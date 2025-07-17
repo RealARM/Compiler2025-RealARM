@@ -1,4 +1,6 @@
 import Frontend.SysYLexer;
+import Frontend.SysYParser;
+import Frontend.SyntaxTree;
 import Frontend.TokenStream;
 import Frontend.SysYToken;
 import Frontend.SysYTokenType;
@@ -12,25 +14,45 @@ import java.io.IOException;
 public class Compiler {
     public static void main(String[] args) {
         if (args.length < 1) {
-            System.err.println("Usage: java Compiler <source_file.sy>");
+            System.err.println("Usage: java src/Compiler.java [--parse] <source_file.sy>");
             System.exit(1);
         }
 
-        String sourcePath = args[0];
+        boolean doParse = false;
+        String sourcePath;
+        if (args[0].equals("--parse") || args[0].equals("-p")) {
+            if (args.length < 2) {
+                System.err.println("Usage: java src/Compiler.java [--parse] <source_file.sy>");
+                System.exit(1);
+            }
+            doParse = true;
+            sourcePath = args[1];
+        } else {
+            // 默认词法分析模式
+            sourcePath = args[0];
+        }
+
         try {
             SysYLexer lexer = new SysYLexer(new FileReader(sourcePath));
-            TokenStream tokens = lexer.tokenize();
+            TokenStream tokenStream = lexer.tokenize();
 
-            // 打印所有Token（不包括EOF）
-            while (tokens.hasMore()) {
-                SysYToken token = tokens.next();
-                if (token.getType() == SysYTokenType.EOF) {
-                    break;
+            if (!doParse) {
+                // 词法分析模式：打印所有 Token
+                tokenStream.reset();
+                while (tokenStream.hasMore()) {
+                    SysYToken t = tokenStream.next();
+                    System.out.println(t);
+                    if (t.getType() == SysYTokenType.EOF) break;
                 }
-                System.out.println(token);
+                return;
             }
-        } catch (IOException e) {
-            System.err.println("Lexical analysis failed: " + e.getMessage());
+
+            // 语法分析模式
+            SysYParser parser = new SysYParser(tokenStream);
+            SyntaxTree.CompilationUnit ast = parser.parseCompilationUnit();
+            System.out.println("Parse succeeded. Top-level definitions: " + ast.getDefs().size());
+        } catch (Exception e) {
+            System.err.println("Compilation failed: " + e.getMessage());
         }
     }
 } 

@@ -355,24 +355,25 @@ public class SysYLexer {
                 readChar();
                 isHex = true;
                 
-                // 读取十六进制数字部分
-                if (!isHexDigit(currentChar)) {
-                    // 错误：0x后面必须跟十六进制数字
-                    throw new IOException("Invalid hexadecimal number format at line " + line + ", column " + column);
-                }
-                
-                while (!reachedEOF && isHexDigit(currentChar)) {
+                // 读取十六进制数字和小数点，允许形如 0x.8p+0 / 0x8.p0 / 0x8p0
+                boolean seenHexDigit = false;
+                while (!reachedEOF && (isHexDigit(currentChar) || currentChar == '.')) {
+                    if (isHexDigit(currentChar)) seenHexDigit = true;
                     sb.append(currentChar);
                     readChar();
+                }
+
+                if (!seenHexDigit) {
+                    throw new IOException("Invalid hexadecimal number format at line " + line + ", column " + column);
                 }
                 
                 // 检查是否为十六进制浮点数
                 if (currentChar == '.') {
+                    // 若小数点尚未被读取（意味着之前没有读到'.')
                     isFloat = true;
                     sb.append(currentChar);
                     readChar();
-                    
-                    // 读取小数部分
+
                     while (!reachedEOF && isHexDigit(currentChar)) {
                         sb.append(currentChar);
                         readChar();
@@ -401,18 +402,109 @@ public class SysYLexer {
                         readChar();
                     }
                 }
+            } else if (currentChar == '.') {
+                // 处理形如 0.xxx 的十进制浮点数
+                isFloat = true;
+                sb.append(currentChar); // '.'
+                readChar();
+
+                // 读取小数部分
+                while (!reachedEOF && isDigit(currentChar)) {
+                    sb.append(currentChar);
+                    readChar();
+                }
+
+                // 处理可选指数部分 0.xxx[eE][+-]?digits
+                if (currentChar == 'e' || currentChar == 'E') {
+                    sb.append(currentChar);
+                    readChar();
+
+                    // 指数符号
+                    if (currentChar == '+' || currentChar == '-') {
+                        sb.append(currentChar);
+                        readChar();
+                    }
+
+                    if (!isDigit(currentChar)) {
+                        throw new IOException("Invalid decimal floating point exponent at line " + line + ", column " + column);
+                    }
+
+                    while (!reachedEOF && isDigit(currentChar)) {
+                        sb.append(currentChar);
+                        readChar();
+                    }
+                }
+            } else if (currentChar == 'e' || currentChar == 'E') {
+                // 处理形如 0e10, 0E-1 的十进制浮点数
+                isFloat = true;
+                sb.append(currentChar);
+                readChar();
+
+                // 指数符号
+                if (currentChar == '+' || currentChar == '-') {
+                    sb.append(currentChar);
+                    readChar();
+                }
+
+                if (!isDigit(currentChar)) {
+                    throw new IOException("Invalid decimal floating point exponent at line " + line + ", column " + column);
+                }
+
+                while (!reachedEOF && isDigit(currentChar)) {
+                    sb.append(currentChar);
+                    readChar();
+                }
             } else if (isDigit(currentChar) && currentChar != '8' && currentChar != '9') {
                 // 八进制
                 isOct = true;
                 
-                // 读取八进制数字部分
+                // 读取八进制数字部分，但若后续出现'.'或'e/E'，则按十进制浮点处理
                 while (!reachedEOF && isDigit(currentChar) && currentChar != '8' && currentChar != '9') {
                     sb.append(currentChar);
                     readChar();
                 }
-                
-                // 如果遇到8或9，则为无效的八进制数
-                if (isDigit(currentChar)) {
+
+                // 若出现 8/9，视为十进制常量而非八进制
+                if (isDigit(currentChar) && (currentChar == '8' || currentChar == '9')) {
+                    isOct = false;
+                }
+
+                // 检查是否转成浮点: 0xx.xxx 或 0xxe±n
+                if (currentChar == '.' || currentChar == 'e' || currentChar == 'E') {
+                    isFloat = true;
+                    isOct = false;
+
+                    if (currentChar == '.') {
+                        sb.append(currentChar);
+                        readChar();
+
+                        while (!reachedEOF && isDigit(currentChar)) {
+                            sb.append(currentChar);
+                            readChar();
+                        }
+                    }
+
+                    // 指数部分
+                    if (currentChar == 'e' || currentChar == 'E') {
+                        sb.append(currentChar);
+                        readChar();
+
+                        if (currentChar == '+' || currentChar == '-') {
+                            sb.append(currentChar);
+                            readChar();
+                        }
+
+                        if (!isDigit(currentChar)) {
+                            throw new IOException("Invalid decimal floating point exponent at line " + line + ", column " + column);
+                        }
+
+                        while (!reachedEOF && isDigit(currentChar)) {
+                            sb.append(currentChar);
+                            readChar();
+                        }
+                    }
+                } else if (isOct && isDigit(currentChar)) {
+                    // 如果仍是数字(8/9)，抛 octal 格式错误
                     throw new IOException("Invalid octal number format at line " + line + ", column " + column);
                 }
             }
