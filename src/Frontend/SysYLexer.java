@@ -458,14 +458,53 @@ public class SysYLexer {
                 // 八进制
                 isOct = true;
                 
-                // 读取八进制数字部分
+                // 读取八进制数字部分，但若后续出现'.'或'e/E'，则按十进制浮点处理
                 while (!reachedEOF && isDigit(currentChar) && currentChar != '8' && currentChar != '9') {
                     sb.append(currentChar);
                     readChar();
                 }
-                
-                // 如果遇到8或9，则为无效的八进制数
-                if (isDigit(currentChar)) {
+
+                // 若出现 8/9，视为十进制常量而非八进制
+                if (isDigit(currentChar) && (currentChar == '8' || currentChar == '9')) {
+                    isOct = false;
+                }
+
+                // 检查是否转成浮点: 0xx.xxx 或 0xxe±n
+                if (currentChar == '.' || currentChar == 'e' || currentChar == 'E') {
+                    isFloat = true;
+                    isOct = false;
+
+                    if (currentChar == '.') {
+                        sb.append(currentChar);
+                        readChar();
+
+                        while (!reachedEOF && isDigit(currentChar)) {
+                            sb.append(currentChar);
+                            readChar();
+                        }
+                    }
+
+                    // 指数部分
+                    if (currentChar == 'e' || currentChar == 'E') {
+                        sb.append(currentChar);
+                        readChar();
+
+                        if (currentChar == '+' || currentChar == '-') {
+                            sb.append(currentChar);
+                            readChar();
+                        }
+
+                        if (!isDigit(currentChar)) {
+                            throw new IOException("Invalid decimal floating point exponent at line " + line + ", column " + column);
+                        }
+
+                        while (!reachedEOF && isDigit(currentChar)) {
+                            sb.append(currentChar);
+                            readChar();
+                        }
+                    }
+                } else if (isOct && isDigit(currentChar)) {
+                    // 如果仍是数字(8/9)，抛 octal 格式错误
                     throw new IOException("Invalid octal number format at line " + line + ", column " + column);
                 }
             }
