@@ -1,6 +1,7 @@
 package Frontend;
 
 import java.util.List;
+import java.util.ArrayList;
 
 /**
  * SysY 语言的抽象语法树（AST）节点定义（精简版）。
@@ -85,11 +86,17 @@ public class SyntaxTree {
         public final String type; // int/float
         public final String name;
         public final boolean isArray;
+        public final List<Expr> dimensions; // 数组各维度（除第一维）的长度表达式
 
         public Param(String type, String name, boolean isArray) {
+            this(type, name, isArray, new ArrayList<>());
+        }
+        
+        public Param(String type, String name, boolean isArray, List<Expr> dimensions) {
             this.type = type;
             this.name = name;
             this.isArray = isArray;
+            this.dimensions = dimensions;
         }
     }
 
@@ -184,9 +191,12 @@ public class SyntaxTree {
     }
 
     public static class AssignStmt implements Stmt {
-        public final VarExpr target;
-        public final Expr value;
-        public AssignStmt(VarExpr target, Expr value) { this.target = target; this.value = value; }
+        public final Expr target;  // 左值表达式
+        public final Expr value;   // 右值表达式
+        public AssignStmt(Expr target, Expr value) { 
+            this.target = target; 
+            this.value = value; 
+        }
     }
 
     public static class ReturnStmt implements Stmt {
@@ -296,7 +306,7 @@ public class SyntaxTree {
             return sb.toString();
         }
         if (node instanceof AssignStmt aStmt) {
-            sb.append(ind).append("Assign { ").append(aStmt.target.name).append(" = ")
+            sb.append(ind).append("Assign { ").append(exprToString(aStmt.target)).append(" = ")
                     .append(exprToString(aStmt.value)).append(" }");
             return sb.toString();
         }
