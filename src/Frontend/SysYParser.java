@@ -176,10 +176,56 @@ public class SysYParser {
         }
     }
 
-    /* -------------------- 表达式（简化版本） -------------------- */
+    /* -------------------- 表达式（按优先级） -------------------- */
 
+    /**
+     * 表达式入口，按照 SysY 语言定义应当与 C 语言优先级一致。
+     * 最高层为逻辑或表达式 LOrExp。
+     */
     private Expr parseExpression() throws SyntaxException {
-        return parseAdd();
+        return parseLogicalOr();
+    }
+
+    /* 优先级从低到高： || -> && -> ==/!= -> < > <= >= -> + - -> * / % -> Unary -> Primary */
+
+    private Expr parseLogicalOr() throws SyntaxException {
+        Expr left = parseLogicalAnd();
+        while (tokens.check(SysYTokenType.LOGICAL_OR)) {
+            String op = tokens.next().getLexeme(); // "||"
+            Expr right = parseLogicalAnd();
+            left = new BinaryExpr(left, op, right);
+        }
+        return left;
+    }
+
+    private Expr parseLogicalAnd() throws SyntaxException {
+        Expr left = parseEquality();
+        while (tokens.check(SysYTokenType.LOGICAL_AND)) {
+            String op = tokens.next().getLexeme(); // "&&"
+            Expr right = parseEquality();
+            left = new BinaryExpr(left, op, right);
+        }
+        return left;
+    }
+
+    private Expr parseEquality() throws SyntaxException {
+        Expr left = parseRelational();
+        while (tokens.checkAny(SysYTokenType.EQUAL, SysYTokenType.NOT_EQUAL)) {
+            String op = tokens.next().getLexeme(); // "==" or "!="
+            Expr right = parseRelational();
+            left = new BinaryExpr(left, op, right);
+        }
+        return left;
+    }
+
+    private Expr parseRelational() throws SyntaxException {
+        Expr left = parseAdd();
+        while (tokens.checkAny(SysYTokenType.LESS, SysYTokenType.GREATER, SysYTokenType.LESS_EQUAL, SysYTokenType.GREATER_EQUAL)) {
+            String op = tokens.next().getLexeme();
+            Expr right = parseAdd();
+            left = new BinaryExpr(left, op, right);
+        }
+        return left;
     }
 
     private Expr parseAdd() throws SyntaxException {
