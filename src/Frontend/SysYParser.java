@@ -4,12 +4,16 @@ import Frontend.SyntaxTree.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 /**
  * SysY 语法分析器（第一阶段：只解析顶层 VarDecl / FuncDef 的外部结构）
  */
 public class SysYParser {
     private final TokenStream tokens;
+    // 添加常量符号表，用于记录常量变量的值
+    private final Map<String, Object> constSymbolTable = new HashMap<>();
 
     public SysYParser(TokenStream tokens) {
         this.tokens = tokens;
@@ -87,6 +91,13 @@ public class SysYParser {
         // 常量必须有初始化
         tokens.expect(SysYTokenType.ASSIGN);
         Expr firstInitExpr = parseInitVal();
+        
+        // 尝试求解常量值并添加到符号表
+        Object constValue = evalConstExpr(firstInitExpr);
+        if (constValue != null) {
+            constSymbolTable.put(firstIdent, constValue);
+        }
+        
         vars.add(new VarDef(firstIdent, firstDims, firstInitExpr));
 
         // 可能有其他常量定义: , ident ...
@@ -118,6 +129,13 @@ public class SysYParser {
             // 常量必须有初始化
             tokens.expect(SysYTokenType.ASSIGN);
             Expr constInitExpr = parseInitVal();
+            
+            // 尝试求解常量值并添加到符号表
+            Object constVarValue = evalConstExpr(constInitExpr);
+            if (constVarValue != null) {
+                constSymbolTable.put(constName, constVarValue);
+            }
+            
             vars.add(new VarDef(constName, dims, constInitExpr));
         }
         
@@ -243,16 +261,18 @@ public class SysYParser {
                 tokens.next();
                 return new ExprStmt(null);
             }
-            // lookahead for assignment
-            if (tokens.check(SysYTokenType.IDENTIFIER) && tokens.peek(1) != null && tokens.peek(1).getType() == SysYTokenType.ASSIGN) {
-                // 解析左值
-                Expr lval = parseLVal();
-                tokens.expect(SysYTokenType.ASSIGN);
+
+            // 首先尝试解析表达式
+            Expr expr = parseExpression();
+            
+            // 如果表达式后面跟着赋值符号，那么这是一个赋值语句
+            if (tokens.check(SysYTokenType.ASSIGN)) {
+                tokens.next(); // 消耗赋值符号
                 Expr value = parseExpression();
                 tokens.expect(SysYTokenType.SEMICOLON);
-                return new AssignStmt(lval, value);
+                return new AssignStmt(expr, value);
             } else {
-                Expr expr = parseExpression();
+                // 否则这是一个表达式语句
                 tokens.expect(SysYTokenType.SEMICOLON);
                 return new ExprStmt(expr);
             }
@@ -536,6 +556,10 @@ public class SysYParser {
     private Object evalConstExpr(Expr expr) {
         if (expr instanceof LiteralExpr) {
             return ((LiteralExpr) expr).value;
+        } else if (expr instanceof VarExpr) {
+            // 处理变量引用，从常量符号表中查找
+            String varName = ((VarExpr) expr).name;
+            return constSymbolTable.get(varName); // 可能为null，表示未找到或非常量
         } else if (expr instanceof BinaryExpr) {
             BinaryExpr binExpr = (BinaryExpr) expr;
             Object leftVal = evalConstExpr(binExpr.left);
