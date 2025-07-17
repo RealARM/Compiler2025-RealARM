@@ -4,12 +4,16 @@ import Frontend.SyntaxTree.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 /**
  * SysY 语法分析器（第一阶段：只解析顶层 VarDecl / FuncDef 的外部结构）
  */
 public class SysYParser {
     private final TokenStream tokens;
+    // 添加常量符号表，用于记录常量变量的值
+    private final Map<String, Object> constSymbolTable = new HashMap<>();
 
     public SysYParser(TokenStream tokens) {
         this.tokens = tokens;
@@ -49,8 +53,95 @@ public class SysYParser {
         if (tokens.check(SysYTokenType.LEFT_PAREN)) {
             return parseFuncDef(isConst, baseType, ident);
         } else {
-            return parseVarDecl(isConst, baseType, ident);
+            if (isConst) {
+                return parseConstDecl(baseType, ident);
+            } else {
+                return parseVarDecl(isConst, baseType, ident);
+            }
         }
+    }
+
+    /* -------------------- 常量声明 -------------------- */
+    
+    private VarDecl parseConstDecl(String baseType, String firstIdent) throws SyntaxException {
+        List<VarDef> vars = new ArrayList<>();
+        
+        // 处理第一个常量定义
+        List<Integer> firstDims = new ArrayList<>();
+        // 检查是否有数组维度
+        while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+            tokens.next(); // 消耗左括号
+            // 解析维度常量表达式
+            Expr dimExpr = parseExpression();
+            tokens.expect(SysYTokenType.RIGHT_BRACKET);
+            
+            // 尝试进行常量折叠
+            Object constVal = evalConstExpr(dimExpr);
+            if (constVal instanceof Integer) {
+                int dimSize = (Integer) constVal;
+                if (dimSize < 0) {
+                    throw new SyntaxException("数组维度不能为负数，在第 " + tokens.peek().getLine() + " 行");
+                }
+                firstDims.add(dimSize);
+            } else {
+                throw new SyntaxException("数组维度必须是常量表达式，在第 " + tokens.peek().getLine() + " 行");
+            }
+        }
+        
+        // 常量必须有初始化
+        tokens.expect(SysYTokenType.ASSIGN);
+        Expr firstInitExpr = parseInitVal();
+        
+        // 尝试求解常量值并添加到符号表
+        Object constValue = evalConstExpr(firstInitExpr);
+        if (constValue != null) {
+            constSymbolTable.put(firstIdent, constValue);
+        }
+        
+        vars.add(new VarDef(firstIdent, firstDims, firstInitExpr));
+
+        // 可能有其他常量定义: , ident ...
+        while (tokens.check(SysYTokenType.COMMA)) {
+            tokens.next();
+            SysYToken identTok = tokens.expect(SysYTokenType.IDENTIFIER);
+            String constName = identTok.getLexeme();
+            
+            List<Integer> dims = new ArrayList<>();
+            // 检查是否有数组维度
+            while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+                tokens.next(); // 消耗左括号
+                Expr dimExpr = parseExpression();
+                tokens.expect(SysYTokenType.RIGHT_BRACKET);
+                
+                // 尝试进行常量折叠
+                Object constVal = evalConstExpr(dimExpr);
+                if (constVal instanceof Integer) {
+                    int dimSize = (Integer) constVal;
+                    if (dimSize < 0) {
+                        throw new SyntaxException("数组维度不能为负数，在第 " + tokens.peek().getLine() + " 行");
+                    }
+                    dims.add(dimSize);
+                } else {
+                    throw new SyntaxException("数组维度必须是常量表达式，在第 " + tokens.peek().getLine() + " 行");
+                }
+            }
+            
+            // 常量必须有初始化
+            tokens.expect(SysYTokenType.ASSIGN);
+            Expr constInitExpr = parseInitVal();
+            
+            // 尝试求解常量值并添加到符号表
+            Object constVarValue = evalConstExpr(constInitExpr);
+            if (constVarValue != null) {
+                constSymbolTable.put(constName, constVarValue);
+            }
+            
+            vars.add(new VarDef(constName, dims, constInitExpr));
+        }
+        
+        // 结尾分号
+        tokens.expect(SysYTokenType.SEMICOLON);
+        return new VarDecl(true, baseType, vars);
     }
 
     /* -------------------- 函数定义 -------------------- */
@@ -79,20 +170,25 @@ public class SysYParser {
         String type = typeTok.getLexeme();
         String paramName = tokens.expect(SysYTokenType.IDENTIFIER).getLexeme();
         boolean isArr = false;
+        List<Expr> arrDims = new ArrayList<>();
+        
         if (tokens.check(SysYTokenType.LEFT_BRACKET)) {
             isArr = true;
-            // 忽略第一维长度
+            // 第一维长度省略
             tokens.next();
             tokens.expect(SysYTokenType.RIGHT_BRACKET);
-            // 其余维度 [Exp]
+            
+            // 其余维度需要有具体长度 [Exp]
             while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
                 tokens.next();
-                // 暂简单跳过 Exp 到右括号
-                skipUntil(SysYTokenType.RIGHT_BRACKET);
+                // 解析数组维度表达式
+                Expr dimExpr = parseExpression();
                 tokens.expect(SysYTokenType.RIGHT_BRACKET);
+                arrDims.add(dimExpr);
             }
         }
-        return new Param(type, paramName, isArr);
+        
+        return new Param(type, paramName, isArr, arrDims);
     }
 
     /* -------------------- Block & Statement -------------------- */
@@ -114,8 +210,12 @@ public class SysYParser {
             if (tokens.check(SysYTokenType.CONST)) { isConst = true; tokens.next(); }
             String bType = tokens.expectAny(SysYTokenType.INT, SysYTokenType.FLOAT).getLexeme();
             String firstIdent = tokens.expect(SysYTokenType.IDENTIFIER).getLexeme();
-            VarDecl decl = parseVarDecl(isConst, bType, firstIdent);
-            return decl; // VarDecl 也实现 Stmt 吗? 若不是, 我们让VarDecl实现Stmt
+            
+            if (isConst) {
+                return parseConstDecl(bType, firstIdent);
+            } else {
+                return parseVarDecl(isConst, bType, firstIdent);
+            }
         }
 
         if (tokens.check(SysYTokenType.RETURN)) {
@@ -161,18 +261,41 @@ public class SysYParser {
                 tokens.next();
                 return new ExprStmt(null);
             }
-            // lookahead for assignment
-            if (tokens.check(SysYTokenType.IDENTIFIER) && tokens.peek(1) != null && tokens.peek(1).getType() == SysYTokenType.ASSIGN) {
-                String name = tokens.next().getLexeme();
-                tokens.next(); // consume '='
+
+            // 首先尝试解析表达式
+            Expr expr = parseExpression();
+            
+            // 如果表达式后面跟着赋值符号，那么这是一个赋值语句
+            if (tokens.check(SysYTokenType.ASSIGN)) {
+                tokens.next(); // 消耗赋值符号
                 Expr value = parseExpression();
                 tokens.expect(SysYTokenType.SEMICOLON);
-                return new AssignStmt(new VarExpr(name), value);
+                return new AssignStmt(expr, value);
             } else {
-                Expr expr = parseExpression();
+                // 否则这是一个表达式语句
                 tokens.expect(SysYTokenType.SEMICOLON);
                 return new ExprStmt(expr);
             }
+        }
+    }
+
+    private Expr parseLVal() throws SyntaxException {
+        String name = tokens.expect(SysYTokenType.IDENTIFIER).getLexeme();
+        
+        // 检查是否为数组访问
+        if (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+            List<Expr> indices = new ArrayList<>();
+            
+            while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+                tokens.next(); // 消耗左括号
+                Expr indexExpr = parseExpression();
+                tokens.expect(SysYTokenType.RIGHT_BRACKET);
+                indices.add(indexExpr);
+            }
+            
+            return new ArrayAccessExpr(name, indices);
+        } else {
+            return new VarExpr(name);
         }
     }
 
@@ -276,6 +399,19 @@ public class SysYParser {
                     }
                     tokens.expect(SysYTokenType.RIGHT_PAREN);
                     return new CallExpr(name, args);
+                } else if (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+                    // 数组访问 a[exp][exp]...
+                    List<Expr> indices = new ArrayList<>();
+                    
+                    while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+                        tokens.next(); // 消耗左括号
+                        // 解析数组索引表达式
+                        Expr indexExpr = parseExpression();
+                        tokens.expect(SysYTokenType.RIGHT_BRACKET);
+                        indices.add(indexExpr);
+                    }
+                    
+                    return new ArrayAccessExpr(name, indices);
                 } else {
                     return new VarExpr(name);
                 }
@@ -311,17 +447,213 @@ public class SysYParser {
 
     private VarDecl parseVarDecl(boolean isConst, String baseType, String firstIdent) throws SyntaxException {
         List<VarDef> vars = new ArrayList<>();
-        vars.add(new VarDef(firstIdent, new ArrayList<>(), null));
+        
+        // 处理第一个变量定义
+        List<Integer> firstDims = new ArrayList<>();
+        // 检查是否有数组维度
+        while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+            tokens.next(); // 消耗左括号
+            // 解析维度常量表达式
+            Expr dimExpr = parseExpression();
+            tokens.expect(SysYTokenType.RIGHT_BRACKET);
+            
+            // 尝试进行常量折叠
+            Object constVal = evalConstExpr(dimExpr);
+            if (constVal instanceof Integer) {
+                int dimSize = (Integer) constVal;
+                if (dimSize < 0) {
+                    throw new SyntaxException("数组维度不能为负数，在第 " + tokens.peek().getLine() + " 行");
+                }
+                firstDims.add(dimSize);
+            } else {
+                throw new SyntaxException("数组维度必须是常量表达式，在第 " + tokens.peek().getLine() + " 行");
+            }
+        }
+        
+        Expr firstInitExpr = null;
+        // 检查是否有初始化
+        if (tokens.check(SysYTokenType.ASSIGN)) {
+            tokens.next(); // 消耗等号
+            firstInitExpr = parseInitVal();
+        }
+        vars.add(new VarDef(firstIdent, firstDims, firstInitExpr));
 
         // 可能有其他变量: , ident ...
         while (tokens.check(SysYTokenType.COMMA)) {
             tokens.next();
             SysYToken identTok = tokens.expect(SysYTokenType.IDENTIFIER);
-            vars.add(new VarDef(identTok.getLexeme(), new ArrayList<>(), null));
+            String varName = identTok.getLexeme();
+            
+            List<Integer> dims = new ArrayList<>();
+            // 检查是否有数组维度
+            while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+                tokens.next(); // 消耗左括号
+                // 解析维度常量表达式
+                Expr dimExpr = parseExpression();
+                tokens.expect(SysYTokenType.RIGHT_BRACKET);
+                
+                // 同上处理维度表达式
+                Object constVal = evalConstExpr(dimExpr);
+                if (constVal instanceof Integer) {
+                    int dimSize = (Integer) constVal;
+                    if (dimSize < 0) {
+                        throw new SyntaxException("数组维度不能为负数，在第 " + tokens.peek().getLine() + " 行");
+                    }
+                    dims.add(dimSize);
+                } else {
+                    throw new SyntaxException("数组维度必须是常量表达式，在第 " + tokens.peek().getLine() + " 行");
+                }
+            }
+            
+            Expr initExpr = null;
+            // 检查是否有初始化
+            if (tokens.check(SysYTokenType.ASSIGN)) {
+                tokens.next(); // 消耗等号
+                initExpr = parseInitVal();
+            }
+            vars.add(new VarDef(varName, dims, initExpr));
         }
+        
         // 结尾分号
         tokens.expect(SysYTokenType.SEMICOLON);
         return new VarDecl(isConst, baseType, vars);
+    }
+
+    /**
+     * 解析变量初始值，可以是普通表达式或数组初始化列表
+     */
+    private Expr parseInitVal() throws SyntaxException {
+        // 检查是否为数组初始化列表 {expr, expr, ...}
+        if (tokens.check(SysYTokenType.LEFT_BRACE)) {
+            tokens.next(); // 消耗左花括号
+            List<Expr> elements = new ArrayList<>();
+            
+            // 如果不是空列表
+            if (!tokens.check(SysYTokenType.RIGHT_BRACE)) {
+                // 解析第一个元素
+                elements.add(parseInitVal());
+                
+                // 解析后续元素
+                while (tokens.check(SysYTokenType.COMMA)) {
+                    tokens.next(); // 消耗逗号
+                    elements.add(parseInitVal());
+                }
+            }
+            
+            tokens.expect(SysYTokenType.RIGHT_BRACE);
+            return new ArrayInitExpr(elements);
+        } else {
+            // 普通表达式
+            return parseExpression();
+        }
+    }
+
+    /* -------------------- 常量折叠 -------------------- */
+
+    /**
+     * 尝试对表达式进行常量折叠，若成功则返回折叠后的常量值，否则返回null
+     */
+    private Object evalConstExpr(Expr expr) {
+        if (expr instanceof LiteralExpr) {
+            return ((LiteralExpr) expr).value;
+        } else if (expr instanceof VarExpr) {
+            // 处理变量引用，从常量符号表中查找
+            String varName = ((VarExpr) expr).name;
+            return constSymbolTable.get(varName); // 可能为null，表示未找到或非常量
+        } else if (expr instanceof BinaryExpr) {
+            BinaryExpr binExpr = (BinaryExpr) expr;
+            Object leftVal = evalConstExpr(binExpr.left);
+            Object rightVal = evalConstExpr(binExpr.right);
+            
+            // 如果两个操作数都是常量，则计算结果
+            if (leftVal != null && rightVal != null) {
+                return computeBinaryOp(leftVal, binExpr.op, rightVal);
+            }
+        } else if (expr instanceof UnaryExpr) {
+            UnaryExpr unExpr = (UnaryExpr) expr;
+            Object operandVal = evalConstExpr(unExpr.expr);
+            
+            if (operandVal != null) {
+                return computeUnaryOp(unExpr.op, operandVal);
+            }
+        }
+        
+        return null; // 无法进行常量折叠
+    }
+
+    /**
+     * 计算二元运算表达式的值
+     */
+    private Object computeBinaryOp(Object left, String op, Object right) {
+        // 处理整数运算
+        if (left instanceof Integer && right instanceof Integer) {
+            int leftInt = (Integer) left;
+            int rightInt = (Integer) right;
+            
+            return switch (op) {
+                case "+" -> leftInt + rightInt;
+                case "-" -> leftInt - rightInt;
+                case "*" -> leftInt * rightInt;
+                case "/" -> leftInt / rightInt;
+                case "%" -> leftInt % rightInt;
+                case "==" -> leftInt == rightInt ? 1 : 0;
+                case "!=" -> leftInt != rightInt ? 1 : 0;
+                case "<" -> leftInt < rightInt ? 1 : 0;
+                case "<=" -> leftInt <= rightInt ? 1 : 0;
+                case ">" -> leftInt > rightInt ? 1 : 0;
+                case ">=" -> leftInt >= rightInt ? 1 : 0;
+                case "&&" -> (leftInt != 0 && rightInt != 0) ? 1 : 0;
+                case "||" -> (leftInt != 0 || rightInt != 0) ? 1 : 0;
+                default -> null;
+            };
+        }
+        // 处理浮点数运算
+        else if (left instanceof Float || right instanceof Float) {
+            float leftFloat = (left instanceof Float) ? (Float) left : ((Integer) left).floatValue();
+            float rightFloat = (right instanceof Float) ? (Float) right : ((Integer) right).floatValue();
+            
+            return switch (op) {
+                case "+" -> leftFloat + rightFloat;
+                case "-" -> leftFloat - rightFloat;
+                case "*" -> leftFloat * rightFloat;
+                case "/" -> leftFloat / rightFloat;
+                case "==" -> leftFloat == rightFloat ? 1 : 0;
+                case "!=" -> leftFloat != rightFloat ? 1 : 0;
+                case "<" -> leftFloat < rightFloat ? 1 : 0;
+                case "<=" -> leftFloat <= rightFloat ? 1 : 0;
+                case ">" -> leftFloat > rightFloat ? 1 : 0;
+                case ">=" -> leftFloat >= rightFloat ? 1 : 0;
+                default -> null;
+            };
+        }
+        
+        return null;
+    }
+
+    /**
+     * 计算一元运算表达式的值
+     */
+    private Object computeUnaryOp(String op, Object operand) {
+        if (operand instanceof Integer) {
+            int value = (Integer) operand;
+            
+            return switch (op) {
+                case "+" -> value;
+                case "-" -> -value;
+                case "!" -> value == 0 ? 1 : 0;
+                default -> null;
+            };
+        } else if (operand instanceof Float) {
+            float value = (Float) operand;
+            
+            return switch (op) {
+                case "+" -> value;
+                case "-" -> -value;
+                default -> null;
+            };
+        }
+        
+        return null;
     }
 
     /* -------------------- 工具 -------------------- */

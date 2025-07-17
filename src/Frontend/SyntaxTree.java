@@ -1,6 +1,7 @@
 package Frontend;
 
 import java.util.List;
+import java.util.ArrayList;
 
 /**
  * SysY 语言的抽象语法树（AST）节点定义（精简版）。
@@ -85,11 +86,17 @@ public class SyntaxTree {
         public final String type; // int/float
         public final String name;
         public final boolean isArray;
+        public final List<Expr> dimensions; // 数组各维度（除第一维）的长度表达式
 
         public Param(String type, String name, boolean isArray) {
+            this(type, name, isArray, new ArrayList<>());
+        }
+        
+        public Param(String type, String name, boolean isArray, List<Expr> dimensions) {
             this.type = type;
             this.name = name;
             this.isArray = isArray;
+            this.dimensions = dimensions;
         }
     }
 
@@ -153,6 +160,30 @@ public class SyntaxTree {
         }
     }
 
+    /**
+     * 数组访问表达式，如 a[1][2]
+     */
+    public static class ArrayAccessExpr implements Expr {
+        public final String arrayName;
+        public final List<Expr> indices;
+        
+        public ArrayAccessExpr(String arrayName, List<Expr> indices) {
+            this.arrayName = arrayName;
+            this.indices = indices;
+        }
+    }
+
+    /**
+     * 数组初始化表达式，例如 {1, 2, 3} 或 {{1, 2}, {3, 4}}
+     */
+    public static class ArrayInitExpr implements Expr {
+        public final List<Expr> elements;
+        
+        public ArrayInitExpr(List<Expr> elements) {
+            this.elements = elements;
+        }
+    }
+
     /* -------------------- 新增语句节点 -------------------- */
     public static class ExprStmt implements Stmt {
         public final Expr expr;
@@ -160,9 +191,12 @@ public class SyntaxTree {
     }
 
     public static class AssignStmt implements Stmt {
-        public final VarExpr target;
-        public final Expr value;
-        public AssignStmt(VarExpr target, Expr value) { this.target = target; this.value = value; }
+        public final Expr target;  // 左值表达式
+        public final Expr value;   // 右值表达式
+        public AssignStmt(Expr target, Expr value) { 
+            this.target = target; 
+            this.value = value; 
+        }
     }
 
     public static class ReturnStmt implements Stmt {
@@ -272,7 +306,7 @@ public class SyntaxTree {
             return sb.toString();
         }
         if (node instanceof AssignStmt aStmt) {
-            sb.append(ind).append("Assign { ").append(aStmt.target.name).append(" = ")
+            sb.append(ind).append("Assign { ").append(exprToString(aStmt.target)).append(" = ")
                     .append(exprToString(aStmt.value)).append(" }");
             return sb.toString();
         }
@@ -332,6 +366,20 @@ public class SyntaxTree {
                 sb.append(exprToString(call.args.get(i), indent));
             }
             sb.append(")");
+        } else if (expr instanceof ArrayAccessExpr arr) {
+            sb.append(arr.arrayName).append("[");
+            for (int i = 0; i < arr.indices.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(exprToString(arr.indices.get(i), indent));
+            }
+            sb.append("]");
+        } else if (expr instanceof ArrayInitExpr arr) {
+            sb.append("{ ");
+            for (int i = 0; i < arr.elements.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(exprToString(arr.elements.get(i), indent));
+            }
+            sb.append(" }");
         } else {
             sb.append(expr.getClass().getSimpleName());
         }
