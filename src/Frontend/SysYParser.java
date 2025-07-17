@@ -330,4 +330,17 @@ public class SysYParser {
             tokens.next();
         }
     }
+
+    /**
+     * 打印解析得到的 SyntaxTree
+     */
+    public void printSyntaxTree(CompilationUnit unit) {
+        if (unit == null) {
+            System.out.println("AST is null");
+            return;
+        }
+        System.out.println("====================== AST ======================");
+        System.out.println(unit);
+        System.out.println("=================================================");
+    }
 } 
