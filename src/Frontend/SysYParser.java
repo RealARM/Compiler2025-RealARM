@@ -108,6 +108,16 @@ public class SysYParser {
     }
 
     private Stmt parseStatement() throws SyntaxException {
+        // 变量声明: const/int/float 开头
+        if (tokens.checkAny(SysYTokenType.CONST, SysYTokenType.INT, SysYTokenType.FLOAT)) {
+            boolean isConst = false;
+            if (tokens.check(SysYTokenType.CONST)) { isConst = true; tokens.next(); }
+            String bType = tokens.expectAny(SysYTokenType.INT, SysYTokenType.FLOAT).getLexeme();
+            String firstIdent = tokens.expect(SysYTokenType.IDENTIFIER).getLexeme();
+            VarDecl decl = parseVarDecl(isConst, bType, firstIdent);
+            return decl; // VarDecl 也实现 Stmt 吗? 若不是, 我们让VarDecl实现Stmt
+        }
+
         if (tokens.check(SysYTokenType.RETURN)) {
             tokens.next();
             SyntaxTree.Expr val = null;
@@ -116,17 +126,53 @@ public class SysYParser {
             }
             tokens.expect(SysYTokenType.SEMICOLON);
             return new ReturnStmt(val);
+        } else if (tokens.check(SysYTokenType.BREAK)) {
+            tokens.next();
+            tokens.expect(SysYTokenType.SEMICOLON);
+            return new BreakStmt();
+        } else if (tokens.check(SysYTokenType.CONTINUE)) {
+            tokens.next();
+            tokens.expect(SysYTokenType.SEMICOLON);
+            return new ContinueStmt();
+        } else if (tokens.check(SysYTokenType.IF)) {
+            tokens.next();
+            tokens.expect(SysYTokenType.LEFT_PAREN);
+            Expr cond = parseExpression();
+            tokens.expect(SysYTokenType.RIGHT_PAREN);
+            Stmt thenBranch = parseStatement();
+            Stmt elseBranch = null;
+            if (tokens.check(SysYTokenType.ELSE)) {
+                tokens.next();
+                elseBranch = parseStatement();
+            }
+            return new IfStmt(cond, thenBranch, elseBranch);
+        } else if (tokens.check(SysYTokenType.WHILE)) {
+            tokens.next();
+            tokens.expect(SysYTokenType.LEFT_PAREN);
+            Expr cond = parseExpression();
+            tokens.expect(SysYTokenType.RIGHT_PAREN);
+            Stmt body = parseStatement();
+            return new WhileStmt(cond, body);
         } else if (tokens.check(SysYTokenType.LEFT_BRACE)) {
             return parseBlock();
         } else {
-            // 处理表达式或空语句
+            // 处理赋值 / 表达式 / 空语句
             if (tokens.check(SysYTokenType.SEMICOLON)) {
                 tokens.next();
                 return new ExprStmt(null);
             }
-            Expr expr = parseExpression();
-            tokens.expect(SysYTokenType.SEMICOLON);
-            return new ExprStmt(expr);
+            // lookahead for assignment
+            if (tokens.check(SysYTokenType.IDENTIFIER) && tokens.peek(1) != null && tokens.peek(1).getType() == SysYTokenType.ASSIGN) {
+                String name = tokens.next().getLexeme();
+                tokens.next(); // consume '='
+                Expr value = parseExpression();
+                tokens.expect(SysYTokenType.SEMICOLON);
+                return new AssignStmt(new VarExpr(name), value);
+            } else {
+                Expr expr = parseExpression();
+                tokens.expect(SysYTokenType.SEMICOLON);
+                return new ExprStmt(expr);
+            }
         }
     }
 
