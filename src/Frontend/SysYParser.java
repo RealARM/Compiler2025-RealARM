@@ -49,8 +49,72 @@ public class SysYParser {
         if (tokens.check(SysYTokenType.LEFT_PAREN)) {
             return parseFuncDef(isConst, baseType, ident);
         } else {
-            return parseVarDecl(isConst, baseType, ident);
+            if (isConst) {
+                return parseConstDecl(baseType, ident);
+            } else {
+                return parseVarDecl(isConst, baseType, ident);
+            }
         }
+    }
+
+    /* -------------------- 常量声明 -------------------- */
+    
+    private VarDecl parseConstDecl(String baseType, String firstIdent) throws SyntaxException {
+        List<VarDef> vars = new ArrayList<>();
+        
+        // 处理第一个常量定义
+        List<Integer> firstDims = new ArrayList<>();
+        // 检查是否有数组维度
+        while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+            tokens.next(); // 消耗左括号
+            // 解析维度常量表达式
+            Expr dimExpr = parseExpression();
+            tokens.expect(SysYTokenType.RIGHT_BRACKET);
+            
+            // 对于简化实现，我们假设维度表达式是一个整数常量
+            if (dimExpr instanceof LiteralExpr && ((LiteralExpr) dimExpr).value instanceof Integer) {
+                firstDims.add((Integer) ((LiteralExpr) dimExpr).value);
+            } else {
+                firstDims.add(1);
+                System.err.println("警告：常量数组维度应为常量表达式");
+            }
+        }
+        
+        // 常量必须有初始化
+        tokens.expect(SysYTokenType.ASSIGN);
+        Expr firstInitExpr = parseInitVal();
+        vars.add(new VarDef(firstIdent, firstDims, firstInitExpr));
+
+        // 可能有其他常量定义: , ident ...
+        while (tokens.check(SysYTokenType.COMMA)) {
+            tokens.next();
+            SysYToken identTok = tokens.expect(SysYTokenType.IDENTIFIER);
+            String constName = identTok.getLexeme();
+            
+            List<Integer> dims = new ArrayList<>();
+            // 检查是否有数组维度
+            while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+                tokens.next(); // 消耗左括号
+                Expr dimExpr = parseExpression();
+                tokens.expect(SysYTokenType.RIGHT_BRACKET);
+                
+                if (dimExpr instanceof LiteralExpr && ((LiteralExpr) dimExpr).value instanceof Integer) {
+                    dims.add((Integer) ((LiteralExpr) dimExpr).value);
+                } else {
+                    dims.add(1);
+                    System.err.println("警告：常量数组维度应为常量表达式");
+                }
+            }
+            
+            // 常量必须有初始化
+            tokens.expect(SysYTokenType.ASSIGN);
+            Expr constInitExpr = parseInitVal();
+            vars.add(new VarDef(constName, dims, constInitExpr));
+        }
+        
+        // 结尾分号
+        tokens.expect(SysYTokenType.SEMICOLON);
+        return new VarDecl(true, baseType, vars);
     }
 
     /* -------------------- 函数定义 -------------------- */
@@ -114,8 +178,12 @@ public class SysYParser {
             if (tokens.check(SysYTokenType.CONST)) { isConst = true; tokens.next(); }
             String bType = tokens.expectAny(SysYTokenType.INT, SysYTokenType.FLOAT).getLexeme();
             String firstIdent = tokens.expect(SysYTokenType.IDENTIFIER).getLexeme();
-            VarDecl decl = parseVarDecl(isConst, bType, firstIdent);
-            return decl; // VarDecl 也实现 Stmt 吗? 若不是, 我们让VarDecl实现Stmt
+            
+            if (isConst) {
+                return parseConstDecl(bType, firstIdent);
+            } else {
+                return parseVarDecl(isConst, bType, firstIdent);
+            }
         }
 
         if (tokens.check(SysYTokenType.RETURN)) {
@@ -311,17 +379,99 @@ public class SysYParser {
 
     private VarDecl parseVarDecl(boolean isConst, String baseType, String firstIdent) throws SyntaxException {
         List<VarDef> vars = new ArrayList<>();
-        vars.add(new VarDef(firstIdent, new ArrayList<>(), null));
+        
+        // 处理第一个变量定义
+        List<Integer> firstDims = new ArrayList<>();
+        // 检查是否有数组维度
+        while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+            tokens.next(); // 消耗左括号
+            // 解析维度常量表达式
+            Expr dimExpr = parseExpression();
+            tokens.expect(SysYTokenType.RIGHT_BRACKET);
+            
+            // 对于简化实现，我们假设维度表达式是一个整数常量
+            // 实际上应该进行常量折叠（constant folding）
+            if (dimExpr instanceof LiteralExpr && ((LiteralExpr) dimExpr).value instanceof Integer) {
+                firstDims.add((Integer) ((LiteralExpr) dimExpr).value);
+            } else {
+                // 简化处理，将其设为默认值1
+                firstDims.add(1);
+                System.err.println("警告：数组维度应为常量表达式");
+            }
+        }
+        
+        Expr firstInitExpr = null;
+        // 检查是否有初始化
+        if (tokens.check(SysYTokenType.ASSIGN)) {
+            tokens.next(); // 消耗等号
+            firstInitExpr = parseInitVal();
+        }
+        vars.add(new VarDef(firstIdent, firstDims, firstInitExpr));
 
         // 可能有其他变量: , ident ...
         while (tokens.check(SysYTokenType.COMMA)) {
             tokens.next();
             SysYToken identTok = tokens.expect(SysYTokenType.IDENTIFIER);
-            vars.add(new VarDef(identTok.getLexeme(), new ArrayList<>(), null));
+            String varName = identTok.getLexeme();
+            
+            List<Integer> dims = new ArrayList<>();
+            // 检查是否有数组维度
+            while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+                tokens.next(); // 消耗左括号
+                // 解析维度常量表达式
+                Expr dimExpr = parseExpression();
+                tokens.expect(SysYTokenType.RIGHT_BRACKET);
+                
+                // 同上处理维度表达式
+                if (dimExpr instanceof LiteralExpr && ((LiteralExpr) dimExpr).value instanceof Integer) {
+                    dims.add((Integer) ((LiteralExpr) dimExpr).value);
+                } else {
+                    dims.add(1);
+                    System.err.println("警告：数组维度应为常量表达式");
+                }
+            }
+            
+            Expr initExpr = null;
+            // 检查是否有初始化
+            if (tokens.check(SysYTokenType.ASSIGN)) {
+                tokens.next(); // 消耗等号
+                initExpr = parseInitVal();
+            }
+            vars.add(new VarDef(varName, dims, initExpr));
         }
+        
         // 结尾分号
         tokens.expect(SysYTokenType.SEMICOLON);
         return new VarDecl(isConst, baseType, vars);
+    }
+
+    /**
+     * 解析变量初始值，可以是普通表达式或数组初始化列表
+     */
+    private Expr parseInitVal() throws SyntaxException {
+        // 检查是否为数组初始化列表 {expr, expr, ...}
+        if (tokens.check(SysYTokenType.LEFT_BRACE)) {
+            tokens.next(); // 消耗左花括号
+            List<Expr> elements = new ArrayList<>();
+            
+            // 如果不是空列表
+            if (!tokens.check(SysYTokenType.RIGHT_BRACE)) {
+                // 解析第一个元素
+                elements.add(parseInitVal());
+                
+                // 解析后续元素
+                while (tokens.check(SysYTokenType.COMMA)) {
+                    tokens.next(); // 消耗逗号
+                    elements.add(parseInitVal());
+                }
+            }
+            
+            tokens.expect(SysYTokenType.RIGHT_BRACE);
+            return new ArrayInitExpr(elements);
+        } else {
+            // 普通表达式
+            return parseExpression();
+        }
     }
 
     /* -------------------- 工具 -------------------- */

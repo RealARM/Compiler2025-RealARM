@@ -153,6 +153,17 @@ public class SyntaxTree {
         }
     }
 
+    /**
+     * 数组初始化表达式，例如 {1, 2, 3} 或 {{1, 2}, {3, 4}}
+     */
+    public static class ArrayInitExpr implements Expr {
+        public final List<Expr> elements;
+        
+        public ArrayInitExpr(List<Expr> elements) {
+            this.elements = elements;
+        }
+    }
+
     /* -------------------- 新增语句节点 -------------------- */
     public static class ExprStmt implements Stmt {
         public final Expr expr;
@@ -332,6 +343,13 @@ public class SyntaxTree {
                 sb.append(exprToString(call.args.get(i), indent));
             }
             sb.append(")");
+        } else if (expr instanceof ArrayInitExpr arr) {
+            sb.append("{ ");
+            for (int i = 0; i < arr.elements.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(exprToString(arr.elements.get(i), indent));
+            }
+            sb.append(" }");
         } else {
             sb.append(expr.getClass().getSimpleName());
         }
