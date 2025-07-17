@@ -59,28 +59,151 @@ public class SysYParser {
         if (isConst) {
             throw new SyntaxException("'const' cannot appear before function definition at line " + tokens.peek().getLine());
         }
-        // 读取 '('
         tokens.expect(SysYTokenType.LEFT_PAREN);
-        // 暂时忽略形参，直到遇到 ')'
-        while (!tokens.check(SysYTokenType.RIGHT_PAREN)) {
-            tokens.next();
+        List<Param> params = new ArrayList<>();
+        if (!tokens.check(SysYTokenType.RIGHT_PAREN)) {
+            params.add(parseParam());
+            while (tokens.check(SysYTokenType.COMMA)) {
+                tokens.next();
+                params.add(parseParam());
+            }
         }
         tokens.expect(SysYTokenType.RIGHT_PAREN);
 
-        // 读取函数体的大括号，对内部暂不解析，只找到匹配的 '}'
-        tokens.expect(SysYTokenType.LEFT_BRACE);
-        int braceDepth = 1;
-        while (braceDepth > 0) {
-            SysYToken tok = tokens.next();
-            if (tok == null) {
-                throw new SyntaxException("Unexpected EOF inside function body of " + name);
-            }
-            if (tok.getType() == SysYTokenType.LEFT_BRACE) braceDepth++;
-            if (tok.getType() == SysYTokenType.RIGHT_BRACE) braceDepth--;
-        }
+        Block body = parseBlock();
+        return new FuncDef(retType, name, params, body);
+    }
 
-        // 目前不解析函数体内容，先存为空 block
-        return new FuncDef(retType, name, new ArrayList<>(), new Block(new ArrayList<>()));
+    private Param parseParam() throws SyntaxException {
+        SysYToken typeTok = tokens.expectAny(SysYTokenType.INT, SysYTokenType.FLOAT);
+        String type = typeTok.getLexeme();
+        String paramName = tokens.expect(SysYTokenType.IDENTIFIER).getLexeme();
+        boolean isArr = false;
+        if (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+            isArr = true;
+            // 忽略第一维长度
+            tokens.next();
+            tokens.expect(SysYTokenType.RIGHT_BRACKET);
+            // 其余维度 [Exp]
+            while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+                tokens.next();
+                // 暂简单跳过 Exp 到右括号
+                skipUntil(SysYTokenType.RIGHT_BRACKET);
+                tokens.expect(SysYTokenType.RIGHT_BRACKET);
+            }
+        }
+        return new Param(type, paramName, isArr);
+    }
+
+    /* -------------------- Block & Statement -------------------- */
+
+    private Block parseBlock() throws SyntaxException {
+        tokens.expect(SysYTokenType.LEFT_BRACE);
+        List<Stmt> stmts = new ArrayList<>();
+        while (!tokens.check(SysYTokenType.RIGHT_BRACE)) {
+            stmts.add(parseStatement());
+        }
+        tokens.expect(SysYTokenType.RIGHT_BRACE);
+        return new Block(stmts);
+    }
+
+    private Stmt parseStatement() throws SyntaxException {
+        if (tokens.check(SysYTokenType.RETURN)) {
+            tokens.next();
+            SyntaxTree.Expr val = null;
+            if (!tokens.check(SysYTokenType.SEMICOLON)) {
+                val = parseExpression();
+            }
+            tokens.expect(SysYTokenType.SEMICOLON);
+            return new ReturnStmt(val);
+        } else if (tokens.check(SysYTokenType.LEFT_BRACE)) {
+            return parseBlock();
+        } else {
+            // 处理表达式或空语句
+            if (tokens.check(SysYTokenType.SEMICOLON)) {
+                tokens.next();
+                return new ExprStmt(null);
+            }
+            Expr expr = parseExpression();
+            tokens.expect(SysYTokenType.SEMICOLON);
+            return new ExprStmt(expr);
+        }
+    }
+
+    /* -------------------- 表达式（简化版本） -------------------- */
+
+    private Expr parseExpression() throws SyntaxException {
+        return parseAdd();
+    }
+
+    private Expr parseAdd() throws SyntaxException {
+        Expr left = parseMul();
+        while (tokens.checkAny(SysYTokenType.PLUS, SysYTokenType.MINUS)) {
+            String op = tokens.next().getLexeme();
+            Expr right = parseMul();
+            left = new BinaryExpr(left, op, right);
+        }
+        return left;
+    }
+
+    private Expr parseMul() throws SyntaxException {
+        Expr left = parseUnary();
+        while (tokens.checkAny(SysYTokenType.MULTIPLY, SysYTokenType.DIVIDE, SysYTokenType.MODULO)) {
+            String op = tokens.next().getLexeme();
+            Expr right = parseUnary();
+            left = new BinaryExpr(left, op, right);
+        }
+        return left;
+    }
+
+    private Expr parseUnary() throws SyntaxException {
+        if (tokens.checkAny(SysYTokenType.PLUS, SysYTokenType.MINUS, SysYTokenType.LOGICAL_NOT)) {
+            String op = tokens.next().getLexeme();
+            Expr expr = parseUnary();
+            return new UnaryExpr(op, expr);
+        }
+        return parsePrimary();
+    }
+
+    private Expr parsePrimary() throws SyntaxException {
+        SysYToken tok = tokens.peek();
+        switch (tok.getType()) {
+            case IDENTIFIER -> {
+                tokens.next();
+                String name = tok.getLexeme();
+                if (tokens.check(SysYTokenType.LEFT_PAREN)) {
+                    // 函数调用
+                    tokens.next();
+                    List<Expr> args = new ArrayList<>();
+                    if (!tokens.check(SysYTokenType.RIGHT_PAREN)) {
+                        args.add(parseExpression());
+                        while (tokens.check(SysYTokenType.COMMA)) {
+                            tokens.next();
+                            args.add(parseExpression());
+                        }
+                    }
+                    tokens.expect(SysYTokenType.RIGHT_PAREN);
+                    return new CallExpr(name, args);
+                } else {
+                    return new VarExpr(name);
+                }
+            }
+            case DEC_CONST, OCT_CONST, HEX_CONST -> {
+                tokens.next();
+                return new LiteralExpr(Integer.parseInt(tok.getLexeme().startsWith("0x") || tok.getLexeme().startsWith("0X") ? tok.getLexeme().substring(2), 16 : tok.getLexeme(), tok.getLexeme().startsWith("0") ? 8 : 10));
+            }
+            case DEC_FLOAT, HEX_FLOAT -> {
+                tokens.next();
+                return new LiteralExpr(Float.parseFloat(tok.getLexeme()));
+            }
+            case LEFT_PAREN -> {
+                tokens.next();
+                Expr inner = parseExpression();
+                tokens.expect(SysYTokenType.RIGHT_PAREN);
+                return inner;
+            }
+            default -> throw new SyntaxException("Unexpected token " + tok);
+        }
     }
 
     /* -------------------- 变量声明 -------------------- */
@@ -98,5 +221,12 @@ public class SysYParser {
         // 结尾分号
         tokens.expect(SysYTokenType.SEMICOLON);
         return new VarDecl(isConst, baseType, vars);
+    }
+
+    /* -------------------- 工具 -------------------- */
+    private void skipUntil(SysYTokenType type) {
+        while (!tokens.check(type) && tokens.hasMore()) {
+            tokens.next();
+        }
     }
 } 
