@@ -26,6 +26,8 @@ DEBUG = False
 TEST_MODE = 'both'
 # 保存失败输出的目录
 FAILED_DIR = "./failed_outputs"
+# 仅测试 ARM-性能 目录下 .sy 文件
+ARM_ONLY = False
 
 # Token 类型映射(参考实现 <-> 当前实现 -> 统一名称)
 TOKEN_MAP = {
@@ -316,7 +318,7 @@ def normalize_output(output):
             prefix, token, suffix = m.groups()
             unified_token = TOKEN_MAP.get(token, token)
             line = f"{prefix}{unified_token}{suffix}"
-        filtered_lines.append(line)
+            filtered_lines.append(line)
     
     return filtered_lines
 
@@ -515,12 +517,22 @@ def test_all_cases():
         print_color("项目编译失败，无法进行测试", Colors.RED)
         return
     
-    test_dirs = sorted([f for f in os.listdir(TESTS_DIR) if os.path.isdir(os.path.join(TESTS_DIR, f))])
-    
-    lexer_success = 0
-    lexer_total = 0
-    parser_success = 0
-    parser_total = 0
+    # 收集测试目录与 ARM 性能 .sy 文件
+    test_dirs = [] if ARM_ONLY else sorted([f for f in os.listdir(TESTS_DIR) if os.path.isdir(os.path.join(TESTS_DIR, f))])
+
+    arm_perf_dir = os.path.join(TESTS_DIR, "ARM-性能")
+    sy_files = []
+    if os.path.isdir(arm_perf_dir):
+        for root, _, files in os.walk(arm_perf_dir):
+            for file in files:
+                if file.endswith(".sy"):
+                    sy_files.append(os.path.join(root, file))
+
+    if ARM_ONLY and not sy_files:
+        print_color("未发现 ARM-性能 下的 .sy 文件", Colors.RED)
+        return
+
+    lexer_success = lexer_total = parser_success = parser_total = 0
     
     print_color("\n开始测试...", Colors.BLUE)
     print_color(f"使用参考jar包: {REF_JAR_PATH}", Colors.BLUE)
@@ -586,6 +598,32 @@ def test_all_cases():
                 if compare_outputs(ref_parser_output, current_parser_output, test_dir, "语法分析", input_content):
                     parser_success += 1
     
+    # 处理 ARM-性能 下的 .sy 文件
+    for sy_path in sy_files:
+        test_name = Path(sy_path).stem
+        print(f"\n[ARM-性能] 测试文件: {sy_path}")
+
+        with open(sy_path, 'r', encoding='utf-8') as f_in:
+            input_content = f_in.read()
+
+        # 词法
+        if TEST_MODE in ['both', 'lexer']:
+            ref_lexer_output = run_reference_lexer(sy_path)
+            current_lexer_output = run_current_lexer(sy_path)
+
+            lexer_total += 1
+            if compare_outputs(ref_lexer_output, current_lexer_output, test_name, '词法分析', input_content):
+                lexer_success += 1
+
+        # 语法
+        if TEST_MODE in ['both', 'parser']:
+            ref_parser_output = run_reference_parser(sy_path)
+            current_parser_output = run_current_parser(sy_path)
+
+            parser_total += 1
+            if compare_outputs(ref_parser_output, current_parser_output, test_name, '语法分析', input_content):
+                parser_success += 1
+
     end_time = time.time()
     elapsed_time = end_time - start_time
     
@@ -609,6 +647,7 @@ def show_help():
     print("  --test-jar      测试参考jar包功能")
     print("  --lexer         仅测试词法分析")
     print("  --parser        仅测试语法分析")
+    print("  --arm-only      仅测试 tests/ARM-性能 目录下的 .sy 文件")
     print("\n示例:")
     print("  python evaluator.py --ref=./TestLexer.jar --debug")
     print("\n说明:")
@@ -643,6 +682,10 @@ def parse_args():
         elif arg == '--parser':
             TEST_MODE = 'parser'
             print_color("仅测试语法分析", Colors.BLUE)
+        elif arg == '--arm-only':
+            global ARM_ONLY
+            ARM_ONLY = True
+            print_color("仅测试 ARM-性能 .sy 文件", Colors.BLUE)
         i += 1
 
 if __name__ == "__main__":
