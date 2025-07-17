@@ -76,4 +76,12 @@ public class SysYToken {
             type, lexeme, line, column,
             value != null ? ", value=" + value : "");
     }
+    
+    /**
+     * 返回用于测试输出的字符串表示
+     * 格式: TOKENTYPE lexeme
+     */
+    public String toTestString() {
+        return String.format("%s %s", type, lexeme);
+    }
 } 

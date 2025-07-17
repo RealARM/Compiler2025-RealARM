@@ -2,6 +2,9 @@ package Frontend;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.io.PrintWriter;
+import java.io.FileWriter;
+import java.io.IOException;
 
 /**
  * 词法单元流，用于管理和访问词法分析器生成的词法单元序列
@@ -184,6 +187,48 @@ public class TokenStream {
     public void setPosition(int position) {
         if (position >= 0 && position <= tokens.size()) {
             this.currentPosition = position;
+        }
+    }
+    
+    /**
+     * 返回用于测试的字符串表示，格式类似于:
+     * =================== Token List ===================
+     * 1: INTTK int
+     * 2: IDENFR main
+     * ...
+     * =================================================
+     */
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("=================== Token List ===================\n");
+        
+        int lineNumber = 1;
+        // 不包括EOF标记
+        for (int i = 0; i < tokens.size() - 1; i++) {
+            SysYToken token = tokens.get(i);
+            sb.append(String.format("%d: %s\n", lineNumber++, token.toTestString()));
+        }
+        
+        sb.append("\n=================================================\n");
+        return sb.toString();
+    }
+    
+    /**
+     * 打印词法单元列表到标准输出
+     */
+    public void print() {
+        System.out.println(this.toString());
+    }
+    
+    /**
+     * 打印词法单元列表到文件
+     * @param filePath 输出文件路径
+     * @throws IOException 如果写入失败
+     */
+    public void printToFile(String filePath) throws IOException {
+        try (PrintWriter writer = new PrintWriter(new FileWriter(filePath))) {
+            writer.print(this.toString());
         }
     }
 }

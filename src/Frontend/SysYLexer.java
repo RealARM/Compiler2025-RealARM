@@ -401,6 +401,58 @@ public class SysYLexer {
                         readChar();
                     }
                 }
+            } else if (currentChar == '.') {
+                // 处理形如 0.xxx 的十进制浮点数
+                isFloat = true;
+                sb.append(currentChar); // '.'
+                readChar();
+
+                // 读取小数部分
+                while (!reachedEOF && isDigit(currentChar)) {
+                    sb.append(currentChar);
+                    readChar();
+                }
+
+                // 处理可选指数部分 0.xxx[eE][+-]?digits
+                if (currentChar == 'e' || currentChar == 'E') {
+                    sb.append(currentChar);
+                    readChar();
+
+                    // 指数符号
+                    if (currentChar == '+' || currentChar == '-') {
+                        sb.append(currentChar);
+                        readChar();
+                    }
+
+                    if (!isDigit(currentChar)) {
+                        throw new IOException("Invalid decimal floating point exponent at line " + line + ", column " + column);
+                    }
+
+                    while (!reachedEOF && isDigit(currentChar)) {
+                        sb.append(currentChar);
+                        readChar();
+                    }
+                }
+            } else if (currentChar == 'e' || currentChar == 'E') {
+                // 处理形如 0e10, 0E-1 的十进制浮点数
+                isFloat = true;
+                sb.append(currentChar);
+                readChar();
+
+                // 指数符号
+                if (currentChar == '+' || currentChar == '-') {
+                    sb.append(currentChar);
+                    readChar();
+                }
+
+                if (!isDigit(currentChar)) {
+                    throw new IOException("Invalid decimal floating point exponent at line " + line + ", column " + column);
+                }
+
+                while (!reachedEOF && isDigit(currentChar)) {
+                    sb.append(currentChar);
+                    readChar();
+                }
             } else if (isDigit(currentChar) && currentChar != '8' && currentChar != '9') {
                 // 八进制
                 isOct = true;
@@ -558,5 +610,54 @@ public class SysYLexer {
         
         reader.unread(nextChar);
         return (char) nextChar;
+    }
+    
+    /**
+     * 从文件中分析词法并打印结果到控制台
+     * 
+     * @param filePath 源文件路径
+     * @throws IOException 如果读取文件失败
+     */
+    public static void lexAndPrint(String filePath) throws IOException {
+        SysYLexer lexer = new SysYLexer(filePath);
+        TokenStream tokens = lexer.tokenize();
+        tokens.print();
+    }
+    
+    /**
+     * 从文件中分析词法并保存结果到输出文件
+     * 
+     * @param sourceFilePath 源文件路径
+     * @param outputFilePath 输出文件路径
+     * @throws IOException 如果读取或写入文件失败
+     */
+    public static void lexAndSave(String sourceFilePath, String outputFilePath) throws IOException {
+        SysYLexer lexer = new SysYLexer(sourceFilePath);
+        TokenStream tokens = lexer.tokenize();
+        tokens.printToFile(outputFilePath);
+    }
+    
+    /**
+     * 从字符串中分析词法并打印结果到控制台
+     * 
+     * @param sourceCode 源代码字符串
+     * @throws IOException 如果读取失败
+     */
+    public static void lexStringAndPrint(String sourceCode) throws IOException {
+        SysYLexer lexer = new SysYLexer(new StringReader(sourceCode));
+        TokenStream tokens = lexer.tokenize();
+        tokens.print();
+    }
+    
+    /**
+     * 从字符串中分析词法并返回词法单元流
+     * 
+     * @param sourceCode 源代码字符串
+     * @return 词法单元流
+     * @throws IOException 如果读取失败
+     */
+    public static TokenStream lexString(String sourceCode) throws IOException {
+        SysYLexer lexer = new SysYLexer(new StringReader(sourceCode));
+        return lexer.tokenize();
     }
 } 
