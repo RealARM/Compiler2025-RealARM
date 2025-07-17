@@ -401,6 +401,58 @@ public class SysYLexer {
                         readChar();
                     }
                 }
+            } else if (currentChar == '.') {
+                // 处理形如 0.xxx 的十进制浮点数
+                isFloat = true;
+                sb.append(currentChar); // '.'
+                readChar();
+
+                // 读取小数部分
+                while (!reachedEOF && isDigit(currentChar)) {
+                    sb.append(currentChar);
+                    readChar();
+                }
+
+                // 处理可选指数部分 0.xxx[eE][+-]?digits
+                if (currentChar == 'e' || currentChar == 'E') {
+                    sb.append(currentChar);
+                    readChar();
+
+                    // 指数符号
+                    if (currentChar == '+' || currentChar == '-') {
+                        sb.append(currentChar);
+                        readChar();
+                    }
+
+                    if (!isDigit(currentChar)) {
+                        throw new IOException("Invalid decimal floating point exponent at line " + line + ", column " + column);
+                    }
+
+                    while (!reachedEOF && isDigit(currentChar)) {
+                        sb.append(currentChar);
+                        readChar();
+                    }
+                }
+            } else if (currentChar == 'e' || currentChar == 'E') {
+                // 处理形如 0e10, 0E-1 的十进制浮点数
+                isFloat = true;
+                sb.append(currentChar);
+                readChar();
+
+                // 指数符号
+                if (currentChar == '+' || currentChar == '-') {
+                    sb.append(currentChar);
+                    readChar();
+                }
+
+                if (!isDigit(currentChar)) {
+                    throw new IOException("Invalid decimal floating point exponent at line " + line + ", column " + column);
+                }
+
+                while (!reachedEOF && isDigit(currentChar)) {
+                    sb.append(currentChar);
+                    readChar();
+                }
             } else if (isDigit(currentChar) && currentChar != '8' && currentChar != '9') {
                 // 八进制
                 isOct = true;
