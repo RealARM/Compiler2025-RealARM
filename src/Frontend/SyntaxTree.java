@@ -103,4 +103,85 @@ public class SyntaxTree {
 
     public interface Expr extends Node {
     }
+
+    /* -------------------- 新增表达式节点 -------------------- */
+    public static class LiteralExpr implements Expr {
+        public final Object value; // Integer, Float, String
+        public LiteralExpr(Object value) {
+            this.value = value;
+        }
+    }
+
+    public static class VarExpr implements Expr {
+        public final String name;
+        public VarExpr(String name) {
+            this.name = name;
+        }
+    }
+
+    public static class BinaryExpr implements Expr {
+        public final Expr left;
+        public final String op;
+        public final Expr right;
+        public BinaryExpr(Expr left, String op, Expr right) {
+            this.left = left;
+            this.op = op;
+            this.right = right;
+        }
+    }
+
+    public static class UnaryExpr implements Expr {
+        public final String op;
+        public final Expr expr;
+        public UnaryExpr(String op, Expr expr) {
+            this.op = op;
+            this.expr = expr;
+        }
+    }
+
+    public static class CallExpr implements Expr {
+        public final String funcName;
+        public final List<Expr> args;
+        public CallExpr(String funcName, List<Expr> args) {
+            this.funcName = funcName;
+            this.args = args;
+        }
+    }
+
+    /* -------------------- 新增语句节点 -------------------- */
+    public static class ExprStmt implements Stmt {
+        public final Expr expr;
+        public ExprStmt(Expr expr) { this.expr = expr; }
+    }
+
+    public static class AssignStmt implements Stmt {
+        public final VarExpr target;
+        public final Expr value;
+        public AssignStmt(VarExpr target, Expr value) { this.target = target; this.value = value; }
+    }
+
+    public static class ReturnStmt implements Stmt {
+        public final Expr value; // 可能为空
+        public ReturnStmt(Expr value) { this.value = value; }
+    }
+
+    public static class BreakStmt implements Stmt {}
+    public static class ContinueStmt implements Stmt {}
+
+    public static class IfStmt implements Stmt {
+        public final Expr cond;
+        public final Stmt thenBranch;
+        public final Stmt elseBranch; // 可能为空
+        public IfStmt(Expr cond, Stmt thenBranch, Stmt elseBranch) {
+            this.cond = cond;
+            this.thenBranch = thenBranch;
+            this.elseBranch = elseBranch;
+        }
+    }
+
+    public static class WhileStmt implements Stmt {
+        public final Expr cond;
+        public final Stmt body;
+        public WhileStmt(Expr cond, Stmt body) { this.cond = cond; this.body = body; }
+    }
 } 
