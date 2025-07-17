@@ -355,24 +355,25 @@ public class SysYLexer {
                 readChar();
                 isHex = true;
                 
-                // 读取十六进制数字部分
-                if (!isHexDigit(currentChar)) {
-                    // 错误：0x后面必须跟十六进制数字
-                    throw new IOException("Invalid hexadecimal number format at line " + line + ", column " + column);
-                }
-                
-                while (!reachedEOF && isHexDigit(currentChar)) {
+                // 读取十六进制数字和小数点，允许形如 0x.8p+0 / 0x8.p0 / 0x8p0
+                boolean seenHexDigit = false;
+                while (!reachedEOF && (isHexDigit(currentChar) || currentChar == '.')) {
+                    if (isHexDigit(currentChar)) seenHexDigit = true;
                     sb.append(currentChar);
                     readChar();
+                }
+
+                if (!seenHexDigit) {
+                    throw new IOException("Invalid hexadecimal number format at line " + line + ", column " + column);
                 }
                 
                 // 检查是否为十六进制浮点数
                 if (currentChar == '.') {
+                    // 若小数点尚未被读取（意味着之前没有读到'.')
                     isFloat = true;
                     sb.append(currentChar);
                     readChar();
-                    
-                    // 读取小数部分
+
                     while (!reachedEOF && isHexDigit(currentChar)) {
                         sb.append(currentChar);
                         readChar();
