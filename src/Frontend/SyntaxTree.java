@@ -154,6 +154,19 @@ public class SyntaxTree {
     }
 
     /**
+     * 数组访问表达式，如 a[1][2]
+     */
+    public static class ArrayAccessExpr implements Expr {
+        public final String arrayName;
+        public final List<Expr> indices;
+        
+        public ArrayAccessExpr(String arrayName, List<Expr> indices) {
+            this.arrayName = arrayName;
+            this.indices = indices;
+        }
+    }
+
+    /**
      * 数组初始化表达式，例如 {1, 2, 3} 或 {{1, 2}, {3, 4}}
      */
     public static class ArrayInitExpr implements Expr {
@@ -343,6 +356,13 @@ public class SyntaxTree {
                 sb.append(exprToString(call.args.get(i), indent));
             }
             sb.append(")");
+        } else if (expr instanceof ArrayAccessExpr arr) {
+            sb.append(arr.arrayName).append("[");
+            for (int i = 0; i < arr.indices.size(); i++) {
+                if (i > 0) sb.append(", ");
+                sb.append(exprToString(arr.indices.get(i), indent));
+            }
+            sb.append("]");
         } else if (expr instanceof ArrayInitExpr arr) {
             sb.append("{ ");
             for (int i = 0; i < arr.elements.size(); i++) {

@@ -344,6 +344,19 @@ public class SysYParser {
                     }
                     tokens.expect(SysYTokenType.RIGHT_PAREN);
                     return new CallExpr(name, args);
+                } else if (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+                    // 数组访问 a[exp][exp]...
+                    List<Expr> indices = new ArrayList<>();
+                    
+                    while (tokens.check(SysYTokenType.LEFT_BRACKET)) {
+                        tokens.next(); // 消耗左括号
+                        // 解析数组索引表达式
+                        Expr indexExpr = parseExpression();
+                        tokens.expect(SysYTokenType.RIGHT_BRACKET);
+                        indices.add(indexExpr);
+                    }
+                    
+                    return new ArrayAccessExpr(name, indices);
                 } else {
                     return new VarExpr(name);
                 }
