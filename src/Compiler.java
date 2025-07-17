@@ -1,4 +1,6 @@
 import Frontend.SysYLexer;
+import Frontend.SysYParser;
+import Frontend.SyntaxTree;
 import Frontend.TokenStream;
 import Frontend.SysYToken;
 import Frontend.SysYTokenType;
@@ -19,18 +21,26 @@ public class Compiler {
         String sourcePath = args[0];
         try {
             SysYLexer lexer = new SysYLexer(new FileReader(sourcePath));
-            TokenStream tokens = lexer.tokenize();
+            TokenStream tokenStream = lexer.tokenize();
 
-            // 打印所有Token（不包括EOF）
-            while (tokens.hasMore()) {
-                SysYToken token = tokens.next();
-                if (token.getType() == SysYTokenType.EOF) {
-                    break;
-                }
-                System.out.println(token);
+            // 可选：打印Token序列进行调试
+            /*
+            tokenStream.reset();
+            while (tokenStream.hasMore()) {
+                SysYToken t = tokenStream.next();
+                System.out.println(t);
+                if (t.getType() == SysYTokenType.EOF) break;
             }
-        } catch (IOException e) {
-            System.err.println("Lexical analysis failed: " + e.getMessage());
+            tokenStream.reset();
+            */
+
+            // 语法分析
+            SysYParser parser = new SysYParser(tokenStream);
+            SyntaxTree.CompilationUnit ast = parser.parseCompilationUnit();
+
+            System.out.println("Parse succeeded. Top-level definitions: " + ast.getDefs().size());
+        } catch (Exception e) {
+            System.err.println("Compilation failed: " + e.getMessage());
         }
     }
 } 

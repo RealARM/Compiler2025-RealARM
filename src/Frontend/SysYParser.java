@@ -236,7 +236,16 @@ public class SysYParser {
             }
             case DEC_CONST, OCT_CONST, HEX_CONST -> {
                 tokens.next();
-                return new LiteralExpr(Integer.parseInt(tok.getLexeme().startsWith("0x") || tok.getLexeme().startsWith("0X") ? tok.getLexeme().substring(2), 16 : tok.getLexeme(), tok.getLexeme().startsWith("0") ? 8 : 10));
+                String lex = tok.getLexeme();
+                int intVal;
+                if (lex.startsWith("0x") || lex.startsWith("0X")) {
+                    intVal = Integer.parseInt(lex.substring(2), 16);
+                } else if (lex.startsWith("0") && lex.length() > 1) {
+                    intVal = Integer.parseInt(lex, 8);
+                } else {
+                    intVal = Integer.parseInt(lex);
+                }
+                return new LiteralExpr(intVal);
             }
             case DEC_FLOAT, HEX_FLOAT -> {
                 tokens.next();

@@ -33,8 +33,8 @@ public class SyntaxTree {
 
     /* -------------------- 声明相关 -------------------- */
 
-    /** 变量声明（含常量） */
-    public static class VarDecl implements TopLevelDef {
+    /** 变量声明（含常量）。在语句块中也可作为Stmt出现 */
+    public static class VarDecl implements TopLevelDef, Stmt {
         public final boolean isConst;
         public final String baseType; // int / float
         public final List<VarDef> variables;
