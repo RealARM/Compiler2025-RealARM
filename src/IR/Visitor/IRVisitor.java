@@ -13,9 +13,6 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Stack;
-import java.util.Set;
-import java.util.HashSet;
-import java.util.Map;
 
 /**
  * IR访问者类，用于将AST转换为IR
@@ -319,26 +316,26 @@ public class IRVisitor {
      */
     private void visitFuncDef(SyntaxTree.FuncDef funcDef) {
         String name = funcDef.name;
-        String returnTypeStr = funcDef.retType;
+        String retTypeStr = funcDef.retType;
         
-        // 确定返回值类型
-        Type returnType;
-        switch (returnTypeStr) {
+        // 确定返回类型
+        Type retType;
+        switch (retTypeStr) {
             case "int":
-                returnType = IntegerType.I32;
+                retType = IntegerType.I32;
                 break;
             case "float":
-                returnType = FloatType.F32;
+                retType = FloatType.F32;
                 break;
             case "void":
-                returnType = VoidType.VOID;
+                retType = VoidType.VOID;
                 break;
             default:
-                throw new RuntimeException("不支持的返回值类型: " + returnTypeStr);
+                throw new RuntimeException("不支持的返回类型: " + retTypeStr);
         }
         
         // 创建函数
-        Function function = IRBuilder.createFunction(name, returnType, module);
+        Function function = IRBuilder.createFunction("@" + name, retType, module);
         currentFunction = function;
         
         // 重置基本块计数器，确保每个函数的基本块名称都是唯一的
@@ -354,28 +351,77 @@ public class IRVisitor {
         // 进入函数作用域
         enterScope();
         
-        // 处理函数参数
+        // 处理参数
         for (SyntaxTree.Param param : funcDef.params) {
             processParam(param, function);
         }
         
-        // 访问函数体
+        // 处理函数体
         visitBlock(funcDef.body);
         
+        // 确保函数有返回语句
+        if (currentBlock != null) {
+            if (!currentBlock.getInstructions().isEmpty()) {
+                Instruction lastInst = currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1);
+                if (!(lastInst instanceof ReturnInstruction)) {
+                    // 如果最后一条指令不是返回指令，添加一个默认的返回指令
+                    if (retType == VoidType.VOID) {
+                        IRBuilder.createReturn(currentBlock); // void返回
+                    } else if (retType == IntegerType.I32) {
+                        // 加载函数体中最后一个表达式的值作为返回值
+                        Value returnValue = null;
+                        
+                        // 尝试找到最后一个语句，如果是表达式语句，使用其结果作为返回值
+                        if (!funcDef.body.stmts.isEmpty()) {
+                            SyntaxTree.Stmt lastStmt = funcDef.body.stmts.get(funcDef.body.stmts.size() - 1);
+                            if (lastStmt instanceof SyntaxTree.ExprStmt) {
+                                visitExpr(((SyntaxTree.ExprStmt) lastStmt).expr);
+                                returnValue = currentValue;
+                            }
+                        }
+                        
+                        // 如果没有找到合适的返回值，返回0
+                        if (returnValue == null) {
+                            returnValue = new ConstantInt(0);
+                        }
+                        
+                        IRBuilder.createReturn(returnValue, currentBlock);
+                    } else if (retType == FloatType.F32) {
+                        IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock); // 返回0.0
+                    }
+                }
+            } else {
+                // 如果当前块是空的，添加一个默认的返回指令
+                if (retType == VoidType.VOID) {
+                    IRBuilder.createReturn(currentBlock); // void返回
+                } else if (retType == IntegerType.I32) {
+                    IRBuilder.createReturn(new ConstantInt(0), currentBlock); // 返回0
+                } else if (retType == FloatType.F32) {
+                    IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock); // 返回0.0
+                }
+            }
+        }
+        
+        // 离开函数作用域
+        exitScope();
+        
+        // 清理不可达的基本块
+        cleanupUnreachableBlocks(function);
+        
         // 检查所有基本块，确保它们都有终结指令
-        for (BasicBlock block : currentFunction.getBasicBlocks()) {
+        for (BasicBlock block : function.getBasicBlocks()) {
             if (block.getInstructions().isEmpty()) {
                 // 空块添加跳转到下一个块或返回指令
-                if (currentFunction.getBasicBlocks().indexOf(block) < currentFunction.getBasicBlocks().size() - 1) {
-                    BasicBlock nextBlock = currentFunction.getBasicBlocks().get(currentFunction.getBasicBlocks().indexOf(block) + 1);
+                if (function.getBasicBlocks().indexOf(block) < function.getBasicBlocks().size() - 1) {
+                    BasicBlock nextBlock = function.getBasicBlocks().get(function.getBasicBlocks().indexOf(block) + 1);
                     IRBuilder.createBr(nextBlock, block);
                 } else {
-                    // 最后一个块添加适当的返回指令
-                    if (returnType == VoidType.VOID) {
+                    // 最后一个块添加返回指令
+                    if (retType == VoidType.VOID) {
                         IRBuilder.createReturn(block);
-                    } else if (returnType == IntegerType.I32) {
+                    } else if (retType == IntegerType.I32) {
                         IRBuilder.createReturn(new ConstantInt(0), block);
-                    } else if (returnType == FloatType.F32) {
+                    } else if (retType == FloatType.F32) {
                         IRBuilder.createReturn(new ConstantFloat(0.0f), block);
                     }
                 }
@@ -383,31 +429,22 @@ public class IRVisitor {
                 Instruction lastInst = block.getInstructions().get(block.getInstructions().size() - 1);
                 if (!(lastInst instanceof TerminatorInstruction)) {
                     // 非空块但没有终结指令，添加跳转到下一个块或返回指令
-                    if (currentFunction.getBasicBlocks().indexOf(block) < currentFunction.getBasicBlocks().size() - 1) {
-                        BasicBlock nextBlock = currentFunction.getBasicBlocks().get(currentFunction.getBasicBlocks().indexOf(block) + 1);
+                    if (function.getBasicBlocks().indexOf(block) < function.getBasicBlocks().size() - 1) {
+                        BasicBlock nextBlock = function.getBasicBlocks().get(function.getBasicBlocks().indexOf(block) + 1);
                         IRBuilder.createBr(nextBlock, block);
                     } else {
-                        // 最后一个块添加适当的返回指令
-                        if (returnType == VoidType.VOID) {
+                        // 最后一个块添加返回指令
+                        if (retType == VoidType.VOID) {
                             IRBuilder.createReturn(block);
-                        } else if (returnType == IntegerType.I32) {
+                        } else if (retType == IntegerType.I32) {
                             IRBuilder.createReturn(new ConstantInt(0), block);
-                        } else if (returnType == FloatType.F32) {
+                        } else if (retType == FloatType.F32) {
                             IRBuilder.createReturn(new ConstantFloat(0.0f), block);
                         }
                     }
                 }
             }
         }
-
-        // 修复控制流图中的问题
-        fixLoopControlFlow(currentFunction);
-
-        // 清除不可达的基本块
-        cleanupUnreachableBlocks(currentFunction);
-
-        // 退出此函数的作用域
-        exitScope();
     }
     
     /**
@@ -530,9 +567,6 @@ public class IRVisitor {
         // 进入新的作用域
         enterScope();
         
-        // 保存当前上下文中的循环块（为了在块结束后可能需要跳回）
-        BasicBlock loopCondBlock = loopConditionBlocks.isEmpty() ? null : loopConditionBlocks.peek();
-        
         // 处理块中的每条语句
         for (SyntaxTree.Stmt stmt : block.stmts) {
             visitStmt(stmt);
@@ -544,14 +578,6 @@ public class IRVisitor {
         
         // 离开作用域
         exitScope();
-        
-        // 如果当前块没有终结，且处于循环中，确保跳回循环条件块
-        if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
-            loopCondBlock != null && !loopExitBlocks.isEmpty() && 
-            !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
-            // 如果当前在循环内部且没有终结指令，添加跳回循环条件块的指令
-            IRBuilder.createBr(loopCondBlock, currentBlock);
-        }
     }
     
     /**
@@ -1026,9 +1052,6 @@ public class IRVisitor {
         BasicBlock elseBlock = IRBuilder.createBasicBlock(currentFunction);
         BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
         
-        // 保存循环上下文信息（用于在嵌套 if 内部正确处理循环回跳）
-        BasicBlock loopCondBlock = loopConditionBlocks.isEmpty() ? null : loopConditionBlocks.peek();
-        
         // 条件求值
         visitExpr(stmt.cond);
         Value condValue = convertToBoolean(currentValue);
@@ -1042,13 +1065,7 @@ public class IRVisitor {
         // 如果当前块没有终结指令，添加跳转到合并块的指令
         if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
             !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
-            // 处理内部循环的特殊情况
-            if (loopCondBlock != null && stmt.thenBranch instanceof SyntaxTree.Block && 
-                !loopExitBlocks.isEmpty()) {
-                IRBuilder.createBr(loopCondBlock, currentBlock);
-            } else {
-                IRBuilder.createBr(mergeBlock, currentBlock);
-            }
+            IRBuilder.createBr(mergeBlock, currentBlock);
         } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
             // 如果是空块，也要跳转到合并块
             IRBuilder.createBr(mergeBlock, currentBlock);
@@ -1061,13 +1078,7 @@ public class IRVisitor {
             // 如果当前块没有终结指令，添加跳转到合并块的指令
             if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
                 !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
-                // 处理内部循环的特殊情况
-                if (loopCondBlock != null && stmt.elseBranch instanceof SyntaxTree.Block && 
-                    !loopExitBlocks.isEmpty()) {
-                    IRBuilder.createBr(loopCondBlock, currentBlock);
-                } else {
-                    IRBuilder.createBr(mergeBlock, currentBlock);
-                }
+                IRBuilder.createBr(mergeBlock, currentBlock);
             } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
                 // 如果是空块，直接跳转到合并块
                 IRBuilder.createBr(mergeBlock, currentBlock);
@@ -1079,12 +1090,6 @@ public class IRVisitor {
         
         // 继续在合并块生成代码
         currentBlock = mergeBlock;
-        
-        // 检查是否在循环内部，如果是，确保合并块也有正确的跳转
-        if (loopCondBlock != null && !loopExitBlocks.isEmpty()) {
-            // 暂时不添加跳转，让后续代码决定是否需要跳转
-            // 避免创建不必要的跳转指令
-        }
     }
     
     /**
@@ -1114,37 +1119,35 @@ public class IRVisitor {
         loopConditionBlocks.push(condBlock);
         loopExitBlocks.push(exitBlock);
         
+        // 保存循环体起始块，用于后续恢复currentBlock
+        BasicBlock loopBodyStart = bodyBlock;
+        
         // 处理循环体
         currentBlock = bodyBlock;
         visitStmt(stmt.body);
         
         // 如果循环体没有终结（比如通过break或return），添加跳回条件块的指令
-        if (currentBlock != null && 
-            !(currentBlock.getInstructions().isEmpty() || 
-              currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+        if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
+            !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
             IRBuilder.createBr(condBlock, currentBlock);
         }
         
-        // 检查所有可能的终点基本块，确保它们都有正确的跳转
+        // 检查循环体中生成的所有基本块
         for (BasicBlock block : currentFunction.getBasicBlocks()) {
-            // 跳过已经有终结指令的块
-            if (block.hasTerminator()) {
-                continue;
-            }
-            
-            // 如果这个块是在当前循环体内创建的，且没有终结指令
-            if (block != exitBlock && block != condBlock && 
-                block != currentBlock && !block.getInstructions().isEmpty()) {
-                // 添加到条件块的跳转（如果尚未添加）
-                boolean needsJump = true;
+            // 如果块在当前函数中，不是条件块、出口块，且没有终结指令，就添加跳转回条件块
+            if (block != condBlock && block != exitBlock && block != loopBodyStart &&
+                block.getParentFunction() == currentFunction &&
+                block.getInstructions().size() > 0 &&
+                !(block.getInstructions().get(block.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+                // 只处理循环体内部没有正确终结的基本块
+                boolean isInLoopBody = false;
                 for (BasicBlock pred : block.getPredecessors()) {
-                    if (pred == condBlock) {
-                        needsJump = false;
+                    if (pred != condBlock && pred != exitBlock) {
+                        isInLoopBody = true;
                         break;
                     }
                 }
-                
-                if (needsJump) {
+                if (isInLoopBody) {
                     IRBuilder.createBr(condBlock, block);
                 }
             }
@@ -1854,69 +1857,5 @@ public class IRVisitor {
     private void exitScope() {
         symbolTables.remove(symbolTables.size() - 1);
         arrayDimensions.remove(arrayDimensions.size() - 1);
-    }
-
-    /**
-     * 修复函数中的循环控制流问题
-     */
-    private void fixLoopControlFlow(Function function) {
-        List<BasicBlock> blocks = function.getBasicBlocks();
-        
-        // 第一遍：标记所有可能的循环入口和出口点
-        Set<BasicBlock> loopHeaders = new HashSet<>();
-        Map<BasicBlock, List<BasicBlock>> backEdges = new HashMap<>();
-        
-        for (BasicBlock block : blocks) {
-            // 查找所有后继的基本块
-            for (BasicBlock succ : block.getSuccessors()) {
-                // 如果后继块支配当前块，则形成了循环
-                if (blocks.indexOf(succ) < blocks.indexOf(block)) {
-                    loopHeaders.add(succ);
-                    if (!backEdges.containsKey(succ)) {
-                        backEdges.put(succ, new ArrayList<>());
-                    }
-                    backEdges.get(succ).add(block);
-                }
-            }
-        }
-        
-        // 第二遍：修复循环内部可能缺失的跳转
-        for (BasicBlock header : loopHeaders) {
-            // 对于每个循环入口点
-            if (backEdges.containsKey(header)) {
-                List<BasicBlock> loopBlocks = new ArrayList<>();
-                collectLoopBlocks(header, loopBlocks, new HashSet<>());
-                
-                // 检查循环体中的块，确保所有路径都能回到循环头或退出循环
-                for (BasicBlock block : loopBlocks) {
-                    // 跳过已经有终结指令的块
-                    if (block.hasTerminator() || block == header) {
-                        continue;
-                    }
-                    
-                    // 如果块没有后继，则添加回到循环头的跳转
-                    if (block.getSuccessors().isEmpty() && !block.getInstructions().isEmpty()) {
-                        IRBuilder.createBr(header, block);
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * 收集循环中的所有基本块
-     */
-    private void collectLoopBlocks(BasicBlock header, List<BasicBlock> loopBlocks, Set<BasicBlock> visited) {
-        if (visited.contains(header)) {
-            return;
-        }
-        
-        visited.add(header);
-        loopBlocks.add(header);
-        
-        // 递归收集所有后继块
-        for (BasicBlock succ : header.getSuccessors()) {
-            collectLoopBlocks(succ, loopBlocks, visited);
-        }
     }
 } 
