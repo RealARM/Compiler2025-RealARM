@@ -179,6 +179,18 @@ public class PhiInstruction extends Instruction {
         }
     }
     
+    /**
+     * 移除指定基本块的输入值
+     */
+    public void removeIncoming(BasicBlock block) {
+        if (incomingValues.containsKey(block)) {
+            Value value = incomingValues.remove(block);
+            if (value != null) {
+                removeOperand(value);
+            }
+        }
+    }
+    
     @Override
     public String getOpcodeName() {
         return OpCode.PHI.getName();

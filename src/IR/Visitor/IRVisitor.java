@@ -1074,7 +1074,55 @@ public class IRVisitor {
         visitExpr(stmt.cond);
         Value condValue = convertToBoolean(currentValue);
         
-        // 条件分支
+        // 处理常量条件的特殊情况
+        if (condValue instanceof ConstantInt) {
+            int condConstValue = ((ConstantInt) condValue).getValue();
+            if (condConstValue != 0) {
+                // 条件为真，只生成then分支
+                IRBuilder.createBr(thenBlock, currentBlock);
+                
+                // 处理then分支
+                currentBlock = thenBlock;
+                visitStmt(stmt.thenBranch);
+                
+                // 如果当前块没有终结指令，添加跳转到合并块的指令
+                if (currentBlock != null && !currentBlock.hasTerminator()) {
+                    IRBuilder.createBr(mergeBlock, currentBlock);
+                }
+                
+                // 添加一个从else块到合并块的直接跳转，确保控制流完整
+                currentBlock = elseBlock;
+                IRBuilder.createBr(mergeBlock, currentBlock);
+                
+                // 继续在合并块生成代码
+                currentBlock = mergeBlock;
+                return;
+            } else {
+                // 条件为假，只生成else分支
+                IRBuilder.createBr(elseBlock, currentBlock);
+                
+                // 添加一个从then块到合并块的直接跳转，确保控制流完整
+                currentBlock = thenBlock;
+                IRBuilder.createBr(mergeBlock, currentBlock);
+                
+                // 处理else分支
+                currentBlock = elseBlock;
+                if (stmt.elseBranch != null) {
+                    visitStmt(stmt.elseBranch);
+                }
+                
+                // 如果当前块没有终结指令，添加跳转到合并块的指令
+                if (currentBlock != null && !currentBlock.hasTerminator()) {
+                    IRBuilder.createBr(mergeBlock, currentBlock);
+                }
+                
+                // 继续在合并块生成代码
+                currentBlock = mergeBlock;
+                return;
+            }
+        }
+        
+        // 非常量条件的正常处理
         IRBuilder.createCondBr(condValue, thenBlock, elseBlock, currentBlock);
         
         // 处理then分支
@@ -1392,10 +1440,10 @@ public class IRVisitor {
         
         // 特殊处理逻辑运算符，实现短路评估
         if (op.equals("&&")) {
-            visitLogicalAnd(expr.left, expr.right);
+            handleLogicalAndChain(expr);
             return;
         } else if (op.equals("||")) {
-            visitLogicalOr(expr.left, expr.right);
+            handleLogicalOrChain(expr);
             return;
         }
         
@@ -1415,13 +1463,13 @@ public class IRVisitor {
             if (leftValue.getType() instanceof FloatType || rightValue.getType() instanceof FloatType) {
                 compareType = OpCode.FCMP;
                 predicate = getFloatPredicate(op);
-                    } else {
+            } else {
                 compareType = OpCode.ICMP;
                 predicate = getIntPredicate(op);
             }
             
             currentValue = IRBuilder.createCompare(compareType, predicate, leftValue, rightValue, currentBlock);
-                    } else {
+        } else {
             // 确定操作码
             OpCode opCode = getOpCodeForBinaryOp(op);
             
@@ -1431,113 +1479,286 @@ public class IRVisitor {
     }
     
     /**
-     * 处理逻辑与(&&)，实现短路评估
+     * 处理逻辑与表达式链，支持a&&b&&c这样的嵌套逻辑表达式
      */
-    private void visitLogicalAnd(SyntaxTree.Expr left, SyntaxTree.Expr right) {
-        // 如果当前块已经终结，不再生成代码
-        if (currentBlock == null) {
+    private void handleLogicalAndChain(SyntaxTree.BinaryExpr expr) {
+        // 收集逻辑链中的所有表达式
+        List<SyntaxTree.Expr> operands = collectLogicalChain(expr, "&&");
+        
+        // 检查是否所有操作数都是常量
+        boolean allConstants = true;
+        for (SyntaxTree.Expr operand : operands) {
+            if (!isConstantExpr(operand)) {
+                allConstants = false;
+                break;
+            }
+        }
+        
+        // 如果全是常量，直接计算结果并创建控制流
+        if (allConstants) {
+            boolean result = true;
+            for (SyntaxTree.Expr operand : operands) {
+                if (!evaluateConstantBool(operand)) {
+                    result = false;
+                    break;
+                }
+            }
+            
+            // 创建常量结果
+            currentValue = new ConstantInt(result ? 1 : 0, IntegerType.I1);
+            
+            // 对于常量表达式，我们仍然需要创建正确的控制流
+            if (!result) {
+                // 如果结果为假，我们需要确保控制流能够正确跳过if语句体
+                // 这里不创建短路跳转，让后续代码使用这个常量值来决定控制流
+            }
+            
             return;
         }
         
-        // 创建基本块
-        BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
+        // 保存开始基本块
+        BasicBlock startBlock = currentBlock;
+        
+        // 创建结束块，所有表达式结束后会跳转到这里
         BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
         
-        // 记住左值计算的基本块
-        BasicBlock leftBlock = currentBlock;
+        // 为每个操作数创建一个基本块（除了第一个操作数，它使用当前块）
+        List<BasicBlock> evalBlocks = new ArrayList<>();
+        for (int i = 1; i < operands.size(); i++) {
+            evalBlocks.add(IRBuilder.createBasicBlock(currentFunction));
+        }
         
-        // 求值左操作数
-        visitExpr(left);
-        Value leftValue = convertToBoolean(currentValue);
+        // 处理第一个操作数
+        visitExpr(operands.get(0));
+        Value firstResult = convertToBoolean(currentValue);
         
-        // 如果左边为假，短路到合并块；否则继续计算右边
-        IRBuilder.createCondBr(leftValue, rightBlock, mergeBlock, currentBlock);
+        // 从第一个操作数开始短路逻辑
+        for (int i = 0; i < operands.size() - 1; i++) {
+            Value currentResult = (i == 0) ? firstResult : currentValue;
+            BasicBlock nextBlock = (i < evalBlocks.size()) ? evalBlocks.get(i) : mergeBlock;
+            
+            // 如果当前结果为假，短路到合并块，结果为假
+            // 否则，继续求值下一个表达式
+            IRBuilder.createCondBr(currentResult, nextBlock, mergeBlock, currentBlock);
+            
+            // 移动到下一个求值块
+            if (i < evalBlocks.size()) {
+                currentBlock = nextBlock;
+                
+                // 求值下一个操作数
+                visitExpr(operands.get(i+1));
+                currentValue = convertToBoolean(currentValue);
+            }
+        }
         
-        // 设置前驱关系
-        mergeBlock.addPredecessor(leftBlock);
-        
-        // 求值右操作数
-        currentBlock = rightBlock;
-        visitExpr(right);
-        Value rightValue = convertToBoolean(currentValue);
-        
-        // 保存右操作数计算的基本块（可能已经改变）
-        BasicBlock rightResultBlock = currentBlock;
+        // 最后一个表达式的结果是链的结果，添加跳转到合并块
         IRBuilder.createBr(mergeBlock, currentBlock);
         
-        // 更新前驱关系
-        mergeBlock.addPredecessor(rightResultBlock);
-        
-        // 合并结果
+        // 创建phi节点用于合并结果
         currentBlock = mergeBlock;
+        PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, mergeBlock);
         
-        // 创建phi节点
-        PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+        // 处理短路情况（当任一条件为假时）
+        for (int i = 0; i < operands.size() - 1; i++) {
+            BasicBlock predBlock = (i == 0) ? startBlock : evalBlocks.get(i-1);
+            phi.addIncoming(new ConstantInt(0, IntegerType.I1), predBlock);
+        }
         
-        // 确保PHI节点与合并块的前驱匹配
-        phi.getIncomingValues().clear(); // 清除默认值
-        
-        // 左边为假时，结果为假(0)
-        phi.addIncoming(new ConstantInt(0, IntegerType.I1), leftBlock);
-        // 右边计算结果作为整体结果
-        phi.addIncoming(rightValue, rightResultBlock);
+        // 最后一个表达式的结果
+        if (!evalBlocks.isEmpty()) {
+            BasicBlock lastEvalBlock = evalBlocks.get(evalBlocks.size() - 1);
+            phi.addIncoming(currentValue, lastEvalBlock);
+        }
         
         currentValue = phi;
+        
+        // 强制修复PHI节点的前驱关系
+        forceFixPhiNodes(phi);
     }
     
     /**
-     * 处理逻辑或(||)，实现短路评估
+     * 处理逻辑或表达式链，支持a||b||c这样的嵌套逻辑表达式
      */
-    private void visitLogicalOr(SyntaxTree.Expr left, SyntaxTree.Expr right) {
-        // 如果当前块已经终结，不再生成代码
-        if (currentBlock == null) {
+    private void handleLogicalOrChain(SyntaxTree.BinaryExpr expr) {
+        // 收集逻辑链中的所有表达式
+        List<SyntaxTree.Expr> operands = collectLogicalChain(expr, "||");
+        
+        // 检查是否所有操作数都是常量
+        boolean allConstants = true;
+        for (SyntaxTree.Expr operand : operands) {
+            if (!isConstantExpr(operand)) {
+                allConstants = false;
+                break;
+            }
+        }
+        
+        // 如果全是常量，直接计算结果并创建控制流
+        if (allConstants) {
+            boolean result = false;
+            for (SyntaxTree.Expr operand : operands) {
+                if (evaluateConstantBool(operand)) {
+                    result = true;
+                    break;
+                }
+            }
+            
+            // 创建常量结果
+            currentValue = new ConstantInt(result ? 1 : 0, IntegerType.I1);
+            
+            // 对于常量表达式，我们仍然需要创建正确的控制流
+            if (result) {
+                // 如果结果为真，我们需要确保控制流能够正确进入if语句体
+                // 这里不创建短路跳转，让后续代码使用这个常量值来决定控制流
+            }
+            
             return;
         }
         
-        // 创建基本块
-        BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
+        // 创建结束块，所有表达式结束后会跳转到这里
         BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
         
-        // 记住左值计算的基本块
-        BasicBlock leftBlock = currentBlock;
+        // 为每个操作数（除了第一个）创建一个基本块
+        List<BasicBlock> evalBlocks = new ArrayList<>();
+        for (int i = 1; i < operands.size(); i++) {
+            evalBlocks.add(IRBuilder.createBasicBlock(currentFunction));
+        }
         
-        // 求值左操作数
-        visitExpr(left);
-        Value leftValue = convertToBoolean(currentValue);
+        // 保存起始块引用
+        BasicBlock startBlock = currentBlock;
         
-        // 如果左边为真，短路到合并块；否则继续计算右边
-        IRBuilder.createCondBr(leftValue, mergeBlock, rightBlock, currentBlock);
+        // 处理第一个操作数
+        visitExpr(operands.get(0));
+        Value firstValue = convertToBoolean(currentValue);
         
-        // 设置前驱关系
-        mergeBlock.addPredecessor(leftBlock);
+        // 创建短路逻辑
+        if (operands.size() > 1) {
+            // 如果第一个操作数为真，短路到合并块，否则继续
+            IRBuilder.createCondBr(firstValue, mergeBlock, evalBlocks.get(0), currentBlock);
+            
+            // 处理其余操作数
+            for (int i = 1; i < operands.size(); i++) {
+                currentBlock = evalBlocks.get(i-1);
+                
+                // 处理当前操作数
+                visitExpr(operands.get(i));
+                Value currValue = convertToBoolean(currentValue);
+                
+                // 最后一个操作数直接跳转到合并块
+                if (i == operands.size() - 1) {
+                    IRBuilder.createBr(mergeBlock, currentBlock);
+                } else {
+                    // 否则检查短路
+                    IRBuilder.createCondBr(currValue, mergeBlock, evalBlocks.get(i), currentBlock);
+                }
+            }
+        } else {
+            // 只有一个操作数，直接跳转到合并块
+            IRBuilder.createBr(mergeBlock, currentBlock);
+        }
         
-        // 求值右操作数
-        currentBlock = rightBlock;
-        visitExpr(right);
-        Value rightValue = convertToBoolean(currentValue);
-        
-        // 保存右操作数计算的基本块（可能已经改变）
-        BasicBlock rightResultBlock = currentBlock;
-        IRBuilder.createBr(mergeBlock, currentBlock);
-        
-        // 更新前驱关系
-        mergeBlock.addPredecessor(rightResultBlock);
-        
-        // 合并结果
+        // 设置合并块
         currentBlock = mergeBlock;
         
-        // 创建phi节点
-        PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+        // 创建PHI节点合并结果
+        PhiInstruction resultPhi = IRBuilder.createPhi(IntegerType.I1, mergeBlock);
         
-        // 确保PHI节点与合并块的前驱匹配
-        phi.getIncomingValues().clear(); // 清除默认值
+        // 第一个操作数短路（为真）
+        resultPhi.addIncoming(new ConstantInt(1, IntegerType.I1), startBlock);
         
-        // 左边为真时，结果为真(1)
-        phi.addIncoming(new ConstantInt(1, IntegerType.I1), leftBlock);
-        // 右边计算结果作为整体结果
-        phi.addIncoming(rightValue, rightResultBlock);
+        // 中间操作数短路（为真）
+        for (int i = 0; i < operands.size() - 1 && i < evalBlocks.size(); i++) {
+            resultPhi.addIncoming(new ConstantInt(1, IntegerType.I1), evalBlocks.get(i));
+        }
         
-        currentValue = phi;
+        // 最后一个操作数的结果
+        if (!evalBlocks.isEmpty()) {
+            BasicBlock lastEvalBlock = evalBlocks.get(evalBlocks.size() - 1);
+            resultPhi.addIncoming(currentValue, lastEvalBlock);
+        }
+        
+        currentValue = resultPhi;
+        
+        // 强制修复PHI节点的前驱关系
+        forceFixPhiNodes(resultPhi);
+    }
+    
+    /**
+     * 强制修复PHI节点的前驱关系
+     */
+    private void forceFixPhiNodes(PhiInstruction phi) {
+        BasicBlock block = phi.getParent();
+        if (block == null) return;
+        
+        // 确保PHI节点的前驱与基本块的前驱一致
+        List<BasicBlock> blockPreds = block.getPredecessors();
+        List<BasicBlock> phiPreds = new ArrayList<>(phi.getIncomingBlocks());
+        
+        // 添加缺失的前驱
+        for (BasicBlock pred : blockPreds) {
+            if (!phiPreds.contains(pred)) {
+                // 添加默认值
+                Value defaultValue = phi.getType().toString().equals("i1") ? 
+                    new ConstantInt(0, IntegerType.I1) : new ConstantInt(0);
+                phi.addIncoming(defaultValue, pred);
+            }
+        }
+        
+        // 移除多余的前驱
+        for (BasicBlock pred : new ArrayList<>(phiPreds)) {
+            if (!blockPreds.contains(pred)) {
+                phi.removeIncoming(pred);
+            }
+        }
+    }
+    
+    /**
+     * 判断表达式是否为常量
+     */
+    private boolean isConstantExpr(SyntaxTree.Expr expr) {
+        if (expr instanceof SyntaxTree.LiteralExpr) {
+            return true;
+        }
+        return false;
+    }
+    
+    /**
+     * 计算常量表达式的布尔值
+     */
+    private boolean evaluateConstantBool(SyntaxTree.Expr expr) {
+        if (expr instanceof SyntaxTree.LiteralExpr) {
+            Object value = ((SyntaxTree.LiteralExpr) expr).value;
+            if (value instanceof Integer) {
+                return ((Integer) value) != 0;
+            } else if (value instanceof Float) {
+                return ((Float) value) != 0.0f;
+            }
+        }
+        
+        // 默认为假
+        return false;
+    }
+    
+    /**
+     * 收集嵌套的逻辑表达式链
+     * 例如: a || b || c -> [a, b, c]
+     */
+    private List<SyntaxTree.Expr> collectLogicalChain(SyntaxTree.BinaryExpr expr, String operator) {
+        List<SyntaxTree.Expr> operands = new ArrayList<>();
+        collectOperandsHelper(expr, operator, operands);
+        return operands;
+    }
+    
+    /**
+     * 递归收集逻辑表达式链的辅助方法
+     */
+    private void collectOperandsHelper(SyntaxTree.Expr expr, String operator, List<SyntaxTree.Expr> operands) {
+        if (expr instanceof SyntaxTree.BinaryExpr && ((SyntaxTree.BinaryExpr) expr).op.equals(operator)) {
+            SyntaxTree.BinaryExpr binExpr = (SyntaxTree.BinaryExpr) expr;
+            collectOperandsHelper(binExpr.left, operator, operands);
+            collectOperandsHelper(binExpr.right, operator, operands);
+        } else {
+            operands.add(expr);
+        }
     }
     
     /**
@@ -1867,5 +2088,20 @@ public class IRVisitor {
     private void exitScope() {
         symbolTables.remove(symbolTables.size() - 1);
         arrayDimensions.remove(arrayDimensions.size() - 1);
+    }
+
+    /**
+     * 获取布尔值的否定结果
+     * 例如：true -> false, false -> true
+     */
+    private Value getNegatedBooleanValue(Value boolValue, BasicBlock block) {
+        if (boolValue instanceof ConstantInt) {
+            // 如果是常量，直接求反
+            int value = ((ConstantInt) boolValue).getValue();
+            return new ConstantInt(value == 0 ? 1 : 0, IntegerType.I1);
+        } else {
+            // 否则使用异或运算
+            return IRBuilder.createBinaryInst(OpCode.XOR, boolValue, new ConstantInt(1, IntegerType.I1), block);
+        }
     }
 } 
