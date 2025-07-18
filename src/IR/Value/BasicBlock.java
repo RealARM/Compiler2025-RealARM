@@ -242,7 +242,12 @@ public class BasicBlock extends Value {
      * 判断该基本块是否有终结指令
      */
     public boolean hasTerminator() {
-        return getTerminator() != null;
+        if (instructions.isEmpty()) {
+            return false;
+        }
+        
+        Instruction lastInst = instructions.getLast();
+        return lastInst instanceof TerminatorInstruction;
     }
     
     /**
