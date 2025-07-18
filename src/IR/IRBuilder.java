@@ -115,8 +115,16 @@ public class IRBuilder {
      * 创建一个加载指令
      */
     public static LoadInstruction createLoad(Value pointer, BasicBlock block) {
-        String name = "load_" + tmpCounter++;
+        // 检查指针类型
+        if (!(pointer.getType() instanceof PointerType)) {
+            throw new IllegalArgumentException("加载指令必须从指针类型加载");
+        }
+        
+        // 获取指针元素类型
         Type pointedType = ((PointerType) pointer.getType()).getElementType();
+        String name = "load_" + tmpCounter++;
+        
+        // 创建加载指令
         LoadInstruction inst = new LoadInstruction(pointer, pointedType, name);
         if (block != null) {
             block.addInstruction(inst);
@@ -128,6 +136,14 @@ public class IRBuilder {
      * 创建一个分配指令
      */
     public static AllocaInstruction createAlloca(Type type, BasicBlock block) {
+        // 为常用类型创建缓存的指针类型
+        PointerType pointerType = null;
+        if (type.equals(IntegerType.I32)) {
+            pointerType = new PointerType(IntegerType.I32);
+        } else if (type.equals(FloatType.F32)) {
+            pointerType = new PointerType(FloatType.F32);
+        }
+        
         String name = "alloca_" + tmpCounter++;
         AllocaInstruction inst = new AllocaInstruction(type, name);
         if (block != null) {
@@ -152,46 +168,39 @@ public class IRBuilder {
      * 创建一个存储指令
      */
     public static StoreInstruction createStore(Value value, Value pointer, BasicBlock block) {
-        // 自动类型转换，确保值类型与指针元素类型匹配
+        // 确保指针是指针类型
         if (pointer.getType() instanceof PointerType) {
             Type elementType = ((PointerType) pointer.getType()).getElementType();
+            Type valueType = value.getType();
             
-            // 处理常量整数到常量浮点数的转换
-            if (elementType instanceof FloatType && value instanceof ConstantInt) {
-                ConstantInt constInt = (ConstantInt) value;
-                value = new ConstantFloat((float) constInt.getValue());
-            }
-            // 处理常量浮点数到常量整数的转换
-            else if (elementType instanceof IntegerType && value instanceof ConstantFloat) {
-                ConstantFloat constFloat = (ConstantFloat) value;
-                value = new ConstantInt((int) constFloat.getValue());
-            }
-            // 非常量值的类型转换
-            else if (!value.getType().equals(elementType)) {
-                // 整数和浮点数之间的转换
-                if (elementType instanceof IntegerType && value.getType() instanceof FloatType) {
-                    value = createFloatToInt(value, block);
-                } else if (elementType instanceof FloatType && value.getType() instanceof IntegerType) {
+            // 只处理常见的整数和浮点类型转换
+            if (elementType instanceof FloatType && valueType instanceof IntegerType) {
+                // 将整数值转换为浮点值
+                if (value instanceof ConstantInt constInt) {
+                    // 常量整数转常量浮点
+                    value = createConstantFloat((float) constInt.getValue());
+                } else {
+                    // 非常量整数转浮点
                     value = createIntToFloat(value, block);
-                } 
-                // 整数类型之间的转换
-                else if (elementType instanceof IntegerType && value.getType() instanceof IntegerType) {
-                    IntegerType targetIntType = (IntegerType) elementType;
-                    IntegerType valueIntType = (IntegerType) value.getType();
-                    
-                    if (targetIntType.getBitWidth() > valueIntType.getBitWidth()) {
-                        // 扩展
-                        value = createZeroExtend(value, elementType, block);
-                    } else if (targetIntType.getBitWidth() < valueIntType.getBitWidth()) {
-                        // 截断
-                        value = createTrunc(value, elementType, block);
-                    }
+                }
+            }
+            else if (elementType instanceof IntegerType && valueType instanceof FloatType) {
+                // 将浮点值转换为整数值
+                if (value instanceof ConstantFloat constFloat) {
+                    // 常量浮点转常量整数
+                    value = createConstantInt((int) constFloat.getValue());
+                } else {
+                    // 非常量浮点转整数
+                    value = createFloatToInt(value, block);
                 }
             }
         }
         
+        // 创建存储指令
         StoreInstruction inst = new StoreInstruction(value, pointer);
-        block.addInstruction(inst);
+        if (block != null) {
+            block.addInstruction(inst);
+        }
         return inst;
     }
     
@@ -236,8 +245,56 @@ public class IRBuilder {
      * 创建一个二元运算指令
      */
     public static BinaryInstruction createBinaryInst(OpCode opCode, Value left, Value right, BasicBlock block) {
-        BinaryInstruction inst = createBinaryInstOnly(opCode, left, right);
-        block.addInstruction(inst);
+        Type type;
+        Type leftType = left.getType();
+        Type rightType = right.getType();
+
+        // 如果操作数类型不同，进行类型转换
+        if (!leftType.equals(rightType)) {
+            // 默认使用整数类型
+            type = IntegerType.I32;
+
+            // 处理浮点数和整数的混合运算
+            if (leftType instanceof FloatType && rightType instanceof IntegerType) {
+                // 将整数转为浮点数
+                right = createIntToFloat(right, block);
+                type = FloatType.F32;
+            } 
+            else if (rightType instanceof FloatType && leftType instanceof IntegerType) {
+                // 将整数转为浮点数
+                left = createIntToFloat(left, block);
+                type = FloatType.F32;
+            }
+        } else {
+            type = leftType;
+        }
+
+        // 确保类型不为null
+        if (type == null) {
+            type = IntegerType.I32;
+        }
+
+        // 根据类型调整操作码
+        if (type instanceof FloatType) {
+            // 将整数操作转换为浮点操作
+            switch (opCode) {
+                case ADD: opCode = OpCode.FADD; break;
+                case SUB: opCode = OpCode.FSUB; break;
+                case MUL: opCode = OpCode.FMUL; break;
+                case DIV: opCode = OpCode.FDIV; break;
+                case REM: opCode = OpCode.FREM; break;
+            }
+        }
+
+        // 比较操作的结果总是布尔值（i1类型）
+        if (opCode.isCompare()) {
+            type = IntegerType.I1;
+        }
+
+        BinaryInstruction inst = new BinaryInstruction(opCode, left, right, type);
+        if (block != null) {
+            block.addInstruction(inst);
+        }
         return inst;
     }
     
@@ -245,6 +302,34 @@ public class IRBuilder {
      * 创建一个比较指令
      */
     public static CompareInstruction createCompare(OpCode compareType, OpCode predicate, Value left, Value right, BasicBlock block) {
+        // 处理类型不匹配的情况
+        Type leftType = left.getType();
+        Type rightType = right.getType();
+        
+        // 如果类型不匹配，进行必要的转换
+        if (!leftType.equals(rightType)) {
+            // 处理浮点数和整数的混合比较
+            if (leftType instanceof FloatType && rightType instanceof IntegerType) {
+                // 将整数转为浮点数
+                right = createIntToFloat(right, block);
+                // 确保使用浮点比较
+                compareType = OpCode.FCMP;
+            } 
+            else if (rightType instanceof FloatType && leftType instanceof IntegerType) {
+                // 将整数转为浮点数
+                left = createIntToFloat(left, block);
+                // 确保使用浮点比较
+                compareType = OpCode.FCMP;
+            }
+        } else {
+            // 确保根据操作数类型选择正确的比较类型
+            if (leftType instanceof FloatType) {
+                compareType = OpCode.FCMP;
+            } else {
+                compareType = OpCode.ICMP;
+            }
+        }
+
         CompareInstruction inst = new CompareInstruction(compareType, predicate, left, right);
         if (block != null) {
             block.addInstruction(inst);
@@ -290,7 +375,13 @@ public class IRBuilder {
     public static BranchInstruction createBr(BasicBlock target, BasicBlock block) {
         BranchInstruction inst = new BranchInstruction(target);
         block.addInstruction(inst);
+        
+        // 更新基本块的后继关系
         block.addSuccessor(target);
+        
+        // 更新目标块的前驱关系
+        target.addPredecessor(block);
+        
         return inst;
     }
     
@@ -298,10 +389,24 @@ public class IRBuilder {
      * 创建一个条件分支指令
      */
     public static BranchInstruction createCondBr(Value condition, BasicBlock trueBlock, BasicBlock falseBlock, BasicBlock block) {
+        // 确保条件是布尔类型(i1)
+        if (condition.getType() != IntegerType.I1) {
+            // 如果条件不是布尔类型，创建比较指令转换为布尔类型
+            // 将非零值视为true，零值视为false
+            condition = createICmp(OpCode.NE, condition, createConstantInt(0), block);
+        }
+        
         BranchInstruction inst = new BranchInstruction(condition, trueBlock, falseBlock);
         block.addInstruction(inst);
+        
+        // 更新基本块的后继关系
         block.addSuccessor(trueBlock);
         block.addSuccessor(falseBlock);
+        
+        // 更新基本块的前驱关系
+        trueBlock.addPredecessor(block);
+        falseBlock.addPredecessor(block);
+        
         return inst;
     }
     
@@ -323,7 +428,20 @@ public class IRBuilder {
         
         if (block != null) {
             block.addInstruction(inst);
+            
+            // 建立调用关系
+            if (!callee.isExternal()) {
+                Function caller = block.getParentFunction();
+                // 避免重复添加
+                if (!caller.getCallees().contains(callee)) {
+                    caller.getCallees().add(callee);
+                }
+                if (!callee.getCallers().contains(caller)) {
+                    callee.getCallers().add(caller);
+                }
+            }
         }
+        
         return inst;
     }
     
@@ -343,6 +461,11 @@ public class IRBuilder {
      * 创建一个简单的GetElementPtr指令（类似示例的PtrInst）
      */
     public static GetElementPtrInstruction createGetElementPtr(Value pointer, Value index, BasicBlock block) {
+        // 检查指针类型
+        if (!(pointer.getType() instanceof PointerType)) {
+            throw new IllegalArgumentException("GetElementPtr的基地址必须是指针类型");
+        }
+        
         String name = "gep_" + tmpCounter++;
         GetElementPtrInstruction inst = new GetElementPtrInstruction(pointer, index, name);
         if (block != null) {
@@ -355,6 +478,11 @@ public class IRBuilder {
      * 创建一个多维索引的GetElementPtr指令
      */
     public static GetElementPtrInstruction createGetElementPtr(Value pointer, List<Value> indices, BasicBlock block) {
+        // 检查指针类型
+        if (!(pointer.getType() instanceof PointerType)) {
+            throw new IllegalArgumentException("GetElementPtr的基地址必须是指针类型");
+        }
+        
         String name = "gep_" + tmpCounter++;
         GetElementPtrInstruction inst = new GetElementPtrInstruction(pointer, indices, name);
         if (block != null) {
