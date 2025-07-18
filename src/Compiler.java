@@ -4,11 +4,16 @@ import Frontend.SyntaxTree;
 import Frontend.TokenStream;
 import Frontend.SysYToken;
 import Frontend.SysYTokenType;
+import IR.IRBuilder;
+import IR.IRPrinter;
 import IR.Module;
+import IR.Pass.ConstantFolding;
+import IR.Pass.PassManager;
 import IR.Visitor.IRVisitor;
 
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.PrintStream;
 
 /**
  * 编译器入口，目前仅执行词法分析并打印Token序列
@@ -16,25 +21,27 @@ import java.io.IOException;
 public class Compiler {
     public static void main(String[] args) {
         if (args.length < 1) {
-            System.err.println("Usage: java src/Compiler.java [--parse|--ast|--ir] <source_file.sy>");
+            System.err.println("Usage: java src/Compiler.java [--parse|--ast|--ir|--opt] <source_file.sy>");
             System.exit(1);
         }
 
         boolean doParse = false;
         boolean printAST = false;
         boolean generateIR = false;
+        boolean printIR = false;
+        boolean optimize = false;
         String sourcePath;
         
         if (args[0].equals("--parse") || args[0].equals("-p")) {
             if (args.length < 2) {
-                System.err.println("Usage: java src/Compiler.java [--parse|--ast|--ir] <source_file.sy>");
+                System.err.println("Usage: java src/Compiler.java [--parse|--ast|--ir|--opt] <source_file.sy>");
                 System.exit(1);
             }
             doParse = true;
             sourcePath = args[1];
         } else if (args[0].equals("--ast") || args[0].equals("-a")) {
             if (args.length < 2) {
-                System.err.println("Usage: java src/Compiler.java [--parse|--ast|--ir] <source_file.sy>");
+                System.err.println("Usage: java src/Compiler.java [--parse|--ast|--ir|--opt] <source_file.sy>");
                 System.exit(1);
             }
             doParse = true;
@@ -42,11 +49,22 @@ public class Compiler {
             sourcePath = args[1];
         } else if (args[0].equals("--ir") || args[0].equals("-i")) {
             if (args.length < 2) {
-                System.err.println("Usage: java src/Compiler.java [--parse|--ast|--ir] <source_file.sy>");
+                System.err.println("Usage: java src/Compiler.java [--parse|--ast|--ir|--opt] <source_file.sy>");
                 System.exit(1);
             }
             doParse = true;
             generateIR = true;
+            printIR = true;
+            sourcePath = args[1];
+        } else if (args[0].equals("--opt") || args[0].equals("-o")) {
+            if (args.length < 2) {
+                System.err.println("Usage: java src/Compiler.java [--parse|--ast|--ir|--opt] <source_file.sy>");
+                System.exit(1);
+            }
+            doParse = true;
+            generateIR = true;
+            printIR = true;
+            optimize = true;
             sourcePath = args[1];
         } else {
             // 默认词法分析模式
@@ -91,8 +109,29 @@ public class Compiler {
             System.out.println("  - " + irModule.globalVars().size() + " global variables");
             System.out.println("  - " + irModule.libFunctions().size() + " library functions");
             
-            // 打印IR（可选）
-            // TODO: 实现IR打印功能
+            // 如果需要优化，运行优化Pass
+            if (optimize) {
+                System.out.println("\nRunning optimization passes...");
+                
+                // 获取PassManager实例
+                PassManager passManager = PassManager.getInstance();
+                passManager.setDebug(true);
+                
+                // 添加优化Pass
+                passManager.addIRPass(new ConstantFolding());
+                
+                // 运行所有Pass
+                passManager.runAllPasses(irModule);
+                
+                System.out.println("Optimization completed.");
+            }
+            
+            // 打印IR
+            if (printIR) {
+                System.out.println("\nGenerated IR:");
+                IRPrinter printer = new IRPrinter(System.out);
+                printer.printModule(irModule);
+            }
             
         } catch (Exception e) {
             System.err.println("Compilation failed: " + e.getMessage());

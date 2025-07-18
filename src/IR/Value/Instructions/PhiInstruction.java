@@ -84,10 +84,9 @@ public class PhiInstruction extends Instruction {
     /**
      * 移除所有操作数
      */
-    private void removeAllOperands() {
-        for (int i = getOperandCount() - 1; i >= 0; i--) {
-            removeOperand(i);
-        }
+    @Override
+    public void removeAllOperands() {
+        super.removeAllOperands();
     }
     
     @Override

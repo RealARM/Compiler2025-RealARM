@@ -80,10 +80,10 @@ public class IRVisitor {
         declareLibFunction("putarray", VoidType.VOID, IntegerType.I32, new PointerType(IntegerType.I32));
         
         // 浮点操作函数
-        declareLibFunction("getfloat", FloatType.FLOAT);
-        declareLibFunction("putfloat", VoidType.VOID, FloatType.FLOAT);
-        declareLibFunction("getfarray", IntegerType.I32, new PointerType(FloatType.FLOAT));
-        declareLibFunction("putfarray", VoidType.VOID, IntegerType.I32, new PointerType(FloatType.FLOAT));
+        declareLibFunction("getfloat", FloatType.F32);
+        declareLibFunction("putfloat", VoidType.VOID, FloatType.F32);
+        declareLibFunction("getfarray", IntegerType.I32, new PointerType(FloatType.F32));
+        declareLibFunction("putfarray", VoidType.VOID, IntegerType.I32, new PointerType(FloatType.F32));
         
         // 时间函数
         declareLibFunction("starttime", VoidType.VOID, IntegerType.I32);
@@ -122,7 +122,7 @@ public class IRVisitor {
                 baseType = IntegerType.I32;
                 break;
             case "float":
-                baseType = FloatType.FLOAT;
+                baseType = FloatType.F32;
                 break;
             default:
                 throw new RuntimeException("不支持的变量类型: " + baseTypeStr);
@@ -163,8 +163,13 @@ public class IRVisitor {
                 
                 // 创建全局变量
                 GlobalVariable globalVar = IRBuilder.createGlobalVariable("@" + name, baseType, module);
+                if (isConst) {
+                    // 由于我们的GlobalVariable构造函数不支持直接设置isConstant，
+                    // 我们需要创建一个新的GlobalVariable
+                    globalVar = new GlobalVariable("@" + name, baseType, isConst);
+                    module.addGlobalVariable(globalVar);
+                }
                 globalVar.setInitializer(initValue);
-                globalVar.setConstant(isConst);
                 
                 // 添加到符号表
                 addVariable(name, globalVar);
@@ -177,10 +182,13 @@ public class IRVisitor {
                 }
                 
                 // 创建全局数组
-                GlobalVariable arrayVar = IRBuilder.createGlobalVariable("@" + name, 
-                                                                       new PointerType(baseType), 
-                                                                       module);
-                arrayVar.setConstant(isConst);
+                GlobalVariable arrayVar = IRBuilder.createGlobalArray("@" + name, baseType, totalSize, module);
+                if (isConst) {
+                    // 由于我们的GlobalVariable构造函数不支持直接设置isConstant，
+                    // 我们需要创建一个新的GlobalVariable
+                    arrayVar = new GlobalVariable("@" + name, baseType, totalSize, isConst);
+                    module.addGlobalVariable(arrayVar);
+                }
                 
                 // 处理数组初始化
                 if (varDef.init != null) {
@@ -189,13 +197,13 @@ public class IRVisitor {
                         List<Value> initValues = processGlobalArrayInit((SyntaxTree.ArrayInitExpr) varDef.init, 
                                                                        dims, 
                                                                        baseType);
-                        arrayVar.setInitializer(initValues);
+                        arrayVar.setArrayValues(initValues);
                     } else {
                         throw new RuntimeException("全局数组初始化必须使用数组初始化表达式");
                     }
                 } else {
                     // 默认初始化为全0
-                    arrayVar.setZeroInitializer(totalSize);
+                    arrayVar.setZeroInitialized(totalSize);
                 }
                 
                 // 保存数组维度信息和变量
@@ -279,7 +287,7 @@ public class IRVisitor {
                 retType = IntegerType.I32;
                 break;
             case "float":
-                retType = FloatType.FLOAT;
+                retType = FloatType.F32;
                 break;
             case "void":
                 retType = VoidType.VOID;
@@ -319,11 +327,11 @@ public class IRVisitor {
         if (lastInst == null || !(lastInst instanceof ReturnInstruction)) {
             // 如果最后一条指令不是返回指令，添加一个默认的返回指令
             if (retType == VoidType.VOID) {
-                IRBuilder.createRet(currentBlock); // void返回
+                IRBuilder.createReturn(currentBlock); // void返回
             } else if (retType == IntegerType.I32) {
-                IRBuilder.createRet(new ConstantInt(0), currentBlock); // 返回0
-            } else if (retType == FloatType.FLOAT) {
-                IRBuilder.createRet(new ConstantFloat(0.0f), currentBlock); // 返回0.0
+                IRBuilder.createReturn(new ConstantInt(0), currentBlock); // 返回0
+            } else if (retType == FloatType.F32) {
+                IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock); // 返回0.0
             }
         }
         
@@ -345,7 +353,7 @@ public class IRVisitor {
                 type = isArray ? new PointerType(IntegerType.I32) : IntegerType.I32;
                 break;
             case "float":
-                type = isArray ? new PointerType(FloatType.FLOAT) : FloatType.FLOAT;
+                type = isArray ? new PointerType(FloatType.F32) : FloatType.F32;
                 break;
             default:
                 throw new RuntimeException("不支持的参数类型: " + typeStr);
@@ -446,7 +454,7 @@ public class IRVisitor {
                 baseType = IntegerType.I32;
                 break;
             case "float":
-                baseType = FloatType.FLOAT;
+                baseType = FloatType.F32;
                 break;
             default:
                 throw new RuntimeException("不支持的变量类型: " + baseTypeStr);
@@ -466,15 +474,7 @@ public class IRVisitor {
                     visitExpr(varDef.init);
                     Value initValue = currentValue;
                     
-                    // 类型转换（如果需要）
-                    if (!initValue.getType().equals(baseType)) {
-                        if (baseType == IntegerType.I32 && initValue.getType() instanceof FloatType) {
-                            initValue = IRBuilder.createFPToSI(initValue, IntegerType.I32, currentBlock);
-                        } else if (baseType == FloatType.FLOAT && initValue.getType() instanceof IntegerType) {
-                            initValue = IRBuilder.createSIToFP(initValue, FloatType.FLOAT, currentBlock);
-                        }
-                    }
-                    
+                    // IRBuilder.createStore 会自动处理类型转换
                     IRBuilder.createStore(initValue, allocaInst, currentBlock);
                 }
                 
@@ -489,11 +489,7 @@ public class IRVisitor {
                 }
                 
                 // 创建数组
-                Value arrayPtr = IRBuilder.createAlloca(
-                    new PointerType(baseType),
-                    totalSize,
-                    currentBlock
-                );
+                Value arrayPtr = IRBuilder.createArrayAlloca(baseType, totalSize, currentBlock);
                 
                 // 处理数组初始化
                 if (varDef.init != null) {
@@ -560,7 +556,7 @@ public class IRVisitor {
         while (result.size() < totalSize) {
             if (elementType == IntegerType.I32) {
                 result.add(new ConstantInt(0));
-            } else if (elementType == FloatType.FLOAT) {
+            } else if (elementType == FloatType.F32) {
                 result.add(new ConstantFloat(0.0f));
             }
         }
@@ -585,9 +581,9 @@ public class IRVisitor {
             // 类型转换（如果需要）
             if (!value.getType().equals(elementType)) {
                 if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
-                    value = IRBuilder.createFPToSI(value, IntegerType.I32, currentBlock);
-                } else if (elementType == FloatType.FLOAT && value.getType() instanceof IntegerType) {
-                    value = IRBuilder.createSIToFP(value, FloatType.FLOAT, currentBlock);
+                    value = IRBuilder.createFloatToInt(value, currentBlock);
+                } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
+                    value = IRBuilder.createIntToFloat(value, currentBlock);
                 }
             }
             
@@ -620,16 +616,7 @@ public class IRVisitor {
             
             // 如果是指针类型（局部变量），直接存储；否则（全局变量）需要先加载
             if (varPtr.getType() instanceof PointerType) {
-                // 类型转换（如果需要）
-                Type targetType = ((PointerType) varPtr.getType()).getPointedType();
-                if (!rightValue.getType().equals(targetType)) {
-                    if (targetType == IntegerType.I32 && rightValue.getType() instanceof FloatType) {
-                        rightValue = IRBuilder.createFPToSI(rightValue, IntegerType.I32, currentBlock);
-                    } else if (targetType == FloatType.FLOAT && rightValue.getType() instanceof IntegerType) {
-                        rightValue = IRBuilder.createSIToFP(rightValue, FloatType.FLOAT, currentBlock);
-                    }
-                }
-                
+                // IRBuilder.createStore 会自动处理类型转换
                 IRBuilder.createStore(rightValue, varPtr, currentBlock);
             } else {
                 throw new RuntimeException("无法对非左值表达式赋值: " + name);
@@ -644,16 +631,7 @@ public class IRVisitor {
                 throw new RuntimeException("数组访问表达式必须返回指针");
             }
             
-            // 类型转换（如果需要）
-            Type targetType = ((PointerType) elemPtr.getType()).getPointedType();
-            if (!rightValue.getType().equals(targetType)) {
-                if (targetType == IntegerType.I32 && rightValue.getType() instanceof FloatType) {
-                    rightValue = IRBuilder.createFPToSI(rightValue, IntegerType.I32, currentBlock);
-                } else if (targetType == FloatType.FLOAT && rightValue.getType() instanceof IntegerType) {
-                    rightValue = IRBuilder.createSIToFP(rightValue, FloatType.FLOAT, currentBlock);
-                }
-            }
-            
+            // IRBuilder.createStore 会自动处理类型转换
             IRBuilder.createStore(rightValue, elemPtr, currentBlock);
         }
     }
@@ -670,17 +648,29 @@ public class IRVisitor {
             // 类型转换（如果需要）
             Type returnType = currentFunction.getReturnType();
             if (!retValue.getType().equals(returnType)) {
-                if (returnType == IntegerType.I32 && retValue.getType() instanceof FloatType) {
-                    retValue = IRBuilder.createFPToSI(retValue, IntegerType.I32, currentBlock);
-                } else if (returnType == FloatType.FLOAT && retValue.getType() instanceof IntegerType) {
-                    retValue = IRBuilder.createSIToFP(retValue, FloatType.FLOAT, currentBlock);
+                if (returnType instanceof IntegerType && retValue.getType() instanceof FloatType) {
+                    retValue = IRBuilder.createFloatToInt(retValue, currentBlock);
+                } else if (returnType instanceof FloatType && retValue.getType() instanceof IntegerType) {
+                    retValue = IRBuilder.createIntToFloat(retValue, currentBlock);
+                } else if (returnType instanceof IntegerType && retValue.getType() instanceof IntegerType) {
+                    // 处理整数类型之间的转换
+                    IntegerType targetIntType = (IntegerType) returnType;
+                    IntegerType retIntType = (IntegerType) retValue.getType();
+                    
+                    if (targetIntType.getBitWidth() > retIntType.getBitWidth()) {
+                        // 扩展
+                        retValue = IRBuilder.createZeroExtend(retValue, returnType, currentBlock);
+                    } else if (targetIntType.getBitWidth() < retIntType.getBitWidth()) {
+                        // 截断
+                        retValue = IRBuilder.createTrunc(retValue, returnType, currentBlock);
+                    }
                 }
             }
             
-            IRBuilder.createRet(retValue, currentBlock);
+            IRBuilder.createReturn(retValue, currentBlock);
         } else {
             // 无返回值
-            IRBuilder.createRet(currentBlock);
+            IRBuilder.createReturn(currentBlock);
         }
         
         // 创建一个不可达的基本块，用于后续指令
@@ -816,6 +806,10 @@ public class IRVisitor {
             visitCallExpr((SyntaxTree.CallExpr) expr);
         } else if (expr instanceof SyntaxTree.ArrayAccessExpr) {
             visitArrayAccessExpr((SyntaxTree.ArrayAccessExpr) expr);
+            // 在表达式中使用数组访问时，需要加载值
+            if (currentValue != null && currentValue.getType() instanceof PointerType) {
+                currentValue = IRBuilder.createLoad(currentValue, currentBlock);
+            }
         } else if (expr instanceof SyntaxTree.ArrayInitExpr) {
             visitArrayInitExpr((SyntaxTree.ArrayInitExpr) expr);
         }
@@ -848,8 +842,8 @@ public class IRVisitor {
         
         // 如果是指针类型（局部变量），需要加载其值
         if (value.getType() instanceof PointerType && !(value instanceof GlobalVariable)) {
-            Type pointedType = ((PointerType) value.getType()).getPointedType();
-            currentValue = IRBuilder.createLoad(value, pointedType, currentBlock);
+            Type pointedType = ((PointerType) value.getType()).getElementType();
+            currentValue = IRBuilder.createLoad(value, currentBlock);
         } else {
             currentValue = value;
         }
@@ -872,12 +866,12 @@ public class IRVisitor {
                 // 对于整数，创建0-operand
                 if (operand.getType() instanceof IntegerType) {
                     Value zero = new ConstantInt(0);
-                    currentValue = IRBuilder.createBinary(OpCode.SUB, zero, operand, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.SUB, zero, operand, currentBlock);
                 }
                 // 对于浮点数，创建0.0-operand
                 else if (operand.getType() instanceof FloatType) {
                     Value zero = new ConstantFloat(0.0f);
-                    currentValue = IRBuilder.createBinary(OpCode.FSUB, zero, operand, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.FSUB, zero, operand, currentBlock);
                 }
                 break;
             case "!":
@@ -887,7 +881,7 @@ public class IRVisitor {
                     currentValue = IRBuilder.createICmp(OpCode.EQ, operand, zero, currentBlock);
                 } else if (operand.getType() instanceof FloatType) {
                     // 将浮点数转为整数再比较
-                    Value intValue = IRBuilder.createFPToSI(operand, IntegerType.I32, currentBlock);
+                    Value intValue = IRBuilder.createFloatToInt(operand, currentBlock);
                     Value zero = new ConstantInt(0);
                     currentValue = IRBuilder.createICmp(OpCode.EQ, intValue, zero, currentBlock);
                 }
@@ -917,11 +911,11 @@ public class IRVisitor {
         if (!leftType.equals(rightType)) {
             // 整数和浮点数运算，将整数转换为浮点数
             if (leftType instanceof IntegerType && rightType instanceof FloatType) {
-                leftValue = IRBuilder.createSIToFP(leftValue, FloatType.FLOAT, currentBlock);
-                leftType = FloatType.FLOAT;
+                leftValue = IRBuilder.createIntToFloat(leftValue, currentBlock);
+                leftType = FloatType.F32;
             } else if (leftType instanceof FloatType && rightType instanceof IntegerType) {
-                rightValue = IRBuilder.createSIToFP(rightValue, FloatType.FLOAT, currentBlock);
-                rightType = FloatType.FLOAT;
+                rightValue = IRBuilder.createIntToFloat(rightValue, currentBlock);
+                rightType = FloatType.F32;
             }
         }
         
@@ -930,37 +924,37 @@ public class IRVisitor {
             // 算术运算
             case "+":
                 if (leftType instanceof IntegerType) {
-                    currentValue = IRBuilder.createBinary(OpCode.ADD, leftValue, rightValue, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.ADD, leftValue, rightValue, currentBlock);
                 } else { // FloatType
-                    currentValue = IRBuilder.createBinary(OpCode.FADD, leftValue, rightValue, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.FADD, leftValue, rightValue, currentBlock);
                 }
                 break;
             case "-":
                 if (leftType instanceof IntegerType) {
-                    currentValue = IRBuilder.createBinary(OpCode.SUB, leftValue, rightValue, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.SUB, leftValue, rightValue, currentBlock);
                 } else { // FloatType
-                    currentValue = IRBuilder.createBinary(OpCode.FSUB, leftValue, rightValue, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.FSUB, leftValue, rightValue, currentBlock);
                 }
                 break;
             case "*":
                 if (leftType instanceof IntegerType) {
-                    currentValue = IRBuilder.createBinary(OpCode.MUL, leftValue, rightValue, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.MUL, leftValue, rightValue, currentBlock);
                 } else { // FloatType
-                    currentValue = IRBuilder.createBinary(OpCode.FMUL, leftValue, rightValue, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.FMUL, leftValue, rightValue, currentBlock);
                 }
                 break;
             case "/":
                 if (leftType instanceof IntegerType) {
-                    currentValue = IRBuilder.createBinary(OpCode.DIV, leftValue, rightValue, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.DIV, leftValue, rightValue, currentBlock);
                 } else { // FloatType
-                    currentValue = IRBuilder.createBinary(OpCode.FDIV, leftValue, rightValue, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.FDIV, leftValue, rightValue, currentBlock);
                 }
                 break;
             case "%":
                 if (leftType instanceof IntegerType) {
-                    currentValue = IRBuilder.createBinary(OpCode.REM, leftValue, rightValue, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.REM, leftValue, rightValue, currentBlock);
                 } else { // FloatType
-                    currentValue = IRBuilder.createBinary(OpCode.FREM, leftValue, rightValue, currentBlock);
+                    currentValue = IRBuilder.createBinaryInst(OpCode.FREM, leftValue, rightValue, currentBlock);
                 }
                 break;
                 
@@ -1032,7 +1026,8 @@ public class IRVisitor {
                 List<BasicBlock> blocks = new ArrayList<>();
                 blocks.add(rightBlock.getPredecessors().get(0)); // 左操作数为假的前驱块
                 blocks.add(rightBlock); // 右操作数块
-                currentValue = IRBuilder.createPhi(IntegerType.I1, values, blocks, currentBlock);
+                currentValue = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+                // TODO: 添加PHI节点的输入值
                 break;
                 
             case "||":
@@ -1058,7 +1053,8 @@ public class IRVisitor {
                 List<BasicBlock> blocks2 = new ArrayList<>();
                 blocks2.add(rightBlock2.getPredecessors().get(0)); // 左操作数为真的前驱块
                 blocks2.add(rightBlock2); // 右操作数块
-                currentValue = IRBuilder.createPhi(IntegerType.I1, values2, blocks2, currentBlock);
+                currentValue = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+                // TODO: 添加PHI节点的输入值
                 break;
                 
             default:
@@ -1078,9 +1074,14 @@ public class IRVisitor {
             return IRBuilder.createICmp(OpCode.NE, value, zero, currentBlock);
         } else if (value.getType() instanceof FloatType) {
             // 浮点数转整数后与0比较
-            Value intValue = IRBuilder.createFPToSI(value, IntegerType.I32, currentBlock);
+            Value intValue = IRBuilder.createFloatToInt(value, currentBlock);
             Value zero = new ConstantInt(0);
             return IRBuilder.createICmp(OpCode.NE, intValue, zero, currentBlock);
+        } else if (value.getType() instanceof PointerType) {
+            // 指针与null比较，不等于null为真
+            // 在C语言中，任何非空指针都被视为true
+            Value zero = new ConstantInt(0);
+            return IRBuilder.createICmp(OpCode.NE, value, zero, currentBlock);
         }
         throw new RuntimeException("无法将类型 " + value.getType() + " 转换为布尔值");
     }
@@ -1121,10 +1122,10 @@ public class IRVisitor {
             if (!arg.getType().equals(paramType)) {
                 if (arg.getType() instanceof IntegerType && paramType instanceof FloatType) {
                     // 整数转浮点
-                    args.set(i, IRBuilder.createSIToFP(arg, FloatType.FLOAT, currentBlock));
+                    args.set(i, IRBuilder.createIntToFloat(arg, currentBlock));
                 } else if (arg.getType() instanceof FloatType && paramType instanceof IntegerType) {
                     // 浮点转整数
-                    args.set(i, IRBuilder.createFPToSI(arg, IntegerType.I32, currentBlock));
+                    args.set(i, IRBuilder.createFloatToInt(arg, currentBlock));
                 }
                 // 其他类型不匹配的情况可能需要更复杂的处理
             }
@@ -1193,33 +1194,29 @@ public class IRVisitor {
                 // 计算总偏移量
                 offset = new ConstantInt(0);
                 for (int i = 0; i < indices.size(); i++) {
-                    Value indexFactor = IRBuilder.createBinary(
+                    Value indexFactor = IRBuilder.createBinaryInst(
                         OpCode.MUL,
                         indices.get(i),
                         new ConstantInt(factors.get(i)),
                         currentBlock
                     );
-                    offset = IRBuilder.createBinary(OpCode.ADD, offset, indexFactor, currentBlock);
+                    offset = IRBuilder.createBinaryInst(OpCode.ADD, offset, indexFactor, currentBlock);
                 }
             }
             
             // 使用GEP指令获取元素指针
-            Type elementType = ((PointerType) arrayPtr.getType()).getPointedType();
+            Type elementType = ((PointerType) arrayPtr.getType()).getElementType();
             currentValue = IRBuilder.createGetElementPtr(arrayPtr, offset, currentBlock);
             
-            // 如果不是访问全部维度，结果是指针；否则加载值
-            if (indices.size() < dimensions.size()) {
-                // 结果是指针，不需要加载
-            } else {
-                // 加载元素值
-                currentValue = IRBuilder.createLoad(currentValue, elementType, currentBlock);
-            }
+            // 在赋值语句中，我们总是需要返回指针
+            // 如果是在表达式中使用，我们会在其他地方加载值
+            // 这里不自动加载值，保持指针类型
         } else {
             // 本地或全局数组变量
             // 首先，如果是全局变量或局部变量，需要先获取数组的基址
             if (arrayPtr instanceof GlobalVariable || 
                 (arrayPtr.getType() instanceof PointerType && 
-                 !(((PointerType) arrayPtr.getType()).getPointedType() instanceof PointerType))) {
+                 !(((PointerType) arrayPtr.getType()).getElementType() instanceof PointerType))) {
                 
                 // 计算每个维度的因子
                 List<Integer> factors = new ArrayList<>();
@@ -1234,30 +1231,26 @@ public class IRVisitor {
                 // 计算总偏移量
                 offset = new ConstantInt(0);
                 for (int i = 0; i < indices.size(); i++) {
-                    Value indexFactor = IRBuilder.createBinary(
+                    Value indexFactor = IRBuilder.createBinaryInst(
                         OpCode.MUL,
                         indices.get(i),
                         new ConstantInt(factors.get(i)),
                         currentBlock
                     );
-                    offset = IRBuilder.createBinary(OpCode.ADD, offset, indexFactor, currentBlock);
+                    offset = IRBuilder.createBinaryInst(OpCode.ADD, offset, indexFactor, currentBlock);
                 }
                 
                 // 使用GEP指令获取元素指针
                 Type elementType = null;
                 if (arrayPtr.getType() instanceof PointerType) {
-                    elementType = ((PointerType) arrayPtr.getType()).getPointedType();
+                    elementType = ((PointerType) arrayPtr.getType()).getElementType();
                 }
                 
                 currentValue = IRBuilder.createGetElementPtr(arrayPtr, offset, currentBlock);
                 
-                // 如果不是访问全部维度，结果是指针；否则加载值
-                if (indices.size() < dimensions.size()) {
-                    // 结果是指针，不需要加载
-                } else {
-                    // 加载元素值
-                    currentValue = IRBuilder.createLoad(currentValue, elementType, currentBlock);
-                }
+                // 在赋值语句中，我们总是需要返回指针
+                // 如果是在表达式中使用，我们会在其他地方加载值
+                // 这里不自动加载值，保持指针类型
             }
         }
     }

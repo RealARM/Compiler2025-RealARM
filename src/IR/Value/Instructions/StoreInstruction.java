@@ -21,11 +21,6 @@ public class StoreInstruction extends Instruction {
             throw new IllegalArgumentException("存储指令必须存储到指针类型");
         }
         
-        Type elementType = ((PointerType) pointer.getType()).getElementType();
-        if (!value.getType().equals(elementType)) {
-            throw new IllegalArgumentException("存储值类型必须与指针元素类型匹配");
-        }
-        
         // 添加操作数（值和指针）
         addOperand(value);
         addOperand(pointer);

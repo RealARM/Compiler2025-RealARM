@@ -139,6 +139,44 @@ public class IRBuilder {
      * 创建一个存储指令
      */
     public static StoreInstruction createStore(Value value, Value pointer, BasicBlock block) {
+        // 自动类型转换，确保值类型与指针元素类型匹配
+        if (pointer.getType() instanceof PointerType) {
+            Type elementType = ((PointerType) pointer.getType()).getElementType();
+            
+            // 处理常量整数到常量浮点数的转换
+            if (elementType instanceof FloatType && value instanceof ConstantInt) {
+                ConstantInt constInt = (ConstantInt) value;
+                value = new ConstantFloat((float) constInt.getValue());
+            }
+            // 处理常量浮点数到常量整数的转换
+            else if (elementType instanceof IntegerType && value instanceof ConstantFloat) {
+                ConstantFloat constFloat = (ConstantFloat) value;
+                value = new ConstantInt((int) constFloat.getValue());
+            }
+            // 非常量值的类型转换
+            else if (!value.getType().equals(elementType)) {
+                // 整数和浮点数之间的转换
+                if (elementType instanceof IntegerType && value.getType() instanceof FloatType) {
+                    value = createFloatToInt(value, block);
+                } else if (elementType instanceof FloatType && value.getType() instanceof IntegerType) {
+                    value = createIntToFloat(value, block);
+                } 
+                // 整数类型之间的转换
+                else if (elementType instanceof IntegerType && value.getType() instanceof IntegerType) {
+                    IntegerType targetIntType = (IntegerType) elementType;
+                    IntegerType valueIntType = (IntegerType) value.getType();
+                    
+                    if (targetIntType.getBitWidth() > valueIntType.getBitWidth()) {
+                        // 扩展
+                        value = createZeroExtend(value, elementType, block);
+                    } else if (targetIntType.getBitWidth() < valueIntType.getBitWidth()) {
+                        // 截断
+                        value = createTrunc(value, elementType, block);
+                    }
+                }
+            }
+        }
+        
         StoreInstruction inst = new StoreInstruction(value, pointer);
         block.addInstruction(inst);
         return inst;

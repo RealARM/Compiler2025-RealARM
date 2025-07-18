@@ -1,6 +1,7 @@
 package IR.Value;
 
 import IR.Type.Type;
+import IR.Value.Instructions.Instruction;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

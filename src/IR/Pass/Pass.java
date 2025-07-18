@@ -1,9 +1,10 @@
 package IR.Pass;
 
 import IR.Module;
+import IR.Value.Function;
 
 /**
- * IR优化Pass的基础接口
+ * IR优化Pass接口
  */
 public interface Pass {
     /**
@@ -12,22 +13,43 @@ public interface Pass {
     String getName();
     
     /**
-     * IR优化Pass接口
+     * 模块级Pass接口，处理整个IR模块
      */
     interface IRPass extends Pass {
         /**
-         * 执行IR优化
+         * 运行Pass
+         * @param module IR模块
+         * @return 如果IR发生变化返回true，否则返回false
          */
-        void run(Module module);
+        boolean run(Module module);
     }
     
     /**
-     * 函数Pass接口，只对单个函数进行优化
+     * 函数级Pass接口，处理单个函数
      */
     interface FunctionPass extends Pass {
         /**
-         * 对单个函数执行优化
+         * 运行Pass
+         * @param function 目标函数
+         * @return 如果IR发生变化返回true，否则返回false
          */
-        void runOnFunction(IR.Value.Function function);
+        boolean run(Function function);
+    }
+    
+    /**
+     * 分析Pass接口，不修改IR，只进行分析
+     */
+    interface AnalysisPass extends Pass {
+        /**
+         * 运行分析
+         * @param module IR模块
+         */
+        void run(Module module);
+        
+        /**
+         * 获取分析结果
+         * @return 分析结果
+         */
+        Object getResult();
     }
 } 

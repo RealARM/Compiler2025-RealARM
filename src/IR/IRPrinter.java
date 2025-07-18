@@ -1,0 +1,364 @@
+package IR;
+
+import IR.Type.*;
+import IR.Value.*;
+import IR.Value.Instructions.*;
+import java.util.Map;
+
+import java.io.PrintStream;
+import java.util.List;
+
+/**
+ * IR打印器，用于将IR以文本形式输出
+ */
+public class IRPrinter {
+    private PrintStream out;
+    
+    public IRPrinter(PrintStream out) {
+        this.out = out;
+    }
+    
+    /**
+     * 打印整个IR模块
+     */
+    public void printModule(Module module) {
+        // 打印全局变量
+        for (GlobalVariable gv : module.globalVars()) {
+            printGlobalVariable(gv);
+            out.println();
+        }
+        
+        // 打印函数声明
+        for (Function func : module.libFunctions()) {
+            printFunctionDeclaration(func);
+            out.println();
+        }
+        
+        // 打印函数定义
+        for (Function func : module.functions()) {
+            printFunction(func);
+            out.println();
+        }
+    }
+    
+    /**
+     * 打印全局变量
+     */
+    private void printGlobalVariable(GlobalVariable gv) {
+        out.print(gv.getName());
+        out.print(" = ");
+        if (gv.isConstant()) {
+            out.print("constant ");
+        } else {
+            out.print("global ");
+        }
+        
+        // 打印类型和初始值
+        if (gv.hasInitializer()) {
+            Value initializer = gv.getInitializer();
+            if (initializer instanceof Constant) {
+                out.print(((PointerType)gv.getType()).getElementType());
+                out.print(" ");
+                printConstant((Constant)initializer);
+            } else if (gv.isZeroInitialized()) {
+                out.print(((PointerType)gv.getType()).getElementType());
+                out.print(" zeroinitializer");
+            }
+        } else {
+            out.print(((PointerType)gv.getType()).getElementType());
+            out.print(" undef");
+        }
+    }
+    
+    /**
+     * 打印常量值
+     */
+    private void printConstant(Constant constant) {
+        if (constant instanceof ConstantInt) {
+            out.print(((ConstantInt) constant).getValue());
+        } else if (constant instanceof ConstantFloat) {
+            out.print(((ConstantFloat) constant).getValue());
+        }
+    }
+    
+    /**
+     * 打印函数声明
+     */
+    private void printFunctionDeclaration(Function func) {
+        out.print("declare ");
+        out.print(func.getReturnType());
+        out.print(" ");
+        out.print(func.getName());
+        out.print("(");
+        
+        List<Argument> args = func.getArguments();
+        for (int i = 0; i < args.size(); i++) {
+            if (i > 0) {
+                out.print(", ");
+            }
+            out.print(args.get(i).getType());
+        }
+        
+        out.print(")");
+    }
+    
+    /**
+     * 打印函数定义
+     */
+    private void printFunction(Function func) {
+        out.print("define ");
+        out.print(func.getReturnType());
+        out.print(" ");
+        out.print(func.getName());
+        out.print("(");
+        
+        List<Argument> args = func.getArguments();
+        for (int i = 0; i < args.size(); i++) {
+            if (i > 0) {
+                out.print(", ");
+            }
+            Argument arg = args.get(i);
+            out.print(arg.getType());
+            out.print(" ");
+            out.print(arg.getName());
+        }
+        
+        out.println(") {");
+        
+        // 打印基本块
+        for (BasicBlock bb : func.getBasicBlocks()) {
+            printBasicBlock(bb);
+        }
+        
+        out.println("}");
+    }
+    
+    /**
+     * 打印基本块
+     */
+    private void printBasicBlock(BasicBlock bb) {
+        out.print(bb.getName());
+        out.println(":");
+        
+        // 打印指令
+        for (Instruction inst : bb.getInstructions()) {
+            out.print("  ");
+            printInstruction(inst);
+            out.println();
+        }
+    }
+    
+    /**
+     * 打印指令
+     */
+    private void printInstruction(Instruction inst) {
+        // 如果指令有结果值，打印赋值
+        if (!(inst instanceof StoreInstruction || inst instanceof BranchInstruction || inst instanceof ReturnInstruction)) {
+            out.print(inst.getName());
+            out.print(" = ");
+        }
+        
+        // 根据指令类型打印
+        if (inst instanceof BinaryInstruction) {
+            printBinaryInstruction((BinaryInstruction) inst);
+        } else if (inst instanceof LoadInstruction) {
+            printLoadInstruction((LoadInstruction) inst);
+        } else if (inst instanceof StoreInstruction) {
+            printStoreInstruction((StoreInstruction) inst);
+        } else if (inst instanceof AllocaInstruction) {
+            printAllocaInstruction((AllocaInstruction) inst);
+        } else if (inst instanceof GetElementPtrInstruction) {
+            printGetElementPtrInstruction((GetElementPtrInstruction) inst);
+        } else if (inst instanceof CallInstruction) {
+            printCallInstruction((CallInstruction) inst);
+        } else if (inst instanceof ReturnInstruction) {
+            printReturnInstruction((ReturnInstruction) inst);
+        } else if (inst instanceof BranchInstruction) {
+            printBranchInstruction((BranchInstruction) inst);
+        } else if (inst instanceof PhiInstruction) {
+            printPhiInstruction((PhiInstruction) inst);
+        } else if (inst instanceof ConversionInstruction) {
+            printConversionInstruction((ConversionInstruction) inst);
+        } else {
+            out.print("unknown instruction");
+        }
+    }
+    
+    /**
+     * 打印二元运算指令
+     */
+    private void printBinaryInstruction(BinaryInstruction inst) {
+        out.print(inst.getOpcodeName().toLowerCase());
+        out.print(" ");
+        out.print(inst.getOperand(0).getType());
+        out.print(" ");
+        out.print(inst.getOperand(0).getName());
+        out.print(", ");
+        out.print(inst.getOperand(1).getName());
+    }
+    
+    /**
+     * 打印加载指令
+     */
+    private void printLoadInstruction(LoadInstruction inst) {
+        out.print("load ");
+        Value pointer = inst.getPointer();
+        Type pointedType = ((PointerType) pointer.getType()).getElementType();
+        out.print(pointedType);
+        out.print(", ");
+        out.print(pointer.getType());
+        out.print(" ");
+        out.print(pointer.getName());
+    }
+    
+    /**
+     * 打印存储指令
+     */
+    private void printStoreInstruction(StoreInstruction inst) {
+        out.print("store ");
+        Value value = inst.getValue();
+        Value pointer = inst.getPointer();
+        out.print(value.getType());
+        out.print(" ");
+        out.print(value.getName());
+        out.print(", ");
+        out.print(pointer.getType());
+        out.print(" ");
+        out.print(pointer.getName());
+    }
+    
+    /**
+     * 打印分配指令
+     */
+    private void printAllocaInstruction(AllocaInstruction inst) {
+        out.print("alloca ");
+        Type allocatedType = ((PointerType) inst.getType()).getElementType();
+        out.print(allocatedType);
+        
+        if (inst instanceof AllocaInstruction && ((AllocaInstruction)inst).getArraySize() > 0) {
+            out.print(", i32 ");
+            out.print(((AllocaInstruction)inst).getArraySize());
+        }
+    }
+    
+    /**
+     * 打印获取元素指针指令
+     */
+    private void printGetElementPtrInstruction(GetElementPtrInstruction inst) {
+        out.print("getelementptr ");
+        Value pointer = inst.getPointer();
+        Type pointedType = ((PointerType) pointer.getType()).getElementType();
+        out.print(pointedType);
+        out.print(", ");
+        out.print(pointer.getType());
+        out.print(" ");
+        out.print(pointer.getName());
+        
+        // 打印索引，这里简化处理，只考虑单个索引的情况
+        if (inst.getOperandCount() > 1) {
+            Value index = inst.getOperand(1);
+            out.print(", ");
+            out.print(index.getType());
+            out.print(" ");
+            out.print(index.getName());
+        }
+    }
+    
+    /**
+     * 打印函数调用指令
+     */
+    private void printCallInstruction(CallInstruction inst) {
+        out.print("call ");
+        Function callee = (Function)inst.getOperand(0);
+        out.print(callee.getReturnType());
+        out.print(" ");
+        out.print(callee.getName());
+        out.print("(");
+        
+        List<Value> args = inst.getOperands().subList(1, inst.getOperandCount());
+        for (int i = 0; i < args.size(); i++) {
+            if (i > 0) {
+                out.print(", ");
+            }
+            Value arg = args.get(i);
+            out.print(arg.getType());
+            out.print(" ");
+            out.print(arg.getName());
+        }
+        
+        out.print(")");
+    }
+    
+    /**
+     * 打印返回指令
+     */
+    private void printReturnInstruction(ReturnInstruction inst) {
+        out.print("ret ");
+        if (inst.getOperandCount() > 0) {
+            Value value = inst.getOperand(0);
+            out.print(value.getType());
+            out.print(" ");
+            out.print(value.getName());
+        } else {
+            out.print("void");
+        }
+    }
+    
+    /**
+     * 打印分支指令
+     */
+    private void printBranchInstruction(BranchInstruction inst) {
+        out.print("br ");
+        if (inst.getOperandCount() > 1) {
+            Value condition = inst.getOperand(0);
+            out.print(condition.getType());
+            out.print(" ");
+            out.print(condition.getName());
+            out.print(", label ");
+            out.print(((BasicBlock)inst.getOperand(1)).getName());
+            out.print(", label ");
+            out.print(((BasicBlock)inst.getOperand(2)).getName());
+        } else {
+            out.print("label ");
+            out.print(((BasicBlock)inst.getOperand(0)).getName());
+        }
+    }
+    
+    /**
+     * 打印Phi指令
+     */
+    private void printPhiInstruction(PhiInstruction inst) {
+        out.print("phi ");
+        out.print(inst.getType());
+        out.print(" ");
+        
+        // PhiInstruction的操作数是成对的，一个值对应一个基本块
+        // 这里简化处理，假设操作数列表中的每一项都是值
+        Map<BasicBlock, Value> incomingValues = ((PhiInstruction)inst).getIncomingValues();
+        int i = 0;
+        for (Map.Entry<BasicBlock, Value> entry : incomingValues.entrySet()) {
+            if (i > 0) {
+                out.print(", ");
+            }
+            out.print("[ ");
+            out.print(entry.getValue().getName());
+            out.print(", ");
+            out.print(entry.getKey().getName());
+            out.print(" ]");
+            i++;
+        }
+    }
+    
+    /**
+     * 打印类型转换指令
+     */
+    private void printConversionInstruction(ConversionInstruction inst) {
+        out.print(inst.getOpcodeName().toLowerCase());
+        out.print(" ");
+        out.print(inst.getOperand(0).getType());
+        out.print(" ");
+        out.print(inst.getOperand(0).getName());
+        out.print(" to ");
+        out.print(inst.getType());
+    }
+} 
