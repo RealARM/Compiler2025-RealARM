@@ -137,6 +137,7 @@ public class IRPrinter {
      * 打印基本块
      */
     private void printBasicBlock(BasicBlock bb) {
+        out.print("%");
         out.print(bb.getName());
         out.println(":");
         
@@ -340,12 +341,12 @@ public class IRPrinter {
             out.print(condition.getType());
             out.print(" ");
             out.print(printValueName(condition));
-            out.print(", label ");
+            out.print(", label %");
             out.print(((BasicBlock)inst.getOperand(1)).getName());
-            out.print(", label ");
+            out.print(", label %");
             out.print(((BasicBlock)inst.getOperand(2)).getName());
         } else {
-            out.print("label ");
+            out.print("label %");
             out.print(((BasicBlock)inst.getOperand(0)).getName());
         }
     }
@@ -367,7 +368,7 @@ public class IRPrinter {
             }
             out.print("[ ");
             out.print(printValueName(entry.getValue()));
-            out.print(", ");
+            out.print(", %");
             out.print(entry.getKey().getName());
             out.print(" ]");
             i++;
