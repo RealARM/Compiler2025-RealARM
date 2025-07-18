@@ -338,6 +338,9 @@ public class IRVisitor {
         Function function = IRBuilder.createFunction("@" + name, retType, module);
         currentFunction = function;
         
+        // 重置基本块计数器，确保每个函数的基本块名称都是唯一的
+        IRBuilder.resetBlockCounter();
+        
         // 添加到符号表
         addVariable(name, function);
         

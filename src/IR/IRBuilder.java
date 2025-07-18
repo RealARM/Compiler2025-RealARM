@@ -492,4 +492,11 @@ public class IRBuilder {
         
         return null; // 无法计算
     }
+
+    /**
+     * 重置基本块计数器
+     */
+    public static void resetBlockCounter() {
+        blockCounter = 0;
+    }
 } 
