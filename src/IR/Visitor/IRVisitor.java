@@ -319,70 +319,139 @@ public class IRVisitor {
      * 访问函数定义
      */
     private void visitFuncDef(SyntaxTree.FuncDef funcDef) {
-        // 获取返回值类型
-        String returnTypeName = funcDef.retType;
-        Type returnType = getType(returnTypeName);
+        String name = funcDef.name;
+        String retTypeStr = funcDef.retType;
+        
+        // 确定返回类型
+        Type retType;
+        switch (retTypeStr) {
+            case "int":
+                retType = IntegerType.I32;
+                break;
+            case "float":
+                retType = FloatType.F32;
+                break;
+            case "void":
+                retType = VoidType.VOID;
+                break;
+            default:
+                throw new RuntimeException("不支持的返回类型: " + retTypeStr);
+        }
         
         // 创建函数
-        String funcName = funcDef.name;
-        Function function = IRBuilder.createFunction("@" + funcName, returnType, module);
-        
-        // 设置当前处理的函数
+        Function function = IRBuilder.createFunction("@" + name, retType, module);
         currentFunction = function;
         
-        // 重置基本块计数器
+        // 重置基本块计数器，确保每个函数的基本块名称都是唯一的
         IRBuilder.resetBlockCounter();
         
-        // 新作用域
-        enterScope();
-        
-        // 添加函数到符号表
-        addVariable(funcName, function);
-        
-        // 添加参数
-        for (SyntaxTree.Param param : funcDef.params) {
-            processParam(param, function);
-        }
+        // 添加到符号表
+        addVariable(name, function);
         
         // 创建入口基本块
         BasicBlock entryBlock = IRBuilder.createBasicBlock(function);
         currentBlock = entryBlock;
         
-        // 为每个参数创建一个alloca，方便后续修改
-        for (Argument arg : function.getArguments()) {
-            AllocaInstruction alloca = IRBuilder.createAlloca(arg.getType(), currentBlock);
-            IRBuilder.createStore(arg, alloca, currentBlock);
-            
-            // 更新符号表，后续使用alloca而不是直接使用参数
-            addVariable(arg.getName(), alloca);
+        // 进入函数作用域
+        enterScope();
+        
+        // 处理参数
+        for (SyntaxTree.Param param : funcDef.params) {
+            processParam(param, function);
         }
         
-        // 访问函数体
+        // 处理函数体
         visitBlock(funcDef.body);
         
-        // 如果没有显式return，添加一个return 0或void
-        if (currentBlock != null && !currentBlock.hasTerminator()) {
-            if (returnType instanceof VoidType) {
-                IRBuilder.createReturn(currentBlock);
-            } else if (returnType instanceof IntegerType) {
-                IRBuilder.createReturn(new ConstantInt(0), currentBlock);
-            } else if (returnType instanceof FloatType) {
-                IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock);
+        // 确保函数有返回语句
+        if (currentBlock != null) {
+            if (!currentBlock.getInstructions().isEmpty()) {
+                Instruction lastInst = currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1);
+                if (!(lastInst instanceof ReturnInstruction)) {
+                    // 如果最后一条指令不是返回指令，添加一个默认的返回指令
+                    if (retType == VoidType.VOID) {
+                        IRBuilder.createReturn(currentBlock); // void返回
+                    } else if (retType == IntegerType.I32) {
+                        // 加载函数体中最后一个表达式的值作为返回值
+                        Value returnValue = null;
+                        
+                        // 尝试找到最后一个语句，如果是表达式语句，使用其结果作为返回值
+                        if (!funcDef.body.stmts.isEmpty()) {
+                            SyntaxTree.Stmt lastStmt = funcDef.body.stmts.get(funcDef.body.stmts.size() - 1);
+                            if (lastStmt instanceof SyntaxTree.ExprStmt) {
+                                visitExpr(((SyntaxTree.ExprStmt) lastStmt).expr);
+                                returnValue = currentValue;
+                            }
+                        }
+                        
+                        // 如果没有找到合适的返回值，返回0
+                        if (returnValue == null) {
+                            returnValue = new ConstantInt(0);
+                        }
+                        
+                        IRBuilder.createReturn(returnValue, currentBlock);
+                    } else if (retType == FloatType.F32) {
+                        IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock); // 返回0.0
+                    }
+                }
+            } else {
+                // 如果当前块是空的，添加一个默认的返回指令
+                if (retType == VoidType.VOID) {
+                    IRBuilder.createReturn(currentBlock); // void返回
+                } else if (retType == IntegerType.I32) {
+                    IRBuilder.createReturn(new ConstantInt(0), currentBlock); // 返回0
+                } else if (retType == FloatType.F32) {
+                    IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock); // 返回0.0
+                }
             }
         }
         
-        // 修复函数中所有的PHI节点，确保它们与前驱块匹配
-        fixupPhiNodes(function);
+        // 离开函数作用域
+        exitScope();
         
         // 清理不可达的基本块
         cleanupUnreachableBlocks(function);
         
-        // 离开作用域
-        exitScope();
-        
-        // 清空当前函数和基本块
-        currentFunction = null;
-        currentBlock = null;
+        // 检查所有基本块，确保它们都有终结指令
+        for (BasicBlock block : function.getBasicBlocks()) {
+            if (block.getInstructions().isEmpty()) {
+                // 空块添加跳转到下一个块或返回指令
+                if (function.getBasicBlocks().indexOf(block) < function.getBasicBlocks().size() - 1) {
+                    BasicBlock nextBlock = function.getBasicBlocks().get(function.getBasicBlocks().indexOf(block) + 1);
+                    IRBuilder.createBr(nextBlock, block);
+                } else {
+                    // 最后一个块添加返回指令
+                    if (retType == VoidType.VOID) {
+                        IRBuilder.createReturn(block);
+                    } else if (retType == IntegerType.I32) {
+                        IRBuilder.createReturn(new ConstantInt(0), block);
+                    } else if (retType == FloatType.F32) {
+                        IRBuilder.createReturn(new ConstantFloat(0.0f), block);
+                    }
+                }
+            } else {
+                Instruction lastInst = block.getInstructions().get(block.getInstructions().size() - 1);
+                if (!(lastInst instanceof TerminatorInstruction)) {
+                    // 非空块但没有终结指令，添加跳转到下一个块或返回指令
+                    if (function.getBasicBlocks().indexOf(block) < function.getBasicBlocks().size() - 1) {
+                        BasicBlock nextBlock = function.getBasicBlocks().get(function.getBasicBlocks().indexOf(block) + 1);
+                        IRBuilder.createBr(nextBlock, block);
+                    } else {
+                        // 最后一个块添加返回指令
+                        if (retType == VoidType.VOID) {
+                            IRBuilder.createReturn(block);
+                        } else if (retType == IntegerType.I32) {
+                            IRBuilder.createReturn(new ConstantInt(0), block);
+                        } else if (retType == FloatType.F32) {
+                            IRBuilder.createReturn(new ConstantFloat(0.0f), block);
+                        }
+                    }
+                }
+            }
+        }
+
+        // 验证所有PHI节点的前驱关系
+        IRBuilder.validateAllPhiNodes(function);
     }
     
     /**
@@ -1331,13 +1400,13 @@ public class IRVisitor {
             if (leftValue.getType() instanceof FloatType || rightValue.getType() instanceof FloatType) {
                 compareType = OpCode.FCMP;
                 predicate = getFloatPredicate(op);
-            } else {
+                    } else {
                 compareType = OpCode.ICMP;
                 predicate = getIntPredicate(op);
             }
             
             currentValue = IRBuilder.createCompare(compareType, predicate, leftValue, rightValue, currentBlock);
-        } else {
+                    } else {
             // 确定操作码
             OpCode opCode = getOpCodeForBinaryOp(op);
             
@@ -1369,9 +1438,8 @@ public class IRVisitor {
         // 如果左边为假，短路到合并块；否则继续计算右边
         IRBuilder.createCondBr(leftValue, rightBlock, mergeBlock, currentBlock);
         
-        // 显式设置块的前驱后继关系
+        // 设置前驱关系
         mergeBlock.addPredecessor(leftBlock);
-        rightBlock.addPredecessor(leftBlock);
         
         // 求值右操作数
         currentBlock = rightBlock;
@@ -1399,9 +1467,6 @@ public class IRVisitor {
         // 右边计算结果作为整体结果
         phi.addIncoming(rightValue, rightResultBlock);
         
-        // 确保PHI节点与前驱匹配
-        phi.syncWithPredecessors();
-        
         currentValue = phi;
     }
     
@@ -1428,9 +1493,8 @@ public class IRVisitor {
         // 如果左边为真，短路到合并块；否则继续计算右边
         IRBuilder.createCondBr(leftValue, mergeBlock, rightBlock, currentBlock);
         
-        // 显式设置块的前驱后继关系
+        // 设置前驱关系
         mergeBlock.addPredecessor(leftBlock);
-        rightBlock.addPredecessor(leftBlock);
         
         // 求值右操作数
         currentBlock = rightBlock;
@@ -1457,9 +1521,6 @@ public class IRVisitor {
         phi.addIncoming(new ConstantInt(1, IntegerType.I1), leftBlock);
         // 右边计算结果作为整体结果
         phi.addIncoming(rightValue, rightResultBlock);
-        
-        // 确保PHI节点与前驱匹配
-        phi.syncWithPredecessors();
         
         currentValue = phi;
     }
@@ -1791,18 +1852,5 @@ public class IRVisitor {
     private void exitScope() {
         symbolTables.remove(symbolTables.size() - 1);
         arrayDimensions.remove(arrayDimensions.size() - 1);
-    }
-    
-    /**
-     * 修复函数中所有PHI节点，确保它们与前驱块匹配
-     */
-    private void fixupPhiNodes(Function function) {
-        for (BasicBlock block : function.getBasicBlocks()) {
-            for (Instruction inst : new ArrayList<>(block.getInstructions())) {
-                if (inst instanceof PhiInstruction phi) {
-                    phi.syncWithPredecessors();
-                }
-            }
-        }
     }
 } 

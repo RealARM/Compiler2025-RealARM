@@ -4,10 +4,8 @@ import IR.OpCode;
 import IR.Type.Type;
 import IR.Value.BasicBlock;
 import IR.Value.Value;
-import IR.Type.IntegerType;
 import IR.Value.ConstantInt;
-import IR.Type.FloatType;
-import IR.Value.ConstantFloat;
+import IR.Type.IntegerType;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -115,50 +113,52 @@ public class PhiInstruction extends Instruction {
     }
     
     /**
-     * 确保PHI节点的输入与基本块的前驱匹配
-     */
-    public void syncWithPredecessors() {
-        if (getParent() == null) return;
-        
-        List<BasicBlock> predecessors = getParent().getPredecessors();
-        Map<BasicBlock, Value> newIncoming = new HashMap<>();
-        
-        // 为每个前驱块找到对应的值，或使用默认值
-        for (BasicBlock pred : predecessors) {
-            if (incomingValues.containsKey(pred)) {
-                // 保留已有的输入值
-                newIncoming.put(pred, incomingValues.get(pred));
-            } else {
-                // 添加默认值（0）
-                Value defaultValue;
-                if (getType() instanceof IntegerType) {
-                    defaultValue = new ConstantInt(0, (IntegerType)getType());
-                } else if (getType() instanceof FloatType) {
-                    defaultValue = new ConstantFloat(0.0f);
-                } else {
-                    // 对于其他类型，使用null作为默认值
-                    continue;
-                }
-                newIncoming.put(pred, defaultValue);
-            }
-        }
-        
-        // 清除所有操作数
-        removeAllOperands();
-        incomingValues.clear();
-        
-        // 添加新的输入值
-        for (Map.Entry<BasicBlock, Value> entry : newIncoming.entrySet()) {
-            addIncoming(entry.getValue(), entry.getKey());
-        }
-    }
-    
-    /**
      * 移除所有操作数
      */
     @Override
     public void removeAllOperands() {
         super.removeAllOperands();
+    }
+    
+    /**
+     * 验证并修复PHI节点的前驱关系
+     * 确保PHI节点的前驱与基本块的实际前驱匹配
+     */
+    public void validatePredecessors() {
+        if (getParent() == null) return;
+        
+        List<BasicBlock> actualPreds = getParent().getPredecessors();
+        List<BasicBlock> phiPreds = getIncomingBlocks();
+        
+        // 如果PHI节点前驱与实际基本块前驱不匹配，修复它们
+        if (!phiPreds.containsAll(actualPreds) || !actualPreds.containsAll(phiPreds)) {
+            // 1. 保留所有与实际前驱匹配的输入
+            Map<BasicBlock, Value> validIncoming = new HashMap<>();
+            for (Map.Entry<BasicBlock, Value> entry : incomingValues.entrySet()) {
+                if (actualPreds.contains(entry.getKey())) {
+                    validIncoming.put(entry.getKey(), entry.getValue());
+                }
+            }
+            
+            // 2. 为缺失的前驱添加默认值
+            for (BasicBlock pred : actualPreds) {
+                if (!incomingValues.containsKey(pred)) {
+                    // 添加默认值 (0或false)
+                    Value defaultValue = getType().toString().equals("i1") ? 
+                        new ConstantInt(0, IntegerType.I1) : new ConstantInt(0);
+                    validIncoming.put(pred, defaultValue);
+                }
+            }
+            
+            // 3. 重置所有操作数
+            removeAllOperands();
+            incomingValues.clear();
+            
+            // 4. 添加修复后的输入
+            for (Map.Entry<BasicBlock, Value> entry : validIncoming.entrySet()) {
+                addIncoming(entry.getValue(), entry.getKey());
+            }
+        }
     }
     
     @Override
