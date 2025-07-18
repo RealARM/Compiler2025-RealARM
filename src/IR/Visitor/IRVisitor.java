@@ -957,14 +957,51 @@ public class IRVisitor {
             
             // 特殊处理嵌套的if-else结构
             if (stmt.elseBranch instanceof SyntaxTree.IfStmt) {
-                // 如果else分支是一个if语句，我们需要特殊处理这个if-else-if结构
-                visitIfStmt((SyntaxTree.IfStmt) stmt.elseBranch);
+                // 创建一个新的合并块，用于嵌套if语句的结束
+                BasicBlock nestedMergeBlock = IRBuilder.createBasicBlock(currentFunction);
                 
-                // 确保控制流最终会到达合并块
+                // 处理嵌套的if语句
+                SyntaxTree.IfStmt nestedIf = (SyntaxTree.IfStmt) stmt.elseBranch;
+                
+                // 条件求值
+                visitExpr(nestedIf.cond);
+                Value nestedCondValue = convertToBoolean(currentValue);
+                
+                // 创建嵌套if的then和else块
+                BasicBlock nestedThenBlock = IRBuilder.createBasicBlock(currentFunction);
+                BasicBlock nestedElseBlock = nestedIf.elseBranch != null ? 
+                                           IRBuilder.createBasicBlock(currentFunction) : nestedMergeBlock;
+                
+                // 条件分支
+                IRBuilder.createCondBr(nestedCondValue, nestedThenBlock, nestedElseBlock, currentBlock);
+                
+                // 处理嵌套if的then分支
+                currentBlock = nestedThenBlock;
+                visitStmt(nestedIf.thenBranch);
+                
+                // 添加跳转到嵌套合并块
                 if (!currentBlock.getInstructions().isEmpty() && 
                     !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
-                    IRBuilder.createBr(mergeBlock, currentBlock);
+                    IRBuilder.createBr(nestedMergeBlock, currentBlock);
                 }
+                
+                // 处理嵌套if的else分支（如果有）
+                if (nestedIf.elseBranch != null) {
+                    currentBlock = nestedElseBlock;
+                    visitStmt(nestedIf.elseBranch);
+                    
+                    // 添加跳转到嵌套合并块
+                    if (!currentBlock.getInstructions().isEmpty() && 
+                        !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+                        IRBuilder.createBr(nestedMergeBlock, currentBlock);
+                    }
+                }
+                
+                // 继续在嵌套合并块生成代码
+                currentBlock = nestedMergeBlock;
+                
+                // 从嵌套合并块跳转到外层合并块
+                IRBuilder.createBr(mergeBlock, currentBlock);
             } else {
                 // 普通else分支
                 visitStmt(stmt.elseBranch);
@@ -1321,7 +1358,7 @@ public class IRVisitor {
         visitExpr(left);
         Value leftValue = convertToBoolean(currentValue);
         
-        // 如果左边为假，短路到结果块
+        // 如果左边为假，短路到合并块；否则继续计算右边
         IRBuilder.createCondBr(leftValue, rightBlock, mergeBlock, currentBlock);
         
         // 求值右操作数
