@@ -1,6 +1,12 @@
 package IR;
 
-import IR.Type.*;
+import IR.Module;
+import IR.OpCode;
+import IR.Type.FloatType;
+import IR.Type.IntegerType;
+import IR.Type.PointerType;
+import IR.Type.Type;
+import IR.Type.VoidType;
 import IR.Value.*;
 import IR.Value.Instructions.*;
 
@@ -183,11 +189,18 @@ public class IRBuilder {
     }
     
     /**
+     * 创建一个二元运算指令，但不添加到基本块
+     */
+    public static BinaryInstruction createBinaryInstOnly(OpCode opCode, Value left, Value right) {
+        String name = opCode.getName() + "_" + tmpCounter++;
+        return new BinaryInstruction(opCode, left, right, left.getType());
+    }
+    
+    /**
      * 创建一个二元运算指令
      */
     public static BinaryInstruction createBinaryInst(OpCode opCode, Value left, Value right, BasicBlock block) {
-        String name = opCode.getName() + "_" + tmpCounter++;
-        BinaryInstruction inst = new BinaryInstruction(opCode, left, right, left.getType());
+        BinaryInstruction inst = createBinaryInstOnly(opCode, left, right);
         block.addInstruction(inst);
         return inst;
     }

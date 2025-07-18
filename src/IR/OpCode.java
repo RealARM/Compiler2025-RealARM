@@ -14,6 +14,7 @@ public enum OpCode {
     MUL("mul"),            // 整数乘法
     DIV("div"),            // 整数除法
     REM("rem"),            // 整数余数
+    NEG("neg"),            // 一元负号
     
     // 浮点运算指令
     FADD("fadd"),          // 浮点加法

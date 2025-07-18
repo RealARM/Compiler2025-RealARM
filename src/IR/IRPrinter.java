@@ -149,12 +149,36 @@ public class IRPrinter {
     }
     
     /**
+     * 打印变量名，为局部变量添加%前缀
+     */
+    private String printValueName(Value value) {
+        String name = value.getName();
+        
+        // 全局变量和函数已经有@前缀，不需要添加%
+        if (name.startsWith("@")) {
+            return name;
+        }
+        
+        // 数字常量不需要前缀
+        if (value instanceof Constant) {
+            return name;
+        }
+        
+        // 局部变量添加%前缀
+        if (!name.startsWith("%")) {
+            return "%" + name;
+        }
+        
+        return name;
+    }
+
+    /**
      * 打印指令
      */
     private void printInstruction(Instruction inst) {
         // 如果指令有结果值，打印赋值
         if (!(inst instanceof StoreInstruction || inst instanceof BranchInstruction || inst instanceof ReturnInstruction)) {
-            out.print(inst.getName());
+            out.print(printValueName(inst));
             out.print(" = ");
         }
         
@@ -192,9 +216,9 @@ public class IRPrinter {
         out.print(" ");
         out.print(inst.getOperand(0).getType());
         out.print(" ");
-        out.print(inst.getOperand(0).getName());
+        out.print(printValueName(inst.getOperand(0)));
         out.print(", ");
-        out.print(inst.getOperand(1).getName());
+        out.print(printValueName(inst.getOperand(1)));
     }
     
     /**
@@ -208,7 +232,7 @@ public class IRPrinter {
         out.print(", ");
         out.print(pointer.getType());
         out.print(" ");
-        out.print(pointer.getName());
+        out.print(printValueName(pointer));
     }
     
     /**
@@ -220,11 +244,11 @@ public class IRPrinter {
         Value pointer = inst.getPointer();
         out.print(value.getType());
         out.print(" ");
-        out.print(value.getName());
+        out.print(printValueName(value));
         out.print(", ");
         out.print(pointer.getType());
         out.print(" ");
-        out.print(pointer.getName());
+        out.print(printValueName(pointer));
     }
     
     /**
@@ -252,7 +276,7 @@ public class IRPrinter {
         out.print(", ");
         out.print(pointer.getType());
         out.print(" ");
-        out.print(pointer.getName());
+        out.print(printValueName(pointer));
         
         // 打印索引，这里简化处理，只考虑单个索引的情况
         if (inst.getOperandCount() > 1) {
@@ -260,7 +284,7 @@ public class IRPrinter {
             out.print(", ");
             out.print(index.getType());
             out.print(" ");
-            out.print(index.getName());
+            out.print(printValueName(index));
         }
     }
     
@@ -283,7 +307,7 @@ public class IRPrinter {
             Value arg = args.get(i);
             out.print(arg.getType());
             out.print(" ");
-            out.print(arg.getName());
+            out.print(printValueName(arg));
         }
         
         out.print(")");
@@ -298,7 +322,7 @@ public class IRPrinter {
             Value value = inst.getOperand(0);
             out.print(value.getType());
             out.print(" ");
-            out.print(value.getName());
+            out.print(printValueName(value));
         } else {
             out.print("void");
         }
@@ -313,7 +337,7 @@ public class IRPrinter {
             Value condition = inst.getOperand(0);
             out.print(condition.getType());
             out.print(" ");
-            out.print(condition.getName());
+            out.print(printValueName(condition));
             out.print(", label ");
             out.print(((BasicBlock)inst.getOperand(1)).getName());
             out.print(", label ");
@@ -333,7 +357,6 @@ public class IRPrinter {
         out.print(" ");
         
         // PhiInstruction的操作数是成对的，一个值对应一个基本块
-        // 这里简化处理，假设操作数列表中的每一项都是值
         Map<BasicBlock, Value> incomingValues = ((PhiInstruction)inst).getIncomingValues();
         int i = 0;
         for (Map.Entry<BasicBlock, Value> entry : incomingValues.entrySet()) {
@@ -341,7 +364,7 @@ public class IRPrinter {
                 out.print(", ");
             }
             out.print("[ ");
-            out.print(entry.getValue().getName());
+            out.print(printValueName(entry.getValue()));
             out.print(", ");
             out.print(entry.getKey().getName());
             out.print(" ]");
@@ -350,14 +373,14 @@ public class IRPrinter {
     }
     
     /**
-     * 打印类型转换指令
+     * 打印转换指令
      */
     private void printConversionInstruction(ConversionInstruction inst) {
         out.print(inst.getOpcodeName().toLowerCase());
         out.print(" ");
-        out.print(inst.getOperand(0).getType());
+        out.print(inst.getSource().getType());
         out.print(" ");
-        out.print(inst.getOperand(0).getName());
+        out.print(printValueName(inst.getSource()));
         out.print(" to ");
         out.print(inst.getType());
     }
