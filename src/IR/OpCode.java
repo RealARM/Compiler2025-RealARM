@@ -13,7 +13,7 @@ public enum OpCode {
     SUB("sub"),            // 整数减法
     MUL("mul"),            // 整数乘法
     DIV("div"),            // 整数除法
-    REM("rem"),            // 整数余数
+    REM("srem"),           // 整数余数（有符号）
     NEG("neg"),            // 一元负号
     
     // 浮点运算指令
