@@ -73,7 +73,7 @@ public class GlobalVariable extends Value {
      * 判断是否有初始值
      */
     public boolean hasInitializer() {
-        return initializer != null || !arrayValues.isEmpty();
+        return initializer != null || (arrayValues != null && !arrayValues.isEmpty());
     }
     
     /**
