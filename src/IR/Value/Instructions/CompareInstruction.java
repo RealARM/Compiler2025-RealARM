@@ -11,6 +11,9 @@ public class CompareInstruction extends Instruction {
     private final OpCode compareType; // 比较类型：icmp或fcmp
     private final OpCode predicate;   // 比较谓词：eq, ne, sgt等
     
+    // 为比较指令名称添加计数器
+    private static int nameCounter = 0;
+    
     /**
      * 创建一个比较指令
      */
@@ -104,6 +107,6 @@ public class CompareInstruction extends Instruction {
      * 生成指令名称
      */
     private static String getInstructionName(OpCode compareType, OpCode predicate) {
-        return compareType.getName() + "_" + predicate.getName() + "_result";
+        return compareType.getName() + "_" + predicate.getName() + "_result_" + nameCounter++;
     }
 } 
