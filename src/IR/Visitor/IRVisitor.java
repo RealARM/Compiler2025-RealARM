@@ -360,10 +360,38 @@ public class IRVisitor {
         visitBlock(funcDef.body);
         
         // 确保函数有返回语句
-        if (currentBlock != null && !currentBlock.getInstructions().isEmpty()) {
-            Instruction lastInst = currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1);
-            if (!(lastInst instanceof ReturnInstruction)) {
-                // 如果最后一条指令不是返回指令，添加一个默认的返回指令
+        if (currentBlock != null) {
+            if (!currentBlock.getInstructions().isEmpty()) {
+                Instruction lastInst = currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1);
+                if (!(lastInst instanceof ReturnInstruction)) {
+                    // 如果最后一条指令不是返回指令，添加一个默认的返回指令
+                    if (retType == VoidType.VOID) {
+                        IRBuilder.createReturn(currentBlock); // void返回
+                    } else if (retType == IntegerType.I32) {
+                        // 加载函数体中最后一个表达式的值作为返回值
+                        Value returnValue = null;
+                        
+                        // 尝试找到最后一个语句，如果是表达式语句，使用其结果作为返回值
+                        if (!funcDef.body.stmts.isEmpty()) {
+                            SyntaxTree.Stmt lastStmt = funcDef.body.stmts.get(funcDef.body.stmts.size() - 1);
+                            if (lastStmt instanceof SyntaxTree.ExprStmt) {
+                                visitExpr(((SyntaxTree.ExprStmt) lastStmt).expr);
+                                returnValue = currentValue;
+                            }
+                        }
+                        
+                        // 如果没有找到合适的返回值，返回0
+                        if (returnValue == null) {
+                            returnValue = new ConstantInt(0);
+                        }
+                        
+                        IRBuilder.createReturn(returnValue, currentBlock);
+                    } else if (retType == FloatType.F32) {
+                        IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock); // 返回0.0
+                    }
+                }
+            } else {
+                // 如果当前块是空的，添加一个默认的返回指令
                 if (retType == VoidType.VOID) {
                     IRBuilder.createReturn(currentBlock); // void返回
                 } else if (retType == IntegerType.I32) {
@@ -372,15 +400,6 @@ public class IRVisitor {
                     IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock); // 返回0.0
                 }
             }
-        } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
-            // 如果当前块是空的，添加一个默认的返回指令
-            if (retType == VoidType.VOID) {
-                IRBuilder.createReturn(currentBlock); // void返回
-            } else if (retType == IntegerType.I32) {
-                IRBuilder.createReturn(new ConstantInt(0), currentBlock); // 返回0
-            } else if (retType == FloatType.F32) {
-                IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock); // 返回0.0
-            }
         }
         
         // 离开函数作用域
@@ -388,6 +407,44 @@ public class IRVisitor {
         
         // 清理不可达的基本块
         cleanupUnreachableBlocks(function);
+        
+        // 检查所有基本块，确保它们都有终结指令
+        for (BasicBlock block : function.getBasicBlocks()) {
+            if (block.getInstructions().isEmpty()) {
+                // 空块添加跳转到下一个块或返回指令
+                if (function.getBasicBlocks().indexOf(block) < function.getBasicBlocks().size() - 1) {
+                    BasicBlock nextBlock = function.getBasicBlocks().get(function.getBasicBlocks().indexOf(block) + 1);
+                    IRBuilder.createBr(nextBlock, block);
+                } else {
+                    // 最后一个块添加返回指令
+                    if (retType == VoidType.VOID) {
+                        IRBuilder.createReturn(block);
+                    } else if (retType == IntegerType.I32) {
+                        IRBuilder.createReturn(new ConstantInt(0), block);
+                    } else if (retType == FloatType.F32) {
+                        IRBuilder.createReturn(new ConstantFloat(0.0f), block);
+                    }
+                }
+            } else {
+                Instruction lastInst = block.getInstructions().get(block.getInstructions().size() - 1);
+                if (!(lastInst instanceof TerminatorInstruction)) {
+                    // 非空块但没有终结指令，添加跳转到下一个块或返回指令
+                    if (function.getBasicBlocks().indexOf(block) < function.getBasicBlocks().size() - 1) {
+                        BasicBlock nextBlock = function.getBasicBlocks().get(function.getBasicBlocks().indexOf(block) + 1);
+                        IRBuilder.createBr(nextBlock, block);
+                    } else {
+                        // 最后一个块添加返回指令
+                        if (retType == VoidType.VOID) {
+                            IRBuilder.createReturn(block);
+                        } else if (retType == IntegerType.I32) {
+                            IRBuilder.createReturn(new ConstantInt(0), block);
+                        } else if (retType == FloatType.F32) {
+                            IRBuilder.createReturn(new ConstantFloat(0.0f), block);
+                        }
+                    }
+                }
+            }
+        }
     }
     
     /**
@@ -1004,11 +1061,53 @@ public class IRVisitor {
         
         // 处理then分支
         currentBlock = thenBlock;
-        visitStmt(stmt.thenBranch);
-        // 如果当前块没有终结指令，添加跳转到合并块的指令
-        if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
-            !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+        if (stmt.thenBranch instanceof SyntaxTree.IfStmt) {
+            // 如果then分支是一个if语句，需要特殊处理
+            SyntaxTree.IfStmt nestedIf = (SyntaxTree.IfStmt) stmt.thenBranch;
+            
+            // 创建嵌套if的基本块
+            BasicBlock nestedThenBlock = IRBuilder.createBasicBlock(currentFunction);
+            BasicBlock nestedElseBlock = IRBuilder.createBasicBlock(currentFunction);
+            BasicBlock nestedMergeBlock = IRBuilder.createBasicBlock(currentFunction);
+            
+            // 条件求值
+            visitExpr(nestedIf.cond);
+            Value nestedCondValue = convertToBoolean(currentValue);
+            
+            // 条件分支
+            IRBuilder.createCondBr(nestedCondValue, nestedThenBlock, nestedElseBlock, currentBlock);
+            
+            // 处理嵌套if的then分支
+            currentBlock = nestedThenBlock;
+            visitStmt(nestedIf.thenBranch);
+            if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
+                !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+                IRBuilder.createBr(nestedMergeBlock, currentBlock);
+            }
+            
+            // 处理嵌套if的else分支
+            currentBlock = nestedElseBlock;
+            if (nestedIf.elseBranch != null) {
+                visitStmt(nestedIf.elseBranch);
+            }
+            if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
+                !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+                IRBuilder.createBr(nestedMergeBlock, currentBlock);
+            } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
+                IRBuilder.createBr(nestedMergeBlock, currentBlock);
+            }
+            
+            // 从嵌套合并块跳转到外层合并块
+            currentBlock = nestedMergeBlock;
             IRBuilder.createBr(mergeBlock, currentBlock);
+        } else {
+            // 普通then分支
+            visitStmt(stmt.thenBranch);
+            // 如果当前块没有终结指令，添加跳转到合并块的指令
+            if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
+                !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+                IRBuilder.createBr(mergeBlock, currentBlock);
+            }
         }
         
         // 处理else分支
