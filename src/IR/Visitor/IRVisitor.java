@@ -1274,13 +1274,13 @@ public class IRVisitor {
             if (leftValue.getType() instanceof FloatType || rightValue.getType() instanceof FloatType) {
                 compareType = OpCode.FCMP;
                 predicate = getFloatPredicate(op);
-            } else {
+                    } else {
                 compareType = OpCode.ICMP;
                 predicate = getIntPredicate(op);
             }
             
             currentValue = IRBuilder.createCompare(compareType, predicate, leftValue, rightValue, currentBlock);
-        } else {
+                    } else {
             // 确定操作码
             OpCode opCode = getOpCodeForBinaryOp(op);
             
@@ -1293,24 +1293,36 @@ public class IRVisitor {
      * 处理逻辑与(&&)，实现短路评估
      */
     private void visitLogicalAnd(SyntaxTree.Expr left, SyntaxTree.Expr right) {
-        // 创建基本块
-        BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
+        // 创建三个基本块：计算右操作数的块、结果为真的块、结果为假的块、合并结果的块
+        BasicBlock computeRightBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock trueBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock falseBlock = IRBuilder.createBasicBlock(currentFunction);
         BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
         
-        // 记住左值计算的基本块
-        BasicBlock leftBlock = currentBlock;
+        // 保存当前块，用于Phi指令
+        BasicBlock originalBlock = currentBlock;
         
         // 求值左操作数
         visitExpr(left);
         Value leftValue = convertToBoolean(currentValue);
         
-        // 如果左边为假，短路到合并块；否则继续计算右边
-        IRBuilder.createCondBr(leftValue, rightBlock, mergeBlock, currentBlock);
+        // 如果左边为假，短路到假块；否则继续计算右边
+        IRBuilder.createCondBr(leftValue, computeRightBlock, falseBlock, currentBlock);
         
-        // 求值右操作数
-        currentBlock = rightBlock;
+        // 计算右操作数
+        currentBlock = computeRightBlock;
         visitExpr(right);
         Value rightValue = convertToBoolean(currentValue);
+        
+        // 根据右操作数的值跳转到真块或假块
+        IRBuilder.createCondBr(rightValue, trueBlock, falseBlock, currentBlock);
+        
+        // 真块：结果为真(1)
+        currentBlock = trueBlock;
+        IRBuilder.createBr(mergeBlock, currentBlock);
+        
+        // 假块：结果为假(0)
+        currentBlock = falseBlock;
         IRBuilder.createBr(mergeBlock, currentBlock);
         
         // 合并结果
@@ -1318,10 +1330,8 @@ public class IRVisitor {
         
         // 创建phi节点
         PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, currentBlock);
-        // 左边为假时，结果为假(0)
-        phi.addIncoming(new ConstantInt(0), leftBlock);
-        // 右边计算结果作为整体结果
-        phi.addIncoming(rightValue, rightBlock);
+        phi.addIncoming(new ConstantInt(1), trueBlock);
+        phi.addIncoming(new ConstantInt(0), falseBlock);
         
         currentValue = phi;
     }
@@ -1330,24 +1340,36 @@ public class IRVisitor {
      * 处理逻辑或(||)，实现短路评估
      */
     private void visitLogicalOr(SyntaxTree.Expr left, SyntaxTree.Expr right) {
-        // 创建基本块
-        BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
+        // 创建三个基本块：计算右操作数的块、结果为真的块、结果为假的块、合并结果的块
+        BasicBlock computeRightBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock trueBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock falseBlock = IRBuilder.createBasicBlock(currentFunction);
         BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
         
-        // 记住左值计算的基本块
-        BasicBlock leftBlock = currentBlock;
+        // 保存当前块，用于Phi指令
+        BasicBlock originalBlock = currentBlock;
         
         // 求值左操作数
         visitExpr(left);
         Value leftValue = convertToBoolean(currentValue);
         
-        // 如果左边为真，短路到合并块；否则继续计算右边
-        IRBuilder.createCondBr(leftValue, mergeBlock, rightBlock, currentBlock);
+        // 如果左边为真，短路到真块；否则继续计算右边
+        IRBuilder.createCondBr(leftValue, trueBlock, computeRightBlock, currentBlock);
         
-        // 求值右操作数
-        currentBlock = rightBlock;
+        // 计算右操作数
+        currentBlock = computeRightBlock;
         visitExpr(right);
         Value rightValue = convertToBoolean(currentValue);
+        
+        // 根据右操作数的值跳转到真块或假块
+        IRBuilder.createCondBr(rightValue, trueBlock, falseBlock, currentBlock);
+        
+        // 真块：结果为真(1)
+        currentBlock = trueBlock;
+        IRBuilder.createBr(mergeBlock, currentBlock);
+        
+        // 假块：结果为假(0)
+        currentBlock = falseBlock;
         IRBuilder.createBr(mergeBlock, currentBlock);
         
         // 合并结果
@@ -1355,10 +1377,8 @@ public class IRVisitor {
         
         // 创建phi节点
         PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, currentBlock);
-        // 左边为真时，结果为真(1)
-        phi.addIncoming(new ConstantInt(1), leftBlock);
-        // 右边计算结果作为整体结果
-        phi.addIncoming(rightValue, rightBlock);
+        phi.addIncoming(new ConstantInt(1), trueBlock);
+        phi.addIncoming(new ConstantInt(0), falseBlock);
         
         currentValue = phi;
     }
