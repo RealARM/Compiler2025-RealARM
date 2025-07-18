@@ -25,6 +25,21 @@ public class LoadInstruction extends Instruction {
     }
     
     /**
+     * 创建一个加载指令，指定加载的类型
+     */
+    public LoadInstruction(Value pointer, Type pointedType, String name) {
+        super(name, pointedType);
+        
+        // 检查类型
+        if (!(pointer.getType() instanceof PointerType)) {
+            throw new IllegalArgumentException("加载指令必须从指针类型加载");
+        }
+        
+        // 添加操作数（指针）
+        addOperand(pointer);
+    }
+    
+    /**
      * 获取指针操作数
      */
     public Value getPointer() {

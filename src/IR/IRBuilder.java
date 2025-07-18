@@ -112,12 +112,27 @@ public class IRBuilder {
     }
     
     /**
+     * 创建一个加载指令
+     */
+    public static LoadInstruction createLoad(Value pointer, BasicBlock block) {
+        String name = "load_" + tmpCounter++;
+        Type pointedType = ((PointerType) pointer.getType()).getElementType();
+        LoadInstruction inst = new LoadInstruction(pointer, pointedType, name);
+        if (block != null) {
+            block.addInstruction(inst);
+        }
+        return inst;
+    }
+    
+    /**
      * 创建一个分配指令
      */
     public static AllocaInstruction createAlloca(Type type, BasicBlock block) {
         String name = "alloca_" + tmpCounter++;
-        AllocaInstruction inst = new AllocaInstruction(type, name);
-        block.addInstruction(inst);
+        AllocaInstruction inst = new AllocaInstruction(new PointerType(type), name);
+        if (block != null) {
+            block.addInstruction(inst);
+        }
         return inst;
     }
     
@@ -126,18 +141,10 @@ public class IRBuilder {
      */
     public static AllocaInstruction createArrayAlloca(Type elementType, int size, BasicBlock block) {
         String name = "array_alloca_" + tmpCounter++;
-        AllocaInstruction inst = new AllocaInstruction(elementType, size, name);
-        block.addInstruction(inst);
-        return inst;
-    }
-    
-    /**
-     * 创建一个加载指令
-     */
-    public static LoadInstruction createLoad(Value pointer, BasicBlock block) {
-        String name = "load_" + tmpCounter++;
-        LoadInstruction inst = new LoadInstruction(pointer, name);
-        block.addInstruction(inst);
+        AllocaInstruction inst = new AllocaInstruction(new PointerType(elementType), size, name);
+        if (block != null) {
+            block.addInstruction(inst);
+        }
         return inst;
     }
     
@@ -192,7 +199,7 @@ public class IRBuilder {
      * 创建一个二元运算指令，但不添加到基本块
      */
     public static BinaryInstruction createBinaryInstOnly(OpCode opCode, Value left, Value right) {
-        String name = opCode.getName() + "_" + tmpCounter++;
+        String name = opCode.getName().toLowerCase() + "_" + tmpCounter++;
         return new BinaryInstruction(opCode, left, right, left.getType());
     }
     
@@ -209,9 +216,11 @@ public class IRBuilder {
      * 创建一个比较指令
      */
     public static CompareInstruction createCompare(OpCode compareType, OpCode predicate, Value left, Value right, BasicBlock block) {
-        String name = compareType.getName() + "_" + predicate.getName() + "_" + tmpCounter++;
+        String name = compareType.getName().toLowerCase() + "_" + predicate.getName().toLowerCase() + "_" + tmpCounter++;
         CompareInstruction inst = new CompareInstruction(compareType, predicate, left, right);
-        block.addInstruction(inst);
+        if (block != null) {
+            block.addInstruction(inst);
+        }
         return inst;
     }
     
@@ -274,7 +283,9 @@ public class IRBuilder {
     public static CallInstruction createCall(Function callee, List<Value> arguments, BasicBlock block) {
         String name = "call_" + tmpCounter++;
         CallInstruction inst = new CallInstruction(callee, arguments, name);
-        block.addInstruction(inst);
+        if (block != null) {
+            block.addInstruction(inst);
+        }
         return inst;
     }
     
@@ -284,7 +295,9 @@ public class IRBuilder {
     public static PhiInstruction createPhi(Type type, BasicBlock block) {
         String name = "phi_" + tmpCounter++;
         PhiInstruction inst = new PhiInstruction(type, name);
-        block.addInstructionFirst(inst);
+        if (block != null) {
+            block.addInstructionFirst(inst);
+        }
         return inst;
     }
     
@@ -294,7 +307,9 @@ public class IRBuilder {
     public static GetElementPtrInstruction createGetElementPtr(Value pointer, Value index, BasicBlock block) {
         String name = "gep_" + tmpCounter++;
         GetElementPtrInstruction inst = new GetElementPtrInstruction(pointer, index, name);
-        block.addInstruction(inst);
+        if (block != null) {
+            block.addInstruction(inst);
+        }
         return inst;
     }
     
@@ -304,7 +319,9 @@ public class IRBuilder {
     public static GetElementPtrInstruction createGetElementPtr(Value pointer, List<Value> indices, BasicBlock block) {
         String name = "gep_" + tmpCounter++;
         GetElementPtrInstruction inst = new GetElementPtrInstruction(pointer, indices, name);
-        block.addInstruction(inst);
+        if (block != null) {
+            block.addInstruction(inst);
+        }
         return inst;
     }
     
@@ -312,9 +329,11 @@ public class IRBuilder {
      * 创建一个类型转换指令
      */
     public static ConversionInstruction createConversion(Value value, Type targetType, OpCode conversionType, BasicBlock block) {
-        String name = conversionType.getName() + "_" + tmpCounter++;
+        String name = conversionType.getName().toLowerCase() + "_" + tmpCounter++;
         ConversionInstruction inst = new ConversionInstruction(value, targetType, conversionType, name);
-        block.addInstruction(inst);
+        if (block != null) {
+            block.addInstruction(inst);
+        }
         return inst;
     }
     
