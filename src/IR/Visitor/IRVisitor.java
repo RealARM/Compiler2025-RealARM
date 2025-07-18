@@ -1060,49 +1060,33 @@ public class IRVisitor {
         
         // 处理then分支
         currentBlock = thenBlock;
-        
-        // 如果在循环内，将mergeBlock替换为循环条件块
-        BasicBlock realMergeBlock = mergeBlock;
-        if (!mergeBlockStack.isEmpty() && !loopConditionBlocks.isEmpty()) {
-            realMergeBlock = mergeBlockStack.peek();
-        }
-        
         visitStmt(stmt.thenBranch);
         
-        // 如果当前块没有终结指令，添加跳转到合并块的指令
+        // 如果当前块没有终结指令（比如break、continue或return），添加跳转到合并块的指令
         if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
             !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
-            IRBuilder.createBr(realMergeBlock, currentBlock);
+            IRBuilder.createBr(mergeBlock, currentBlock);
         } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
             // 如果是空块，也要跳转到合并块
-            IRBuilder.createBr(realMergeBlock, currentBlock);
+            IRBuilder.createBr(mergeBlock, currentBlock);
         }
         
         // 处理else分支
         currentBlock = elseBlock;
         if (stmt.elseBranch != null) {
             visitStmt(stmt.elseBranch);
-            // 如果当前块没有终结指令，添加跳转到合并块的指令
-            if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
-                !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
-                IRBuilder.createBr(realMergeBlock, currentBlock);
-            } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
-                // 如果是空块，直接跳转到合并块
-                IRBuilder.createBr(realMergeBlock, currentBlock);
-            }
-        } else {
-            // 没有else分支，直接跳转到合并块
-            IRBuilder.createBr(realMergeBlock, currentBlock);
+        }
+        // 如果当前块没有终结指令，添加跳转到合并块的指令
+        if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
+            !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+            IRBuilder.createBr(mergeBlock, currentBlock);
+        } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
+            // 如果是空块，直接跳转到合并块
+            IRBuilder.createBr(mergeBlock, currentBlock);
         }
         
-        // 只有当不在循环体内部时才使用常规的mergeBlock
-        if (mergeBlockStack.isEmpty()) {
-            // 继续在合并块生成代码
-            currentBlock = mergeBlock;
-        } else {
-            // 如果在循环内部，跳过这个块
-            currentBlock = null;
-        }
+        // 继续在合并块生成代码
+        currentBlock = mergeBlock;
     }
     
     /**
