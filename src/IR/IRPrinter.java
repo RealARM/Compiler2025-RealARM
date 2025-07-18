@@ -54,18 +54,41 @@ public class IRPrinter {
         }
         
         // 打印类型和初始值
-        if (gv.hasInitializer()) {
+        Type elementType = ((PointerType)gv.getType()).getElementType();
+        
+        if (gv.isArray()) {
+            // 处理数组类型
+            out.print("[" + gv.getArraySize() + " x " + elementType + "]");
+            
+            if (gv.isZeroInitialized()) {
+                out.print(" zeroinitializer");
+            } else if (gv.getArrayValues() != null && !gv.getArrayValues().isEmpty()) {
+                out.print(" [");
+                List<Value> values = gv.getArrayValues();
+                for (int i = 0; i < values.size(); i++) {
+                    if (i > 0) {
+                        out.print(", ");
+                    }
+                    out.print(elementType + " ");
+                    printConstant((Constant)values.get(i));
+                }
+                out.print("]");
+            } else {
+                out.print(" undef");
+            }
+        } else if (gv.hasInitializer()) {
+            // 处理非数组类型
             Value initializer = gv.getInitializer();
             if (initializer instanceof Constant) {
-                out.print(((PointerType)gv.getType()).getElementType());
+                out.print(elementType);
                 out.print(" ");
                 printConstant((Constant)initializer);
             } else if (gv.isZeroInitialized()) {
-                out.print(((PointerType)gv.getType()).getElementType());
+                out.print(elementType);
                 out.print(" zeroinitializer");
             }
         } else {
-            out.print(((PointerType)gv.getType()).getElementType());
+            out.print(elementType);
             out.print(" undef");
         }
     }
