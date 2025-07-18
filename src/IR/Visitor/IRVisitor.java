@@ -697,16 +697,98 @@ public class IRVisitor {
                     }
                 }
             } else {
-                // 如果是一维列表初始化二维数组 {1, 2, 3, ...}
-                flattenArrayInitRecursive(initExpr, result, elementType);
+                // 处理混合形式的初始化，如 {1, 2, {3}, {5}, 7, 8}
+                int currentRow = 0;
+                int currentCol = 0;
                 
-                // 如果初始化值不足，用0填充
-                while (result.size() < totalSize) {
-                    if (elementType == IntegerType.I32) {
-                        result.add(new ConstantInt(0));
-                    } else if (elementType == FloatType.F32) {
-                        result.add(new ConstantFloat(0.0f));
+                // 将初始化元素映射到二维数组中
+                for (SyntaxTree.Expr element : initExpr.elements) {
+                    // 检查当前位置是否在数组范围内
+                    if (currentRow >= rows) {
+                        break;
                     }
+                    
+                    if (element instanceof SyntaxTree.ArrayInitExpr) {
+                        // 处理嵌套数组初始化 {3} 或 {5}
+                        SyntaxTree.ArrayInitExpr nestedInit = (SyntaxTree.ArrayInitExpr) element;
+                        
+                        // 获取嵌套数组的第一个元素
+                        if (!nestedInit.elements.isEmpty()) {
+                            visitExpr(nestedInit.elements.get(0));
+                            Value value = currentValue;
+                            
+                            // 类型转换（如果需要）
+                            if (!value.getType().equals(elementType)) {
+                                if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                                    value = IRBuilder.createFloatToInt(value, currentBlock);
+                                } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
+                                    value = IRBuilder.createIntToFloat(value, currentBlock);
+                                }
+                            }
+                            
+                            // 计算正确的一维索引并存储值
+                            int index = currentRow * cols + currentCol;
+                            while (result.size() <= index) {
+                                result.add(new ConstantInt(0)); // 填充中间可能的空隙
+                            }
+                            result.set(index, value);
+                        }
+                        
+                        // 移动到下一位置
+                        currentCol++;
+                        if (currentCol >= cols) {
+                            currentRow++;
+                            currentCol = 0;
+                        }
+                        
+                        // 嵌套数组的其他元素会被忽略，其位置填0
+                        if (currentRow < rows && currentCol < cols) {
+                            int index = currentRow * cols + currentCol;
+                            while (result.size() <= index) {
+                                result.add(new ConstantInt(0));
+                            }
+                            result.set(index, new ConstantInt(0));
+                            
+                            // 移动到下一位置
+                            currentCol++;
+                            if (currentCol >= cols) {
+                                currentRow++;
+                                currentCol = 0;
+                            }
+                        }
+                    } else {
+                        // 处理单个元素
+                        visitExpr(element);
+                        Value value = currentValue;
+                        
+                        // 类型转换（如果需要）
+                        if (!value.getType().equals(elementType)) {
+                            if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                                value = IRBuilder.createFloatToInt(value, currentBlock);
+                            } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
+                                value = IRBuilder.createIntToFloat(value, currentBlock);
+                            }
+                        }
+                        
+                        // 计算正确的一维索引并存储值
+                        int index = currentRow * cols + currentCol;
+                        while (result.size() <= index) {
+                            result.add(new ConstantInt(0)); // 填充中间可能的空隙
+                        }
+                        result.set(index, value);
+                        
+                        // 移动到下一位置
+                        currentCol++;
+                        if (currentCol >= cols) {
+                            currentRow++;
+                            currentCol = 0;
+                        }
+                    }
+                }
+                
+                // 确保结果大小正确
+                while (result.size() < totalSize) {
+                    result.add(new ConstantInt(0));
                 }
             }
         } else {
@@ -1028,12 +1110,80 @@ public class IRVisitor {
      * 这个方法在需要读取数组元素值时使用
      */
     private void visitArrayAccessExprAndLoad(SyntaxTree.ArrayAccessExpr expr) {
-        visitArrayAccessExpr(expr);
+        // 获取数组变量
+        String arrayName = expr.arrayName;
+        Value arrayPtr = findVariable(arrayName);
         
-        // 数组访问表达式返回指针，需要加载以获取值
-        if (currentValue.getType() instanceof PointerType) {
-            currentValue = IRBuilder.createLoad(currentValue, currentBlock);
+        if (arrayPtr == null) {
+            throw new RuntimeException("未定义的数组: " + arrayName);
         }
+        
+        // 获取数组维度信息
+        List<Integer> dimensions = findArrayDimensions(arrayName);
+        if (dimensions == null) {
+            throw new RuntimeException("无法获取数组 " + arrayName + " 的维度信息");
+        }
+        
+        // 处理索引表达式
+        List<Value> indices = new ArrayList<>();
+        for (SyntaxTree.Expr indexExpr : expr.indices) {
+            visitExpr(indexExpr);
+            indices.add(currentValue);
+        }
+        
+        // 检查索引数量
+        if (indices.size() > dimensions.size()) {
+            throw new RuntimeException("数组 " + arrayName + " 的索引数量过多");
+        }
+
+        // 对二维数组特殊处理
+        if (dimensions.size() == 2 && indices.size() == 2) {
+            // 获取行列索引
+            Value rowIndex = indices.get(0);
+            Value colIndex = indices.get(1);
+            int colSize = dimensions.get(1);
+            
+            // 计算一维偏移量: row * cols + col
+            Value rowOffset = IRBuilder.createBinaryInst(OpCode.MUL, rowIndex, new ConstantInt(colSize), currentBlock);
+            Value finalOffset = IRBuilder.createBinaryInst(OpCode.ADD, rowOffset, colIndex, currentBlock);
+            
+            // 获取元素指针
+            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, finalOffset, currentBlock);
+            
+            // 加载值
+            currentValue = IRBuilder.createLoad(elemPtr, currentBlock);
+            return;
+        }
+        
+        // 其他维度的数组处理
+        Value offset = new ConstantInt(0);
+        List<Integer> factors = new ArrayList<>();
+        
+        // 计算每个维度的因子
+        for (int i = 0; i < dimensions.size(); i++) {
+            int factor = 1;
+            for (int j = i + 1; j < dimensions.size(); j++) {
+                factor *= dimensions.get(j);
+            }
+            factors.add(factor);
+        }
+        
+        // 计算总偏移量
+        for (int i = 0; i < indices.size(); i++) {
+            Value indexFactor = IRBuilder.createBinaryInst(
+                OpCode.MUL,
+                indices.get(i),
+                new ConstantInt(factors.get(i)),
+                currentBlock
+            );
+            offset = IRBuilder.createBinaryInst(OpCode.ADD, offset, indexFactor, currentBlock);
+        }
+        
+        // 获取元素指针
+        Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, offset, currentBlock);
+        
+        // 加载值
+        currentValue = IRBuilder.createLoad(elemPtr, currentBlock);
     }
     
     /**
