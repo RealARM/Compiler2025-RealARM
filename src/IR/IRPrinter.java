@@ -137,7 +137,6 @@ public class IRPrinter {
      * 打印基本块
      */
     private void printBasicBlock(BasicBlock bb) {
-        out.print("%");
         out.print(bb.getName());
         out.println(":");
         
