@@ -370,12 +370,34 @@ public class IRVisitor {
             // 处理数组维度
             for (SyntaxTree.Expr dimExpr : param.dimensions) {
                 if (dimExpr instanceof SyntaxTree.LiteralExpr) {
+                    // 直接是字面量常量
                     Object dimValue = ((SyntaxTree.LiteralExpr) dimExpr).value;
                     if (dimValue instanceof Integer) {
                         dimensions.add((Integer) dimValue);
                     } else {
                         throw new RuntimeException("数组维度必须是整数常量");
                     }
+                } else if (dimExpr instanceof SyntaxTree.VarExpr) {
+                    // 变量表达式，尝试查找并获取常量值
+                    String varName = ((SyntaxTree.VarExpr) dimExpr).name;
+                    Value dimVar = findVariable(varName);
+                    
+                    // 处理全局常量情况
+                    if (dimVar instanceof GlobalVariable && ((GlobalVariable) dimVar).isConstant()) {
+                        GlobalVariable globalVar = (GlobalVariable) dimVar;
+                        Value initializer = globalVar.getInitializer();
+                        if (initializer instanceof ConstantInt) {
+                            dimensions.add(((ConstantInt) initializer).getValue());
+                            continue;
+                        }
+                    } 
+                    // 处理直接常量情况
+                    else if (dimVar instanceof ConstantInt) {
+                        dimensions.add(((ConstantInt) dimVar).getValue());
+                        continue;
+                    }
+                    
+                    throw new RuntimeException("数组维度变量必须是整数常量");
                 } else {
                     throw new RuntimeException("数组维度必须是常量表达式");
                 }
@@ -840,6 +862,17 @@ public class IRVisitor {
             throw new RuntimeException("未定义的变量: " + name);
         }
         
+        // 如果是全局变量且是常量
+        if (value instanceof GlobalVariable && ((GlobalVariable) value).isConstant()) {
+            GlobalVariable globalVar = (GlobalVariable) value;
+            // 尝试获取常量的初始值
+            Value initializer = globalVar.getInitializer();
+            if (initializer != null && initializer instanceof Constant) {
+                currentValue = initializer;
+                return;
+            }
+        }
+        
         // 如果是指针类型（局部变量），需要加载其值
         if (value.getType() instanceof PointerType && !(value instanceof GlobalVariable)) {
             Type pointedType = ((PointerType) value.getType()).getElementType();
@@ -1107,6 +1140,11 @@ public class IRVisitor {
             args.add(currentValue);
         }
         
+        // 特殊处理：starttime和stoptime函数需要额外的参数
+        if (funcName.equals("starttime") || funcName.equals("stoptime")) {
+            args.add(new ConstantInt(0)); // 添加行号参数
+        }
+        
         // 检查参数类型并进行必要的类型转换
         List<Argument> funcArgs = function.getArguments();
         if (args.size() != funcArgs.size()) {
@@ -1129,11 +1167,6 @@ public class IRVisitor {
                 }
                 // 其他类型不匹配的情况可能需要更复杂的处理
             }
-        }
-        
-        // 特殊处理：starttime和stoptime函数需要额外的参数
-        if (funcName.equals("starttime") || funcName.equals("stoptime")) {
-            args.add(new ConstantInt(0)); // 添加行号参数
         }
         
         // 创建函数调用指令
