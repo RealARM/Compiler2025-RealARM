@@ -199,7 +199,7 @@ public class IRBuilder {
      * 创建一个二元运算指令，但不添加到基本块
      */
     public static BinaryInstruction createBinaryInstOnly(OpCode opCode, Value left, Value right) {
-        String name = opCode.getName().toLowerCase() + "_result";
+        String name = opCode.getName().toLowerCase() + "_result_" + tmpCounter++;
         
         // 确保操作码与操作数类型匹配
         boolean isFloatOp = opCode == OpCode.FADD || opCode == OpCode.FSUB || 
