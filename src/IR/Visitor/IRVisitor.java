@@ -476,6 +476,8 @@ public class IRVisitor {
     private void visitStmt(SyntaxTree.Stmt stmt) {
         if (stmt instanceof SyntaxTree.ExprStmt) {
             visitExprStmt((SyntaxTree.ExprStmt) stmt);
+        } else if (stmt instanceof SyntaxTree.VarDecl) {
+            visitLocalVarDecl((SyntaxTree.VarDecl) stmt);
         } else if (stmt instanceof SyntaxTree.AssignStmt) {
             visitAssignStmt((SyntaxTree.AssignStmt) stmt);
         } else if (stmt instanceof SyntaxTree.ReturnStmt) {
@@ -484,14 +486,14 @@ public class IRVisitor {
             visitIfStmt((SyntaxTree.IfStmt) stmt);
         } else if (stmt instanceof SyntaxTree.WhileStmt) {
             visitWhileStmt((SyntaxTree.WhileStmt) stmt);
+        } else if (stmt instanceof SyntaxTree.Block) {
+            visitBlock((SyntaxTree.Block) stmt);
         } else if (stmt instanceof SyntaxTree.BreakStmt) {
             visitBreakStmt();
         } else if (stmt instanceof SyntaxTree.ContinueStmt) {
             visitContinueStmt();
-        } else if (stmt instanceof SyntaxTree.Block) {
-            visitBlock((SyntaxTree.Block) stmt);
-        } else if (stmt instanceof SyntaxTree.VarDecl) {
-            visitLocalVarDecl((SyntaxTree.VarDecl) stmt);
+        } else {
+            throw new RuntimeException("不支持的语句类型: " + stmt.getClass().getName());
         }
     }
     
@@ -926,46 +928,42 @@ public class IRVisitor {
      * 访问if语句
      */
     private void visitIfStmt(SyntaxTree.IfStmt stmt) {
-        // 创建基本块
+        // 创建必要的基本块
         BasicBlock thenBlock = IRBuilder.createBasicBlock(currentFunction);
-        BasicBlock elseBlock = stmt.elseBranch != null ? IRBuilder.createBasicBlock(currentFunction) : null;
         BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock elseBlock = stmt.elseBranch != null ? 
+                              IRBuilder.createBasicBlock(currentFunction) : mergeBlock;
         
-        // 处理条件表达式
+        // 条件求值
         visitExpr(stmt.cond);
-        Value condValue = currentValue;
+        Value condValue = convertToBoolean(currentValue);
         
-        // 确保条件值为布尔类型(i1)
-        condValue = convertToBoolean(condValue);
+        // 条件分支
+        IRBuilder.createCondBr(condValue, thenBlock, elseBlock, currentBlock);
         
-        // 创建条件分支指令
-        if (elseBlock != null) {
-            IRBuilder.createCondBr(condValue, thenBlock, elseBlock, currentBlock);
-        } else {
-            IRBuilder.createCondBr(condValue, thenBlock, mergeBlock, currentBlock);
-        }
-        
-        // 处理then分支
+        // then分支
         currentBlock = thenBlock;
         visitStmt(stmt.thenBranch);
-        // 如果最后一条指令不是终结指令，添加跳转到合并块
+        
+        // 如果当前块没有终结指令（比如return），添加跳转到合并块的指令
         if (!currentBlock.getInstructions().isEmpty() && 
             !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
             IRBuilder.createBr(mergeBlock, currentBlock);
         }
         
-        // 处理else分支（如果有）
-        if (elseBlock != null) {
+        // else分支（如果有）
+        if (stmt.elseBranch != null) {
             currentBlock = elseBlock;
             visitStmt(stmt.elseBranch);
-            // 如果最后一条指令不是终结指令，添加跳转到合并块
+            
+            // 如果当前块没有终结指令，添加跳转到合并块的指令
             if (!currentBlock.getInstructions().isEmpty() && 
                 !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
                 IRBuilder.createBr(mergeBlock, currentBlock);
             }
         }
         
-        // 继续在合并块中生成代码
+        // 继续在合并块生成代码
         currentBlock = mergeBlock;
     }
     
@@ -1298,86 +1296,66 @@ public class IRVisitor {
      * 处理逻辑与(&&)，实现短路评估
      */
     private void visitLogicalAnd(SyntaxTree.Expr left, SyntaxTree.Expr right) {
-        // 创建需要的基本块
-        BasicBlock evalRightBlock = IRBuilder.createBasicBlock(currentFunction);
-        BasicBlock endBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
         
-        // 处理左操作数
+        // 求值左操作数
         visitExpr(left);
-        Value leftValue = currentValue;
+        Value leftValue = convertToBoolean(currentValue);
         
-        // 确保左值是布尔类型
-        leftValue = convertToBoolean(leftValue);
+        // 如果左边为假，短路到结果块
+        IRBuilder.createCondBr(leftValue, rightBlock, mergeBlock, currentBlock);
         
-        // 根据左值结果进行条件跳转
-        IRBuilder.createCondBr(leftValue, evalRightBlock, endBlock, currentBlock);
-        
-        // 评估右操作数的块
-        currentBlock = evalRightBlock;
+        // 求值右操作数
+        currentBlock = rightBlock;
         visitExpr(right);
-        Value rightValue = currentValue;
+        Value rightValue = convertToBoolean(currentValue);
+        IRBuilder.createBr(mergeBlock, currentBlock);
         
-        // 确保右值是布尔类型
-        rightValue = convertToBoolean(rightValue);
+        // 合并结果
+        currentBlock = mergeBlock;
         
-        // 记住右值计算结果
-        Value rightResult = rightValue;
+        // 创建phi节点
+        PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+        // 左边为假时，结果为假(0)
+        phi.addIncoming(new ConstantInt(0), currentBlock.getPredecessors().get(0));
+        // 右边计算结果作为整体结果
+        phi.addIncoming(rightValue, rightBlock);
         
-        // 跳转到结束块
-        IRBuilder.createBr(endBlock, currentBlock);
-        
-        // 结束块
-        currentBlock = endBlock;
-        
-        // 创建结果phi指令
-        PhiInstruction phiInst = IRBuilder.createPhi(IntegerType.I1, currentBlock);
-        phiInst.addIncoming(new ConstantInt(0), currentBlock.getPredecessors().get(0));
-        phiInst.addIncoming(rightResult, evalRightBlock);
-        
-        currentValue = phiInst;
+        currentValue = phi;
     }
     
     /**
      * 处理逻辑或(||)，实现短路评估
      */
     private void visitLogicalOr(SyntaxTree.Expr left, SyntaxTree.Expr right) {
-        // 创建需要的基本块
-        BasicBlock evalRightBlock = IRBuilder.createBasicBlock(currentFunction);
-        BasicBlock endBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
         
-        // 处理左操作数
+        // 求值左操作数
         visitExpr(left);
-        Value leftValue = currentValue;
+        Value leftValue = convertToBoolean(currentValue);
         
-        // 确保左值是布尔类型
-        leftValue = convertToBoolean(leftValue);
+        // 如果左边为真，短路到结果块
+        IRBuilder.createCondBr(leftValue, mergeBlock, rightBlock, currentBlock);
         
-        // 根据左值结果进行条件跳转
-        IRBuilder.createCondBr(leftValue, endBlock, evalRightBlock, currentBlock);
-        
-        // 评估右操作数的块
-        currentBlock = evalRightBlock;
+        // 求值右操作数
+        currentBlock = rightBlock;
         visitExpr(right);
-        Value rightValue = currentValue;
+        Value rightValue = convertToBoolean(currentValue);
+        IRBuilder.createBr(mergeBlock, currentBlock);
         
-        // 确保右值是布尔类型
-        rightValue = convertToBoolean(rightValue);
+        // 合并结果
+        currentBlock = mergeBlock;
         
-        // 记住右值计算结果
-        Value rightResult = rightValue;
+        // 创建phi节点
+        PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+        // 左边为真时，结果为真(1)
+        phi.addIncoming(new ConstantInt(1), currentBlock.getPredecessors().get(0));
+        // 右边计算结果作为整体结果
+        phi.addIncoming(rightValue, rightBlock);
         
-        // 跳转到结束块
-        IRBuilder.createBr(endBlock, currentBlock);
-        
-        // 结束块
-        currentBlock = endBlock;
-        
-        // 创建结果phi指令
-        PhiInstruction phiInst = IRBuilder.createPhi(IntegerType.I1, currentBlock);
-        phiInst.addIncoming(new ConstantInt(1), currentBlock.getPredecessors().get(0));
-        phiInst.addIncoming(rightResult, evalRightBlock);
-        
-        currentValue = phiInst;
+        currentValue = phi;
     }
     
     /**
