@@ -122,40 +122,63 @@ public class PhiInstruction extends Instruction {
     
     /**
      * 验证并修复PHI节点的前驱关系
-     * 确保PHI节点的前驱与基本块的实际前驱匹配
+     * 确保PHI节点的前驱与基本块的实际前驱完全匹配
      */
     public void validatePredecessors() {
         if (getParent() == null) return;
         
         List<BasicBlock> actualPreds = getParent().getPredecessors();
-        List<BasicBlock> phiPreds = getIncomingBlocks();
         
-        // 如果PHI节点前驱与实际基本块前驱不匹配，修复它们
-        if (!phiPreds.containsAll(actualPreds) || !actualPreds.containsAll(phiPreds)) {
-            // 1. 保留所有与实际前驱匹配的输入
-            Map<BasicBlock, Value> validIncoming = new HashMap<>();
-            for (Map.Entry<BasicBlock, Value> entry : incomingValues.entrySet()) {
-                if (actualPreds.contains(entry.getKey())) {
-                    validIncoming.put(entry.getKey(), entry.getValue());
-                }
+        // 如果没有前驱，但有PHI节点输入，清空它们
+        if (actualPreds.isEmpty() && !incomingValues.isEmpty()) {
+            removeAllOperands();
+            incomingValues.clear();
+            return;
+        }
+        
+        // 记录需要修复的情况
+        boolean needsFix = false;
+        
+        // 检查所有PHI输入，确保它们都对应实际前驱
+        for (BasicBlock phiPred : new ArrayList<>(incomingValues.keySet())) {
+            if (!actualPreds.contains(phiPred)) {
+                needsFix = true;
+                break;
             }
+        }
+        
+        // 检查所有实际前驱，确保都有PHI输入
+        for (BasicBlock actualPred : actualPreds) {
+            if (!incomingValues.containsKey(actualPred)) {
+                needsFix = true;
+                break;
+            }
+        }
+        
+        // 如果需要修复，重新构建PHI节点的输入
+        if (needsFix) {
+            // 创建新的PHI节点输入映射
+            Map<BasicBlock, Value> newIncomingValues = new HashMap<>();
             
-            // 2. 为缺失的前驱添加默认值
+            // 处理每个实际前驱
             for (BasicBlock pred : actualPreds) {
-                if (!incomingValues.containsKey(pred)) {
-                    // 添加默认值 (0或false)
+                // 如果已有对应的输入，保留它
+                if (incomingValues.containsKey(pred)) {
+                    newIncomingValues.put(pred, incomingValues.get(pred));
+                } else {
+                    // 否则添加默认值
                     Value defaultValue = getType().toString().equals("i1") ? 
                         new ConstantInt(0, IntegerType.I1) : new ConstantInt(0);
-                    validIncoming.put(pred, defaultValue);
+                    newIncomingValues.put(pred, defaultValue);
                 }
             }
             
-            // 3. 重置所有操作数
+            // 清除所有原始操作数
             removeAllOperands();
             incomingValues.clear();
             
-            // 4. 添加修复后的输入
-            for (Map.Entry<BasicBlock, Value> entry : validIncoming.entrySet()) {
+            // 添加新的输入值
+            for (Map.Entry<BasicBlock, Value> entry : newIncomingValues.entrySet()) {
                 addIncoming(entry.getValue(), entry.getKey());
             }
         }

@@ -69,7 +69,22 @@ public class IRVisitor {
             }
         }
         
+        // 最终验证：确保所有函数中的PHI节点都是正确的
+        validateAllPhiNodesInModule();
+        
         return module;
+    }
+    
+    /**
+     * 验证模块中所有函数的PHI节点
+     */
+    private void validateAllPhiNodesInModule() {
+        if (module == null) return;
+        
+        // 验证所有普通函数
+        for (Function function : module.functions()) {
+            IRBuilder.validateAllPhiNodes(function);
+        }
     }
     
     /**
