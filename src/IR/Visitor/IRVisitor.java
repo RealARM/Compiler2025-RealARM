@@ -186,14 +186,17 @@ public class IRVisitor {
                 }
                 
                 // 创建全局变量
-                GlobalVariable globalVar = IRBuilder.createGlobalVariable("@" + name, baseType, module);
+                GlobalVariable globalVar;
                 if (isConst) {
-                    // 由于我们的GlobalVariable构造函数不支持直接设置isConstant，
-                    // 我们需要创建一个新的GlobalVariable
-                    globalVar = new GlobalVariable("@" + name, baseType, isConst);
+                    // 对于常量，直接创建一个常量全局变量
+                    globalVar = new GlobalVariable("@" + name, baseType, true);
+                    globalVar.setInitializer(initValue);
                     module.addGlobalVariable(globalVar);
+                } else {
+                    // 对于非常量，使用IRBuilder创建
+                    globalVar = IRBuilder.createGlobalVariable("@" + name, baseType, module);
+                    globalVar.setInitializer(initValue);
                 }
-                globalVar.setInitializer(initValue);
                 
                 // 添加到符号表
                 addVariable(name, globalVar);
@@ -206,12 +209,14 @@ public class IRVisitor {
                 }
                 
                 // 创建全局数组
-                GlobalVariable arrayVar = IRBuilder.createGlobalArray("@" + name, baseType, totalSize, module);
+                GlobalVariable arrayVar;
                 if (isConst) {
-                    // 由于我们的GlobalVariable构造函数不支持直接设置isConstant，
-                    // 我们需要创建一个新的GlobalVariable
-                    arrayVar = new GlobalVariable("@" + name, baseType, totalSize, isConst);
+                    // 对于常量数组，直接创建一个常量全局数组
+                    arrayVar = new GlobalVariable("@" + name, baseType, totalSize, true);
                     module.addGlobalVariable(arrayVar);
+                } else {
+                    // 对于非常量数组，使用IRBuilder创建
+                    arrayVar = IRBuilder.createGlobalArray("@" + name, baseType, totalSize, module);
                 }
                 
                 // 处理数组初始化
