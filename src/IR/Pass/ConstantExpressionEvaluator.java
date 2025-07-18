@@ -24,6 +24,17 @@ public class ConstantExpressionEvaluator {
             return (Constant) expr;
         }
         
+        // 处理变量引用 (主要用于全局常量引用)
+        if (expr instanceof GlobalVariable gv) {
+            if (gv.isConstant() && gv.hasInitializer()) {
+                Value initializer = gv.getInitializer();
+                if (initializer instanceof Constant) {
+                    return (Constant) initializer;
+                }
+            }
+            return null;
+        }
+        
         // 处理二元表达式
         if (expr instanceof BinaryInstruction binaryInst) {
             Value left = binaryInst.getOperand(0);

@@ -1275,6 +1275,16 @@ public class IRVisitor {
             throw new RuntimeException("未定义的变量: " + name);
         }
         
+        // 全局初始化上下文中（即currentBlock为null），尝试获取常量值
+        if (currentBlock == null && value instanceof GlobalVariable) {
+            GlobalVariable globalVar = (GlobalVariable) value;
+            if (globalVar.isConstant() && globalVar.hasInitializer()) {
+                // 如果是常量并且已初始化，返回它的初始值而不是变量引用
+                currentValue = globalVar.getInitializer();
+                return;
+            }
+        }
+        
         // 如果是指针类型，需要加载值
         if (value.getType() instanceof PointerType) {
             // 指针类型的变量，如局部变量、数组元素等，需要加载
@@ -1406,8 +1416,13 @@ public class IRVisitor {
                     }
                 } else {
                     // 在基本块中，使用二元指令实现一元负号
-                    // 对于整数，创建0-operand
+                    // 对于布尔值(i1)，先扩展为i32
                     if (operand.getType() instanceof IntegerType) {
+                        IntegerType intType = (IntegerType) operand.getType();
+                        if (intType.getBitWidth() == 1) {
+                            // 布尔值先扩展为i32
+                            operand = IRBuilder.createZeroExtend(operand, IntegerType.I32, currentBlock);
+                        }
                         Value zero = new ConstantInt(0);
                         currentValue = IRBuilder.createBinaryInst(OpCode.SUB, zero, operand, currentBlock);
                     }
