@@ -1083,6 +1083,9 @@ public class IRVisitor {
             if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
                 !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
                 IRBuilder.createBr(nestedMergeBlock, currentBlock);
+            } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
+                // 如果是空块，也要跳转到合并块
+                IRBuilder.createBr(nestedMergeBlock, currentBlock);
             }
             
             // 处理嵌套if的else分支
@@ -1099,13 +1102,18 @@ public class IRVisitor {
             
             // 从嵌套合并块跳转到外层合并块
             currentBlock = nestedMergeBlock;
-            IRBuilder.createBr(mergeBlock, currentBlock);
+            if (currentBlock != null) { // 确保合并块存在
+                IRBuilder.createBr(mergeBlock, currentBlock);
+            }
         } else {
             // 普通then分支
             visitStmt(stmt.thenBranch);
             // 如果当前块没有终结指令，添加跳转到合并块的指令
             if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
                 !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+                IRBuilder.createBr(mergeBlock, currentBlock);
+            } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
+                // 如果是空块，也要跳转到合并块
                 IRBuilder.createBr(mergeBlock, currentBlock);
             }
         }
