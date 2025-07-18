@@ -1296,8 +1296,12 @@ public class IRVisitor {
      * 处理逻辑与(&&)，实现短路评估
      */
     private void visitLogicalAnd(SyntaxTree.Expr left, SyntaxTree.Expr right) {
+        // 创建基本块
         BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
         BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
+        
+        // 记住左值计算的基本块
+        BasicBlock leftBlock = currentBlock;
         
         // 求值左操作数
         visitExpr(left);
@@ -1318,7 +1322,7 @@ public class IRVisitor {
         // 创建phi节点
         PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, currentBlock);
         // 左边为假时，结果为假(0)
-        phi.addIncoming(new ConstantInt(0), currentBlock.getPredecessors().get(0));
+        phi.addIncoming(new ConstantInt(0), leftBlock);
         // 右边计算结果作为整体结果
         phi.addIncoming(rightValue, rightBlock);
         
@@ -1329,8 +1333,12 @@ public class IRVisitor {
      * 处理逻辑或(||)，实现短路评估
      */
     private void visitLogicalOr(SyntaxTree.Expr left, SyntaxTree.Expr right) {
+        // 创建基本块
         BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
         BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
+        
+        // 记住左值计算的基本块
+        BasicBlock leftBlock = currentBlock;
         
         // 求值左操作数
         visitExpr(left);
@@ -1351,7 +1359,7 @@ public class IRVisitor {
         // 创建phi节点
         PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, currentBlock);
         // 左边为真时，结果为真(1)
-        phi.addIncoming(new ConstantInt(1), currentBlock.getPredecessors().get(0));
+        phi.addIncoming(new ConstantInt(1), leftBlock);
         // 右边计算结果作为整体结果
         phi.addIncoming(rightValue, rightBlock);
         
