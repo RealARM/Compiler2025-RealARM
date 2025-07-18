@@ -132,59 +132,49 @@ public class PhiInstruction extends Instruction {
     public void validatePredecessors() {
         if (getParent() == null) return;
         
-        List<BasicBlock> actualPreds = getParent().getPredecessors();
-        
-        // 如果没有前驱，但有PHI节点输入，清空它们
-        if (actualPreds.isEmpty() && !incomingValues.isEmpty()) {
-            removeAllOperands();
-            incomingValues.clear();
-            return;
+        // 基本检查：确保PHI节点没有空前驱
+        List<BasicBlock> phiPreds = getIncomingBlocks();
+        for (BasicBlock phiPred : new ArrayList<>(phiPreds)) {
+            if (phiPred == null) {
+                // 移除空前驱
+                Value value = incomingValues.remove(phiPred);
+                if (value != null) {
+                    removeOperand(value);
+                }
+            }
         }
-        
-        // 记录需要修复的情况
-        boolean needsFix = false;
-        
-        // 检查所有PHI输入，确保它们都对应实际前驱
-        for (BasicBlock phiPred : new ArrayList<>(incomingValues.keySet())) {
-            if (!actualPreds.contains(phiPred)) {
-                needsFix = true;
+    }
+    
+    /**
+     * 移除指定操作数
+     */
+    public void removeOperand(Value value) {
+        // 查找操作数的索引
+        int index = -1;
+        for (int i = 0; i < getOperandCount(); i++) {
+            if (getOperand(i) == value) {
+                index = i;
                 break;
             }
         }
         
-        // 检查所有实际前驱，确保都有PHI输入
-        for (BasicBlock actualPred : actualPreds) {
-            if (!incomingValues.containsKey(actualPred)) {
-                needsFix = true;
-                break;
-            }
-        }
-        
-        // 如果需要修复，重新构建PHI节点的输入
-        if (needsFix) {
-            // 创建新的PHI节点输入映射
-            Map<BasicBlock, Value> newIncomingValues = new HashMap<>();
+        // 如果找到，移除它
+        if (index >= 0) {
+            // 移除用户关系
+            value.removeUser(this);
             
-            // 处理每个实际前驱
-            for (BasicBlock pred : actualPreds) {
-                // 如果已有对应的输入，保留它
-                if (incomingValues.containsKey(pred)) {
-                    newIncomingValues.put(pred, incomingValues.get(pred));
-                } else {
-                    // 否则添加默认值
-                    Value defaultValue = getType().toString().equals("i1") ? 
-                        new ConstantInt(0, IntegerType.I1) : new ConstantInt(0);
-                    newIncomingValues.put(pred, defaultValue);
+            // 移除操作数
+            List<Value> newOperands = new ArrayList<>();
+            for (int i = 0; i < getOperandCount(); i++) {
+                if (i != index) {
+                    newOperands.add(getOperand(i));
                 }
             }
             
-            // 清除所有原始操作数
+            // 清除所有操作数并重新添加
             removeAllOperands();
-            incomingValues.clear();
-            
-            // 添加新的输入值
-            for (Map.Entry<BasicBlock, Value> entry : newIncomingValues.entrySet()) {
-                addIncoming(entry.getValue(), entry.getKey());
+            for (Value op : newOperands) {
+                addOperand(op);
             }
         }
     }

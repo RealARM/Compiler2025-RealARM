@@ -2,16 +2,14 @@ package IR;
 
 import IR.Module;
 import IR.OpCode;
-import IR.Type.FloatType;
-import IR.Type.IntegerType;
-import IR.Type.PointerType;
-import IR.Type.Type;
-import IR.Type.VoidType;
+import IR.Type.*;
 import IR.Value.*;
 import IR.Value.Instructions.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.HashMap;
+import java.util.Map;
 
 /**
  * IR构建工厂类，提供创建各种IR元素的静态方法
@@ -475,6 +473,68 @@ public class IRBuilder {
             for (Instruction inst : new ArrayList<>(block.getInstructions())) {
                 if (inst instanceof PhiInstruction phi) {
                     phi.validatePredecessors();
+                }
+            }
+        }
+        
+        // 在验证后，强制修复所有仍然有问题的PHI节点
+        forceFixPhiNodes(function);
+    }
+    
+    /**
+     * 强制修复PHI节点，删除所有不对应实际前驱的输入项
+     */
+    public static void forceFixPhiNodes(Function function) {
+        if (function == null) return;
+        
+        // 分析所有的跳转指令，构建准确的前驱图
+        Map<BasicBlock, List<BasicBlock>> actualPredecessors = new HashMap<>();
+        
+        // 初始化前驱图
+        for (BasicBlock block : function.getBasicBlocks()) {
+            actualPredecessors.put(block, new ArrayList<>());
+        }
+        
+        // 从终结指令分析实际的控制流
+        for (BasicBlock block : function.getBasicBlocks()) {
+            Instruction terminator = block.getTerminator();
+            if (terminator instanceof TerminatorInstruction) {
+                BasicBlock[] successors = ((TerminatorInstruction) terminator).getSuccessors();
+                for (BasicBlock successor : successors) {
+                    if (successor != null && !actualPredecessors.get(successor).contains(block)) {
+                        actualPredecessors.get(successor).add(block);
+                    }
+                }
+            }
+        }
+        
+        // 修复所有PHI节点
+        for (BasicBlock block : function.getBasicBlocks()) {
+            List<BasicBlock> realPreds = actualPredecessors.get(block);
+            
+            for (Instruction inst : new ArrayList<>(block.getInstructions())) {
+                if (inst instanceof PhiInstruction phi) {
+                    // 创建只包含实际前驱的新输入映射
+                    Map<BasicBlock, Value> validIncomings = new HashMap<>();
+                    
+                    // 保留所有有效的前驱输入
+                    for (BasicBlock pred : realPreds) {
+                        if (phi.getIncomingValues().containsKey(pred)) {
+                            validIncomings.put(pred, phi.getIncomingValues().get(pred));
+                        } else {
+                            // 为缺失的前驱添加默认值
+                            Value defaultValue = phi.getType().toString().equals("i1") ?
+                                new ConstantInt(0, IntegerType.I1) : new ConstantInt(0);
+                            validIncomings.put(pred, defaultValue);
+                        }
+                    }
+                    
+                    // 重建PHI节点的输入
+                    phi.removeAllOperands();
+                    phi.getIncomingValues().clear();
+                    for (Map.Entry<BasicBlock, Value> entry : validIncomings.entrySet()) {
+                        phi.addIncoming(entry.getValue(), entry.getKey());
+                    }
                 }
             }
         }
