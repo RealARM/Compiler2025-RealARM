@@ -10,6 +10,9 @@ import IR.Value.Value;
 public class BinaryInstruction extends Instruction {
     private final OpCode opCode; // 操作码，如add, sub, mul等
     
+    // 为不同的指令名称添加计数器
+    private static int nameCounter = 0;
+    
     /**
      * 创建一个二元操作指令
      */
@@ -84,6 +87,6 @@ public class BinaryInstruction extends Instruction {
      * 生成指令名称
      */
     private static String getInstructionName(OpCode opCode) {
-        return opCode.getName() + "_result";
+        return opCode.getName() + "_result_" + nameCounter++;
     }
 } 
