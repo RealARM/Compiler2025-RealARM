@@ -956,14 +956,13 @@ public class IRVisitor {
             if (stmt.elseBranch instanceof SyntaxTree.IfStmt) {
                 SyntaxTree.IfStmt elseIfStmt = (SyntaxTree.IfStmt) stmt.elseBranch;
                 
-                // 创建else-if的条件块和then块
-                BasicBlock elseIfCondBlock = currentBlock; // 当前块就是else-if的条件块
-                BasicBlock elseIfThenBlock = IRBuilder.createBasicBlock(currentFunction);
-                BasicBlock elseIfElseBlock = IRBuilder.createBasicBlock(currentFunction);
-                
                 // 条件求值
                 visitExpr(elseIfStmt.cond);
                 Value elseIfCondValue = convertToBoolean(currentValue);
+                
+                // 创建else-if的then块和else块
+                BasicBlock elseIfThenBlock = IRBuilder.createBasicBlock(currentFunction);
+                BasicBlock elseIfElseBlock = IRBuilder.createBasicBlock(currentFunction);
                 
                 // 条件分支
                 IRBuilder.createCondBr(elseIfCondValue, elseIfThenBlock, elseIfElseBlock, currentBlock);
@@ -986,6 +985,9 @@ public class IRVisitor {
                 if (!currentBlock.getInstructions().isEmpty() && 
                     !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
                     IRBuilder.createBr(mergeBlock, currentBlock);
+                } else if (currentBlock.getInstructions().isEmpty()) {
+                    // 如果是空块，直接跳转到合并块
+                    IRBuilder.createBr(mergeBlock, currentBlock);
                 }
             } else {
                 // 普通else分支
@@ -993,6 +995,9 @@ public class IRVisitor {
                 // 如果当前块没有终结指令，添加跳转到合并块的指令
                 if (!currentBlock.getInstructions().isEmpty() && 
                     !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+                    IRBuilder.createBr(mergeBlock, currentBlock);
+                } else if (currentBlock.getInstructions().isEmpty()) {
+                    // 如果是空块，直接跳转到合并块
                     IRBuilder.createBr(mergeBlock, currentBlock);
                 }
             }
