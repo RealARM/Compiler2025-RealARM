@@ -634,8 +634,11 @@ public class IRVisitor {
      * 访问表达式语句
      */
     private void visitExprStmt(SyntaxTree.ExprStmt stmt) {
-        visitExpr(stmt.expr);
-        // 表达式语句不需要保存结果值
+        if (stmt.expr != null) {
+            visitExpr(stmt.expr);
+            // 表达式语句不需要保存结果值
+        }
+        // 如果表达式为null（空语句），不做任何操作
     }
     
     /**
