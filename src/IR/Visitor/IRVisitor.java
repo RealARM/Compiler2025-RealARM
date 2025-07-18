@@ -954,12 +954,26 @@ public class IRVisitor {
         // else分支（如果有）
         if (stmt.elseBranch != null) {
             currentBlock = elseBlock;
-            visitStmt(stmt.elseBranch);
             
-            // 如果当前块没有终结指令，添加跳转到合并块的指令
-            if (!currentBlock.getInstructions().isEmpty() && 
-                !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
-                IRBuilder.createBr(mergeBlock, currentBlock);
+            // 特殊处理嵌套的if-else结构
+            if (stmt.elseBranch instanceof SyntaxTree.IfStmt) {
+                // 如果else分支是一个if语句，我们需要特殊处理这个if-else-if结构
+                visitIfStmt((SyntaxTree.IfStmt) stmt.elseBranch);
+                
+                // 确保控制流最终会到达合并块
+                if (!currentBlock.getInstructions().isEmpty() && 
+                    !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+                    IRBuilder.createBr(mergeBlock, currentBlock);
+                }
+            } else {
+                // 普通else分支
+                visitStmt(stmt.elseBranch);
+                
+                // 如果当前块没有终结指令，添加跳转到合并块的指令
+                if (!currentBlock.getInstructions().isEmpty() && 
+                    !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+                    IRBuilder.createBr(mergeBlock, currentBlock);
+                }
             }
         }
         
