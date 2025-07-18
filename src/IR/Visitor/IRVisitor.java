@@ -1435,21 +1435,34 @@ public class IRVisitor {
         // 如果左边为假，短路到合并块；否则继续计算右边
         IRBuilder.createCondBr(leftValue, rightBlock, mergeBlock, currentBlock);
         
+        // 设置前驱关系
+        mergeBlock.addPredecessor(leftBlock);
+        
         // 求值右操作数
         currentBlock = rightBlock;
         visitExpr(right);
         Value rightValue = convertToBoolean(currentValue);
+        
+        // 保存右操作数计算的基本块（可能已经改变）
+        BasicBlock rightResultBlock = currentBlock;
         IRBuilder.createBr(mergeBlock, currentBlock);
+        
+        // 更新前驱关系
+        mergeBlock.addPredecessor(rightResultBlock);
         
         // 合并结果
         currentBlock = mergeBlock;
         
         // 创建phi节点
         PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+        
+        // 确保PHI节点与合并块的前驱匹配
+        phi.getIncomingValues().clear(); // 清除默认值
+        
         // 左边为假时，结果为假(0)
-        phi.addIncoming(new ConstantInt(0), leftBlock);
+        phi.addIncoming(new ConstantInt(0, IntegerType.I1), leftBlock);
         // 右边计算结果作为整体结果
-        phi.addIncoming(rightValue, rightBlock);
+        phi.addIncoming(rightValue, rightResultBlock);
         
         currentValue = phi;
     }
@@ -1477,21 +1490,34 @@ public class IRVisitor {
         // 如果左边为真，短路到合并块；否则继续计算右边
         IRBuilder.createCondBr(leftValue, mergeBlock, rightBlock, currentBlock);
         
+        // 设置前驱关系
+        mergeBlock.addPredecessor(leftBlock);
+        
         // 求值右操作数
         currentBlock = rightBlock;
         visitExpr(right);
         Value rightValue = convertToBoolean(currentValue);
+        
+        // 保存右操作数计算的基本块（可能已经改变）
+        BasicBlock rightResultBlock = currentBlock;
         IRBuilder.createBr(mergeBlock, currentBlock);
+        
+        // 更新前驱关系
+        mergeBlock.addPredecessor(rightResultBlock);
         
         // 合并结果
         currentBlock = mergeBlock;
         
         // 创建phi节点
         PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+        
+        // 确保PHI节点与合并块的前驱匹配
+        phi.getIncomingValues().clear(); // 清除默认值
+        
         // 左边为真时，结果为真(1)
-        phi.addIncoming(new ConstantInt(1), leftBlock);
+        phi.addIncoming(new ConstantInt(1, IntegerType.I1), leftBlock);
         // 右边计算结果作为整体结果
-        phi.addIncoming(rightValue, rightBlock);
+        phi.addIncoming(rightValue, rightResultBlock);
         
         currentValue = phi;
     }

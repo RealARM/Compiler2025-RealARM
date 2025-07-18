@@ -453,8 +453,46 @@ public class IRBuilder {
         PhiInstruction inst = new PhiInstruction(type, name);
         if (block != null) {
             block.addInstructionFirst(inst);
+            
+            // 确保PHI节点与基本块前驱匹配
+            List<BasicBlock> predecessors = block.getPredecessors();
+            if (!predecessors.isEmpty()) {
+                // 更新PHI节点前驱信息
+                updatePhiNodePredecessors(inst, block);
+            }
         }
         return inst;
+    }
+    
+    /**
+     * 更新PHI节点的前驱信息
+     * 确保PHI节点的输入与基本块的前驱匹配
+     */
+    public static void updatePhiNodePredecessors(PhiInstruction phi, BasicBlock block) {
+        List<BasicBlock> predecessors = block.getPredecessors();
+        
+        // 只有当PHI节点为空（新创建）时才添加默认值
+        if (phi.getIncomingBlocks().isEmpty() && !predecessors.isEmpty()) {
+            // 为每个前驱块添加一个默认值（常量0）
+            for (BasicBlock pred : predecessors) {
+                Value defaultValue = phi.getType() == IntegerType.I1 ? 
+                    new ConstantInt(0, IntegerType.I1) : new ConstantInt(0);
+                phi.addIncoming(defaultValue, pred);
+            }
+        }
+    }
+    
+    /**
+     * 更新基本块内所有PHI节点的前驱关系
+     */
+    public static void updateAllPhiNodes(BasicBlock block) {
+        if (block == null) return;
+        
+        for (Instruction inst : block.getInstructions()) {
+            if (inst instanceof PhiInstruction phi) {
+                updatePhiNodePredecessors(phi, block);
+            }
+        }
     }
     
     /**
