@@ -29,6 +29,11 @@ public class PhiInstruction extends Instruction {
      * 添加一个输入值
      */
     public void addIncoming(Value value, BasicBlock block) {
+        // 确保block确实是PHI所在基本块的前驱
+        if (getParent() != null && !getParent().getPredecessors().contains(block)) {
+            return; // 如果不是前驱块，不添加
+        }
+        
         incomingValues.put(block, value);
         addOperand(value);
     }

@@ -1,14 +1,18 @@
 package IR.Value;
 
 import IR.Type.LabelType;
+import IR.Type.IntegerType;
 import IR.Value.Instructions.BranchInstruction;
 import IR.Value.Instructions.Instruction;
 import IR.Value.Instructions.PhiInstruction;
 import IR.Value.Instructions.TerminatorInstruction;
+import IR.Value.ConstantInt;
 
 import java.util.ArrayList;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Map;
+import java.util.HashMap;
 
 /**
  * 表示基本块，是IR中的代码容器
@@ -142,11 +146,18 @@ public class BasicBlock extends Value {
         if (!predecessors.contains(block)) {
             predecessors.add(block);
             
+            // 确保相互关系正确
+            if (!block.getSuccessors().contains(this)) {
+                block.getSuccessors().add(this);
+            }
+            
             // 更新phi指令
             for (PhiInstruction phi : getPhiInstructions()) {
-                if (phi.getIncomingBlocks().size() < predecessors.size()) {
-                    // 如果phi指令的输入数量少于前驱数量，则需要更新
-                    phi.updatePredecessors(predecessors, predecessors);
+                // 如果PHI节点还没有这个前驱的输入，添加一个默认值
+                if (!phi.getIncomingBlocks().contains(block)) {
+                    Value defaultValue = phi.getType().toString().equals("i1") ? 
+                        new ConstantInt(0, IntegerType.I1) : new ConstantInt(0);
+                    phi.addIncoming(defaultValue, block);
                 }
             }
         }
@@ -160,9 +171,30 @@ public class BasicBlock extends Value {
         if (index != -1) {
             predecessors.remove(index);
             
+            // 确保相互关系正确
+            if (block.getSuccessors().contains(this)) {
+                block.getSuccessors().remove(this);
+            }
+            
             // 更新phi指令
             for (PhiInstruction phi : getPhiInstructions()) {
-                phi.updatePredecessors(predecessors, predecessors);
+                // 如果PHI节点有这个前驱的输入，移除它
+                if (phi.getIncomingBlocks().contains(block)) {
+                    // 创建新的输入映射，排除要移除的前驱
+                    Map<BasicBlock, Value> newIncomings = new HashMap<>();
+                    for (Map.Entry<BasicBlock, Value> entry : phi.getIncomingValues().entrySet()) {
+                        if (!entry.getKey().equals(block)) {
+                            newIncomings.put(entry.getKey(), entry.getValue());
+                        }
+                    }
+                    
+                    // 清空PHI节点并重新添加输入
+                    phi.removeAllOperands();
+                    phi.getIncomingValues().clear();
+                    for (Map.Entry<BasicBlock, Value> entry : newIncomings.entrySet()) {
+                        phi.addIncoming(entry.getValue(), entry.getKey());
+                    }
+                }
             }
         }
     }
@@ -171,19 +203,34 @@ public class BasicBlock extends Value {
      * 获取前驱基本块列表
      */
     public List<BasicBlock> getPredecessors() {
+        // 确保前驱列表与实际情况匹配
+        validatePredecessors();
         return predecessors;
     }
     
     /**
-     * 设置前驱基本块列表
+     * 验证并修复前驱列表，确保与终结指令的后继一致
      */
-    public void setPredecessors(List<BasicBlock> predecessors) {
-        List<BasicBlock> oldPreds = new ArrayList<>(this.predecessors);
-        this.predecessors = predecessors;
+    private void validatePredecessors() {
+        // 这个方法会根据终结指令信息重建前驱列表
+        List<BasicBlock> realPredecessors = new ArrayList<>();
+        for (BasicBlock potentialPred : getParentFunction().getBasicBlocks()) {
+            if (potentialPred.getSuccessors().contains(this)) {
+                if (!realPredecessors.contains(potentialPred)) {
+                    realPredecessors.add(potentialPred);
+                }
+            }
+        }
         
-        // 更新phi指令
-        for (PhiInstruction phi : getPhiInstructions()) {
-            phi.updatePredecessors(oldPreds, predecessors);
+        // 检查是否需要更新前驱列表
+        if (!predecessors.containsAll(realPredecessors) || !realPredecessors.containsAll(predecessors)) {
+            List<BasicBlock> oldPreds = new ArrayList<>(this.predecessors);
+            this.predecessors = new ArrayList<>(realPredecessors);
+            
+            // 更新所有PHI指令
+            for (PhiInstruction phi : getPhiInstructions()) {
+                phi.updatePredecessors(oldPreds, this.predecessors);
+            }
         }
     }
     
