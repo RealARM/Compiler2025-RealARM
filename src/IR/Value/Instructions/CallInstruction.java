@@ -19,7 +19,8 @@ public class CallInstruction extends Instruction {
      * 创建一个函数调用指令
      */
     public CallInstruction(Function callee, List<Value> arguments, String name) {
-        super(name, callee.getReturnType());
+        // 对于void返回类型的函数调用，如果名称为null，则使用空字符串
+        super(callee.getReturnType() instanceof VoidType && name == null ? "" : name, callee.getReturnType());
         this.callee = callee;
         
         // 添加被调用函数作为操作数

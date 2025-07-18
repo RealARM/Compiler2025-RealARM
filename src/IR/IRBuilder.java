@@ -309,8 +309,18 @@ public class IRBuilder {
      * 创建一个函数调用指令
      */
     public static CallInstruction createCall(Function callee, List<Value> arguments, BasicBlock block) {
-        String name = "call_" + tmpCounter++;
-        CallInstruction inst = new CallInstruction(callee, arguments, name);
+        CallInstruction inst;
+        
+        // 检查函数返回类型是否为void
+        if (callee.getReturnType() instanceof VoidType) {
+            // void返回类型的函数调用不需要名称
+            inst = new CallInstruction(callee, arguments, null);
+        } else {
+            // 非void返回类型的函数调用需要名称
+            String name = "call_" + tmpCounter++;
+            inst = new CallInstruction(callee, arguments, name);
+        }
+        
         if (block != null) {
             block.addInstruction(inst);
         }

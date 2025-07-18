@@ -229,7 +229,8 @@ public class IRPrinter {
      */
     private void printInstruction(Instruction inst) {
         // 如果指令有结果值，打印赋值
-        if (!(inst instanceof StoreInstruction || inst instanceof BranchInstruction || inst instanceof ReturnInstruction)) {
+        if (!(inst instanceof StoreInstruction || inst instanceof BranchInstruction || inst instanceof ReturnInstruction) &&
+            !(inst instanceof CallInstruction && ((CallInstruction) inst).isVoidCall())) {
             out.print(printValueName(inst));
             out.print(" = ");
         }
@@ -346,11 +347,9 @@ public class IRPrinter {
      * 打印函数调用指令
      */
     private void printCallInstruction(CallInstruction inst) {
-        Function callee = (Function)inst.getOperand(0);
-        Type returnType = callee.getReturnType();
-        
         out.print("call ");
-        out.print(returnType);
+        Function callee = (Function)inst.getOperand(0);
+        out.print(callee.getReturnType());
         out.print(" ");
         out.print(callee.getName());
         out.print("(");
