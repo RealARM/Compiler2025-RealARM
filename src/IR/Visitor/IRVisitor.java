@@ -530,7 +530,7 @@ public class IRVisitor {
             
             if (dims.isEmpty()) {
                 // 普通变量
-                Value allocaInst = IRBuilder.createAlloca(baseType, currentBlock);
+                AllocaInstruction allocaInst = IRBuilder.createAlloca(baseType, currentBlock);
                 
                 // 如果有初始化表达式，计算并存储
                 if (varDef.init != null) {
@@ -539,46 +539,39 @@ public class IRVisitor {
                     
                     // IRBuilder.createStore 会自动处理类型转换
                     IRBuilder.createStore(initValue, allocaInst, currentBlock);
+                } else {
+                    // 默认初始化为0
+                    if (baseType == IntegerType.I32) {
+                        IRBuilder.createStore(new ConstantInt(0), allocaInst, currentBlock);
+                    } else if (baseType == FloatType.F32) {
+                        IRBuilder.createStore(new ConstantFloat(0.0f), allocaInst, currentBlock);
+                    }
                 }
                 
                 // 添加到符号表
                 addVariable(name, allocaInst);
             } else {
                 // 数组变量
-                // 计算数组总大小
-                int totalSize = 1;
-                for (int dim : dims) {
-                    totalSize *= dim;
-                }
+                SyntaxTree.ArrayInitExpr initExpr = varDef.init instanceof SyntaxTree.ArrayInitExpr ? 
+                                                  (SyntaxTree.ArrayInitExpr) varDef.init : null;
                 
-                // 创建数组
-                Value arrayPtr = IRBuilder.createArrayAlloca(baseType, totalSize, currentBlock);
-                
-                // 处理数组初始化
-                if (varDef.init != null) {
-                    if (varDef.init instanceof SyntaxTree.ArrayInitExpr) {
-                        processArrayInit((SyntaxTree.ArrayInitExpr) varDef.init, arrayPtr, dims, baseType);
-                    } else {
-                        throw new RuntimeException("数组变量初始化必须使用数组初始化表达式");
-                    }
-                } else {
-                    // 如果没有初始化，使用memset将数组清零
-                    Value zeroValue = new ConstantInt(0);
-                    Value sizeValue = new ConstantInt(totalSize * (baseType == IntegerType.I32 ? 4 : 4)); // 4字节整数或浮点数
-                    
-                    List<Value> args = new ArrayList<>();
-                    args.add(arrayPtr);
-                    args.add(zeroValue);
-                    args.add(sizeValue);
-                    
-                    Function memsetFunc = (Function) findVariable("memset");
-                    IRBuilder.createCall(memsetFunc, args, currentBlock);
-                }
-                
-                // 保存数组维度信息和变量
-                addArrayDimensions(name, dims);
-                addVariable(name, arrayPtr);
+                // 使用processLocalArrayDecl处理数组声明和初始化
+                processLocalArrayDecl(name, baseType, dims, initExpr);
             }
+        }
+    }
+    
+    /**
+     * 获取类型
+     */
+    private Type getType(String typeName) {
+        switch (typeName) {
+            case "int":
+                return IntegerType.I32;
+            case "float":
+                return FloatType.F32;
+            default:
+                throw new RuntimeException("不支持的类型: " + typeName);
         }
     }
     
@@ -1590,13 +1583,13 @@ public class IRVisitor {
             throw new RuntimeException("数组 " + arrayName + " 的索引数量过多");
         }
 
-        // 针对二维数组优化 (比如 a[i][j] 其中a[m][n], 应计算 i*n + j)
+        // 针对二维数组优化
         if (dimensions.size() == 2 && indices.size() == 2) {
-            Value firstIndex = indices.get(0); // i
-            Value secondIndex = indices.get(1); // j
-            int colSize = dimensions.get(1); // n
+            Value firstIndex = indices.get(0); // 行索引
+            Value secondIndex = indices.get(1); // 列索引
+            int colSize = dimensions.get(1); // 列数
             
-            // 计算 i * n
+            // 计算 row * cols
             Value rowOffset = IRBuilder.createBinaryInst(
                 OpCode.MUL, 
                 firstIndex,
@@ -1604,7 +1597,7 @@ public class IRVisitor {
                 currentBlock
             );
             
-            // 计算 i * n + j
+            // 计算 row * cols + col
             Value finalOffset = IRBuilder.createBinaryInst(
                 OpCode.ADD,
                 rowOffset,
@@ -1617,11 +1610,10 @@ public class IRVisitor {
             return;
         }
 
-        // 对于其他维度的数组，保留原有逻辑
-        // 计算总偏移量
+        // 对于其他维度的数组，正确计算偏移量
         Value offset = new ConstantInt(0);
         
-        // 计算每个维度的因子 (正确计算每个索引的权重)
+        // 计算每个维度的因子
         List<Integer> factors = new ArrayList<>();
         for (int i = 0; i < dimensions.size(); i++) {
             int factor = 1;
@@ -1631,7 +1623,7 @@ public class IRVisitor {
             factors.add(factor);
         }
         
-        // 计算总偏移量 sum(indices[i] * factors[i])
+        // 计算总偏移量
         for (int i = 0; i < indices.size(); i++) {
             Value indexFactor = IRBuilder.createBinaryInst(
                 OpCode.MUL,
@@ -1652,6 +1644,43 @@ public class IRVisitor {
     private void visitArrayInitExpr(SyntaxTree.ArrayInitExpr expr) {
         // 暂时不处理数组初始化表达式，这通常在变量声明中处理
         throw new RuntimeException("数组初始化表达式应在变量声明中处理");
+    }
+    
+    /**
+     * 处理局部数组声明
+     */
+    private void processLocalArrayDecl(String name, Type elementType, List<Integer> dimensions, SyntaxTree.ArrayInitExpr initExpr) {
+        // 计算数组总大小
+        int totalSize = 1;
+        for (int dim : dimensions) {
+            totalSize *= dim;
+        }
+        
+        // 创建数组分配指令
+        AllocaInstruction arrayPtr = IRBuilder.createArrayAlloca(elementType, totalSize, currentBlock);
+        
+        // 添加到符号表
+        addVariable(name, arrayPtr);
+        
+        // 存储维度信息，这对于后续数组索引计算很关键
+        addArrayDimensions(name, dimensions);
+        
+        // 初始化数组元素
+        if (initExpr != null) {
+            processArrayInit(initExpr, arrayPtr, dimensions, elementType);
+        } else {
+            // 如果没有初始化表达式，初始化为0
+            for (int i = 0; i < totalSize; i++) {
+                Value indexValue = new ConstantInt(i);
+                Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                
+                if (elementType == IntegerType.I32) {
+                    IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
+                } else if (elementType == FloatType.F32) {
+                    IRBuilder.createStore(new ConstantFloat(0.0f), elemPtr, currentBlock);
+                }
+            }
+        }
     }
     
     /**
