@@ -906,9 +906,8 @@ public class IRVisitor {
             }
         }
         
-        // 如果是指针类型（局部变量），需要加载其值
-        if (value.getType() instanceof PointerType && !(value instanceof GlobalVariable)) {
-            Type pointedType = ((PointerType) value.getType()).getElementType();
+        // 如果是指针类型（局部变量或全局变量），需要加载其值
+        if (value.getType() instanceof PointerType) {
             currentValue = IRBuilder.createLoad(value, currentBlock);
         } else {
             currentValue = value;

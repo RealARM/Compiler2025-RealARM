@@ -129,7 +129,7 @@ public class IRBuilder {
      */
     public static AllocaInstruction createAlloca(Type type, BasicBlock block) {
         String name = "alloca_" + tmpCounter++;
-        AllocaInstruction inst = new AllocaInstruction(new PointerType(type), name);
+        AllocaInstruction inst = new AllocaInstruction(type, name);
         if (block != null) {
             block.addInstruction(inst);
         }
@@ -141,7 +141,7 @@ public class IRBuilder {
      */
     public static AllocaInstruction createArrayAlloca(Type elementType, int size, BasicBlock block) {
         String name = "array_alloca_" + tmpCounter++;
-        AllocaInstruction inst = new AllocaInstruction(new PointerType(elementType), size, name);
+        AllocaInstruction inst = new AllocaInstruction(elementType, size, name);
         if (block != null) {
             block.addInstruction(inst);
         }
@@ -199,7 +199,36 @@ public class IRBuilder {
      * 创建一个二元运算指令，但不添加到基本块
      */
     public static BinaryInstruction createBinaryInstOnly(OpCode opCode, Value left, Value right) {
-        String name = opCode.getName().toLowerCase() + "_" + tmpCounter++;
+        String name = opCode.getName().toLowerCase() + "_result";
+        
+        // 确保操作码与操作数类型匹配
+        boolean isFloatOp = opCode == OpCode.FADD || opCode == OpCode.FSUB || 
+                          opCode == OpCode.FMUL || opCode == OpCode.FDIV || opCode == OpCode.FREM;
+        boolean isIntOp = opCode == OpCode.ADD || opCode == OpCode.SUB || 
+                        opCode == OpCode.MUL || opCode == OpCode.DIV || opCode == OpCode.REM;
+        
+        // 如果操作数是整数但使用了浮点操作码，修正操作码
+        if (isFloatOp && left.getType() instanceof IntegerType && right.getType() instanceof IntegerType) {
+            switch (opCode) {
+                case FADD: opCode = OpCode.ADD; break;
+                case FSUB: opCode = OpCode.SUB; break;
+                case FMUL: opCode = OpCode.MUL; break;
+                case FDIV: opCode = OpCode.DIV; break;
+                case FREM: opCode = OpCode.REM; break;
+            }
+        }
+        
+        // 如果操作数是浮点数但使用了整数操作码，修正操作码
+        if (isIntOp && left.getType() instanceof FloatType && right.getType() instanceof FloatType) {
+            switch (opCode) {
+                case ADD: opCode = OpCode.FADD; break;
+                case SUB: opCode = OpCode.FSUB; break;
+                case MUL: opCode = OpCode.FMUL; break;
+                case DIV: opCode = OpCode.FDIV; break;
+                case REM: opCode = OpCode.FREM; break;
+            }
+        }
+        
         return new BinaryInstruction(opCode, left, right, left.getType());
     }
     
