@@ -1,0 +1,1329 @@
+package IR.Visitor;
+
+import Frontend.SyntaxTree;
+import IR.IRBuilder;
+import IR.Module;
+import IR.Type.*;
+import IR.Value.*;
+import IR.Value.Instructions.*;
+import IR.OpCode;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Stack;
+
+/**
+ * IR访问者类，用于将AST转换为IR
+ */
+public class IRVisitor {
+    // IR构建相关
+    private Module module;                  // 当前模块
+    private Function currentFunction;       // 当前处理的函数
+    private BasicBlock currentBlock;        // 当前基本块
+    private Value currentValue;             // 当前处理生成的值
+    
+    // 符号表相关
+    private final ArrayList<HashMap<String, Value>> symbolTables = new ArrayList<>();  // 符号表栈
+    private final ArrayList<HashMap<String, List<Integer>>> arrayDimensions = new ArrayList<>(); // 数组维度信息
+    
+    // 控制流相关
+    private final Stack<BasicBlock> loopConditionBlocks = new Stack<>();  // 循环条件块栈
+    private final Stack<BasicBlock> loopExitBlocks = new Stack<>();       // 循环出口块栈
+    
+    // 实用工具
+    private final IRBuilder builder = new IRBuilder();  // IR构建器
+    
+    /**
+     * 创建IR访问者
+     */
+    public IRVisitor() {
+        // 初始化顶级符号表
+        symbolTables.add(new HashMap<>());
+        arrayDimensions.add(new HashMap<>());
+    }
+    
+    /**
+     * 访问编译单元并生成IR模块
+     */
+    public Module visitCompilationUnit(SyntaxTree.CompilationUnit unit) {
+        module = new Module("SysYModule");
+        
+        // 初始化库函数
+        initializeLibraryFunctions();
+        
+        // 访问所有顶级定义
+        for (SyntaxTree.TopLevelDef def : unit.getDefs()) {
+            if (def instanceof SyntaxTree.FuncDef) {
+                visitFuncDef((SyntaxTree.FuncDef) def);
+            } else if (def instanceof SyntaxTree.VarDecl) {
+                visitGlobalVarDecl((SyntaxTree.VarDecl) def);
+            }
+        }
+        
+        return module;
+    }
+    
+    /**
+     * 初始化标准库函数
+     */
+    private void initializeLibraryFunctions() {
+        // 输入输出函数
+        declareLibFunction("getint", IntegerType.I32);
+        declareLibFunction("putint", VoidType.VOID, IntegerType.I32);
+        declareLibFunction("getch", IntegerType.I32);
+        declareLibFunction("putch", VoidType.VOID, IntegerType.I32);
+        
+        // 数组操作函数
+        declareLibFunction("getarray", IntegerType.I32, new PointerType(IntegerType.I32));
+        declareLibFunction("putarray", VoidType.VOID, IntegerType.I32, new PointerType(IntegerType.I32));
+        
+        // 浮点操作函数
+        declareLibFunction("getfloat", FloatType.FLOAT);
+        declareLibFunction("putfloat", VoidType.VOID, FloatType.FLOAT);
+        declareLibFunction("getfarray", IntegerType.I32, new PointerType(FloatType.FLOAT));
+        declareLibFunction("putfarray", VoidType.VOID, IntegerType.I32, new PointerType(FloatType.FLOAT));
+        
+        // 时间函数
+        declareLibFunction("starttime", VoidType.VOID, IntegerType.I32);
+        declareLibFunction("stoptime", VoidType.VOID, IntegerType.I32);
+        
+        // 内存操作函数
+        declareLibFunction("memset", VoidType.VOID, new PointerType(IntegerType.I32), IntegerType.I32, IntegerType.I32);
+    }
+    
+    /**
+     * 声明标准库函数
+     */
+    private void declareLibFunction(String name, Type returnType, Type... argTypes) {
+        Function func = IRBuilder.createExternalFunction("@" + name, returnType, module);
+        
+        // 添加参数
+        for (int i = 0; i < argTypes.length; i++) {
+            IRBuilder.createArgument("%" + name + "_arg" + i, argTypes[i], func, i);
+        }
+        
+        // 将函数添加到符号表
+        symbolTables.get(0).put(name, func);
+    }
+    
+    /**
+     * 访问全局变量声明
+     */
+    private void visitGlobalVarDecl(SyntaxTree.VarDecl varDecl) {
+        String baseTypeStr = varDecl.baseType;
+        boolean isConst = varDecl.isConst;
+        
+        // 确定基本类型
+        Type baseType;
+        switch (baseTypeStr) {
+            case "int":
+                baseType = IntegerType.I32;
+                break;
+            case "float":
+                baseType = FloatType.FLOAT;
+                break;
+            default:
+                throw new RuntimeException("不支持的变量类型: " + baseTypeStr);
+        }
+        
+        // 处理每个变量定义
+        for (SyntaxTree.VarDef varDef : varDecl.variables) {
+            String name = varDef.ident;
+            List<Integer> dims = varDef.dims;
+            
+            if (dims.isEmpty()) {
+                // 普通全局变量
+                Value initValue;
+                
+                // 处理初始化值
+                if (varDef.init != null) {
+                    if (varDef.init instanceof SyntaxTree.LiteralExpr) {
+                        // 常量初始化
+                        Object value = ((SyntaxTree.LiteralExpr) varDef.init).value;
+                        if (value instanceof Integer) {
+                            initValue = new ConstantInt((Integer) value);
+                        } else if (value instanceof Float) {
+                            initValue = new ConstantFloat((Float) value);
+                        } else {
+                            throw new RuntimeException("不支持的全局变量初始化类型");
+                        }
+                    } else {
+                        throw new RuntimeException("全局变量初始化必须是常量表达式");
+                    }
+                } else {
+                    // 默认初始化为0
+                    if (baseType == IntegerType.I32) {
+                        initValue = new ConstantInt(0);
+                    } else { // FloatType
+                        initValue = new ConstantFloat(0.0f);
+                    }
+                }
+                
+                // 创建全局变量
+                GlobalVariable globalVar = IRBuilder.createGlobalVariable("@" + name, baseType, module);
+                globalVar.setInitializer(initValue);
+                globalVar.setConstant(isConst);
+                
+                // 添加到符号表
+                addVariable(name, globalVar);
+            } else {
+                // 全局数组变量
+                // 计算数组总大小
+                int totalSize = 1;
+                for (int dim : dims) {
+                    totalSize *= dim;
+                }
+                
+                // 创建全局数组
+                GlobalVariable arrayVar = IRBuilder.createGlobalVariable("@" + name, 
+                                                                       new PointerType(baseType), 
+                                                                       module);
+                arrayVar.setConstant(isConst);
+                
+                // 处理数组初始化
+                if (varDef.init != null) {
+                    if (varDef.init instanceof SyntaxTree.ArrayInitExpr) {
+                        // 处理数组初始化表达式
+                        List<Value> initValues = processGlobalArrayInit((SyntaxTree.ArrayInitExpr) varDef.init, 
+                                                                       dims, 
+                                                                       baseType);
+                        arrayVar.setInitializer(initValues);
+                    } else {
+                        throw new RuntimeException("全局数组初始化必须使用数组初始化表达式");
+                    }
+                } else {
+                    // 默认初始化为全0
+                    arrayVar.setZeroInitializer(totalSize);
+                }
+                
+                // 保存数组维度信息和变量
+                addArrayDimensions(name, dims);
+                addVariable(name, arrayVar);
+            }
+        }
+    }
+    
+    /**
+     * 处理全局数组初始化
+     */
+    private List<Value> processGlobalArrayInit(SyntaxTree.ArrayInitExpr initExpr, 
+                                              List<Integer> dims, 
+                                              Type elementType) {
+        // 计算数组总大小
+        int totalSize = 1;
+        for (int dim : dims) {
+            totalSize *= dim;
+        }
+        
+        // 收集初始化值
+        List<Value> initValues = new ArrayList<>();
+        flattenGlobalArrayInit(initExpr, initValues, elementType);
+        
+        // 如果初始化值不足，用0填充
+        while (initValues.size() < totalSize) {
+            if (elementType == IntegerType.I32) {
+                initValues.add(new ConstantInt(0));
+            } else { // FloatType
+                initValues.add(new ConstantFloat(0.0f));
+            }
+        }
+        
+        return initValues;
+    }
+    
+    /**
+     * 展平全局数组初始化表达式
+     */
+    private void flattenGlobalArrayInit(SyntaxTree.Expr expr, List<Value> result, Type elementType) {
+        if (expr instanceof SyntaxTree.ArrayInitExpr) {
+            SyntaxTree.ArrayInitExpr arrayInit = (SyntaxTree.ArrayInitExpr) expr;
+            for (SyntaxTree.Expr element : arrayInit.elements) {
+                flattenGlobalArrayInit(element, result, elementType);
+            }
+        } else if (expr instanceof SyntaxTree.LiteralExpr) {
+            // 处理常量元素
+            Object value = ((SyntaxTree.LiteralExpr) expr).value;
+            if (value instanceof Integer) {
+                if (elementType == IntegerType.I32) {
+                    result.add(new ConstantInt((Integer) value));
+                } else { // FloatType
+                    result.add(new ConstantFloat(((Integer) value).floatValue()));
+                }
+            } else if (value instanceof Float) {
+                if (elementType == IntegerType.I32) {
+                    result.add(new ConstantInt(((Float) value).intValue()));
+                } else { // FloatType
+                    result.add(new ConstantFloat((Float) value));
+                }
+            } else {
+                throw new RuntimeException("不支持的数组元素类型");
+            }
+        } else {
+            throw new RuntimeException("全局数组初始化必须使用常量表达式");
+        }
+    }
+    
+    /**
+     * 访问函数定义
+     */
+    private void visitFuncDef(SyntaxTree.FuncDef funcDef) {
+        String name = funcDef.name;
+        String retTypeStr = funcDef.retType;
+        
+        // 确定返回类型
+        Type retType;
+        switch (retTypeStr) {
+            case "int":
+                retType = IntegerType.I32;
+                break;
+            case "float":
+                retType = FloatType.FLOAT;
+                break;
+            case "void":
+                retType = VoidType.VOID;
+                break;
+            default:
+                throw new RuntimeException("不支持的返回类型: " + retTypeStr);
+        }
+        
+        // 创建函数
+        Function function = IRBuilder.createFunction("@" + name, retType, module);
+        currentFunction = function;
+        
+        // 添加到符号表
+        addVariable(name, function);
+        
+        // 创建入口基本块
+        BasicBlock entryBlock = IRBuilder.createBasicBlock(function);
+        currentBlock = entryBlock;
+        
+        // 进入函数作用域
+        enterScope();
+        
+        // 处理参数
+        for (SyntaxTree.Param param : funcDef.params) {
+            processParam(param, function);
+        }
+        
+        // 处理函数体
+        visitBlock(funcDef.body);
+        
+        // 确保函数有返回语句
+        Instruction lastInst = null;
+        if (!currentBlock.getInstructions().isEmpty()) {
+            lastInst = currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1);
+        }
+        
+        if (lastInst == null || !(lastInst instanceof ReturnInstruction)) {
+            // 如果最后一条指令不是返回指令，添加一个默认的返回指令
+            if (retType == VoidType.VOID) {
+                IRBuilder.createRet(currentBlock); // void返回
+            } else if (retType == IntegerType.I32) {
+                IRBuilder.createRet(new ConstantInt(0), currentBlock); // 返回0
+            } else if (retType == FloatType.FLOAT) {
+                IRBuilder.createRet(new ConstantFloat(0.0f), currentBlock); // 返回0.0
+            }
+        }
+        
+        // 离开函数作用域
+        exitScope();
+    }
+    
+    /**
+     * 处理函数参数
+     */
+    private void processParam(SyntaxTree.Param param, Function function) {
+        String name = param.name;
+        String typeStr = param.type;
+        boolean isArray = param.isArray;
+        
+        Type type;
+        switch (typeStr) {
+            case "int":
+                type = isArray ? new PointerType(IntegerType.I32) : IntegerType.I32;
+                break;
+            case "float":
+                type = isArray ? new PointerType(FloatType.FLOAT) : FloatType.FLOAT;
+                break;
+            default:
+                throw new RuntimeException("不支持的参数类型: " + typeStr);
+        }
+        
+        // 创建参数
+        Argument arg = IRBuilder.createArgument("%" + name, type, function, function.getArguments().size());
+        
+        if (isArray) {
+            // 如果是数组参数，保存维度信息
+            List<Integer> dimensions = new ArrayList<>();
+            dimensions.add(0); // 第一维未知
+            
+            // 处理数组维度
+            for (SyntaxTree.Expr dimExpr : param.dimensions) {
+                if (dimExpr instanceof SyntaxTree.LiteralExpr) {
+                    Object dimValue = ((SyntaxTree.LiteralExpr) dimExpr).value;
+                    if (dimValue instanceof Integer) {
+                        dimensions.add((Integer) dimValue);
+                    } else {
+                        throw new RuntimeException("数组维度必须是整数常量");
+                    }
+                } else {
+                    throw new RuntimeException("数组维度必须是常量表达式");
+                }
+            }
+            
+            addArrayDimensions(name, dimensions);
+            addVariable(name, arg);
+        } else {
+            // 非数组参数，需要在函数入口处分配栈空间并存储参数值
+            Value allocaInst = IRBuilder.createAlloca(type, currentBlock);
+            IRBuilder.createStore(arg, allocaInst, currentBlock);
+            addVariable(name, allocaInst);
+        }
+    }
+    
+    /**
+     * 访问代码块
+     */
+    private void visitBlock(SyntaxTree.Block block) {
+        // 进入新的作用域
+        enterScope();
+        
+        // 处理块中的每条语句
+        for (SyntaxTree.Stmt stmt : block.stmts) {
+            visitStmt(stmt);
+        }
+        
+        // 离开作用域
+        exitScope();
+    }
+    
+    /**
+     * 访问语句
+     */
+    private void visitStmt(SyntaxTree.Stmt stmt) {
+        if (stmt instanceof SyntaxTree.ExprStmt) {
+            visitExprStmt((SyntaxTree.ExprStmt) stmt);
+        } else if (stmt instanceof SyntaxTree.AssignStmt) {
+            visitAssignStmt((SyntaxTree.AssignStmt) stmt);
+        } else if (stmt instanceof SyntaxTree.ReturnStmt) {
+            visitReturnStmt((SyntaxTree.ReturnStmt) stmt);
+        } else if (stmt instanceof SyntaxTree.IfStmt) {
+            visitIfStmt((SyntaxTree.IfStmt) stmt);
+        } else if (stmt instanceof SyntaxTree.WhileStmt) {
+            visitWhileStmt((SyntaxTree.WhileStmt) stmt);
+        } else if (stmt instanceof SyntaxTree.BreakStmt) {
+            visitBreakStmt();
+        } else if (stmt instanceof SyntaxTree.ContinueStmt) {
+            visitContinueStmt();
+        } else if (stmt instanceof SyntaxTree.Block) {
+            visitBlock((SyntaxTree.Block) stmt);
+        } else if (stmt instanceof SyntaxTree.VarDecl) {
+            visitLocalVarDecl((SyntaxTree.VarDecl) stmt);
+        }
+    }
+    
+    /**
+     * 访问表达式语句
+     */
+    private void visitExprStmt(SyntaxTree.ExprStmt stmt) {
+        visitExpr(stmt.expr);
+        // 表达式语句不需要保存结果值
+    }
+    
+    /**
+     * 访问局部变量声明
+     */
+    private void visitLocalVarDecl(SyntaxTree.VarDecl varDecl) {
+        String baseTypeStr = varDecl.baseType;
+        boolean isConst = varDecl.isConst;
+        
+        // 确定基本类型
+        Type baseType;
+        switch (baseTypeStr) {
+            case "int":
+                baseType = IntegerType.I32;
+                break;
+            case "float":
+                baseType = FloatType.FLOAT;
+                break;
+            default:
+                throw new RuntimeException("不支持的变量类型: " + baseTypeStr);
+        }
+        
+        // 处理每个变量定义
+        for (SyntaxTree.VarDef varDef : varDecl.variables) {
+            String name = varDef.ident;
+            List<Integer> dims = varDef.dims;
+            
+            if (dims.isEmpty()) {
+                // 普通变量
+                Value allocaInst = IRBuilder.createAlloca(baseType, currentBlock);
+                
+                // 如果有初始化表达式，计算并存储
+                if (varDef.init != null) {
+                    visitExpr(varDef.init);
+                    Value initValue = currentValue;
+                    
+                    // 类型转换（如果需要）
+                    if (!initValue.getType().equals(baseType)) {
+                        if (baseType == IntegerType.I32 && initValue.getType() instanceof FloatType) {
+                            initValue = IRBuilder.createFPToSI(initValue, IntegerType.I32, currentBlock);
+                        } else if (baseType == FloatType.FLOAT && initValue.getType() instanceof IntegerType) {
+                            initValue = IRBuilder.createSIToFP(initValue, FloatType.FLOAT, currentBlock);
+                        }
+                    }
+                    
+                    IRBuilder.createStore(initValue, allocaInst, currentBlock);
+                }
+                
+                // 添加到符号表
+                addVariable(name, allocaInst);
+            } else {
+                // 数组变量
+                // 计算数组总大小
+                int totalSize = 1;
+                for (int dim : dims) {
+                    totalSize *= dim;
+                }
+                
+                // 创建数组
+                Value arrayPtr = IRBuilder.createAlloca(
+                    new PointerType(baseType),
+                    totalSize,
+                    currentBlock
+                );
+                
+                // 处理数组初始化
+                if (varDef.init != null) {
+                    if (varDef.init instanceof SyntaxTree.ArrayInitExpr) {
+                        processArrayInit((SyntaxTree.ArrayInitExpr) varDef.init, arrayPtr, dims, baseType);
+                    } else {
+                        throw new RuntimeException("数组变量初始化必须使用数组初始化表达式");
+                    }
+                } else {
+                    // 如果没有初始化，使用memset将数组清零
+                    Value zeroValue = new ConstantInt(0);
+                    Value sizeValue = new ConstantInt(totalSize * (baseType == IntegerType.I32 ? 4 : 4)); // 4字节整数或浮点数
+                    
+                    List<Value> args = new ArrayList<>();
+                    args.add(arrayPtr);
+                    args.add(zeroValue);
+                    args.add(sizeValue);
+                    
+                    Function memsetFunc = (Function) findVariable("memset");
+                    IRBuilder.createCall(memsetFunc, args, currentBlock);
+                }
+                
+                // 保存数组维度信息和变量
+                addArrayDimensions(name, dims);
+                addVariable(name, arrayPtr);
+            }
+        }
+    }
+    
+    /**
+     * 处理数组初始化
+     */
+    private void processArrayInit(SyntaxTree.ArrayInitExpr initExpr, Value arrayPtr, List<Integer> dims, Type elementType) {
+        // 这是一个简化的实现，实际上应该递归处理多维数组初始化
+        List<Value> flattenedValues = flattenArrayInit(initExpr, dims, elementType);
+        
+        // 将值存储到数组中
+        for (int i = 0; i < flattenedValues.size(); i++) {
+            // 计算元素指针
+            Value indexValue = new ConstantInt(i);
+            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+            
+            // 存储值
+            IRBuilder.createStore(flattenedValues.get(i), elemPtr, currentBlock);
+        }
+    }
+    
+    /**
+     * 将嵌套的数组初始化表达式展平为一维值列表
+     */
+    private List<Value> flattenArrayInit(SyntaxTree.ArrayInitExpr initExpr, List<Integer> dims, Type elementType) {
+        List<Value> result = new ArrayList<>();
+        
+        // 计算数组总大小
+        int totalSize = 1;
+        for (int dim : dims) {
+            totalSize *= dim;
+        }
+        
+        // 递归展平数组初始化表达式
+        flattenArrayInitRecursive(initExpr, result, elementType);
+        
+        // 如果初始化值不足，用0填充
+        while (result.size() < totalSize) {
+            if (elementType == IntegerType.I32) {
+                result.add(new ConstantInt(0));
+            } else if (elementType == FloatType.FLOAT) {
+                result.add(new ConstantFloat(0.0f));
+            }
+        }
+        
+        return result;
+    }
+    
+    /**
+     * 递归展平数组初始化表达式
+     */
+    private void flattenArrayInitRecursive(SyntaxTree.Expr expr, List<Value> result, Type elementType) {
+        if (expr instanceof SyntaxTree.ArrayInitExpr) {
+            SyntaxTree.ArrayInitExpr arrayInit = (SyntaxTree.ArrayInitExpr) expr;
+            for (SyntaxTree.Expr element : arrayInit.elements) {
+                flattenArrayInitRecursive(element, result, elementType);
+            }
+        } else {
+            // 处理单个元素
+            visitExpr(expr);
+            Value value = currentValue;
+            
+            // 类型转换（如果需要）
+            if (!value.getType().equals(elementType)) {
+                if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                    value = IRBuilder.createFPToSI(value, IntegerType.I32, currentBlock);
+                } else if (elementType == FloatType.FLOAT && value.getType() instanceof IntegerType) {
+                    value = IRBuilder.createSIToFP(value, FloatType.FLOAT, currentBlock);
+                }
+            }
+            
+            result.add(value);
+        }
+    }
+    
+    /**
+     * 访问赋值语句
+     */
+    private void visitAssignStmt(SyntaxTree.AssignStmt stmt) {
+        // 处理左值表达式
+        if (!(stmt.target instanceof SyntaxTree.VarExpr || stmt.target instanceof SyntaxTree.ArrayAccessExpr)) {
+            throw new RuntimeException("赋值语句左侧必须是变量或数组元素");
+        }
+        
+        // 获取右值
+        visitExpr(stmt.value);
+        Value rightValue = currentValue;
+        
+        // 处理左值
+        if (stmt.target instanceof SyntaxTree.VarExpr) {
+            // 变量赋值
+            String name = ((SyntaxTree.VarExpr) stmt.target).name;
+            Value varPtr = findVariable(name);
+            
+            if (varPtr == null) {
+                throw new RuntimeException("未定义的变量: " + name);
+            }
+            
+            // 如果是指针类型（局部变量），直接存储；否则（全局变量）需要先加载
+            if (varPtr.getType() instanceof PointerType) {
+                // 类型转换（如果需要）
+                Type targetType = ((PointerType) varPtr.getType()).getPointedType();
+                if (!rightValue.getType().equals(targetType)) {
+                    if (targetType == IntegerType.I32 && rightValue.getType() instanceof FloatType) {
+                        rightValue = IRBuilder.createFPToSI(rightValue, IntegerType.I32, currentBlock);
+                    } else if (targetType == FloatType.FLOAT && rightValue.getType() instanceof IntegerType) {
+                        rightValue = IRBuilder.createSIToFP(rightValue, FloatType.FLOAT, currentBlock);
+                    }
+                }
+                
+                IRBuilder.createStore(rightValue, varPtr, currentBlock);
+            } else {
+                throw new RuntimeException("无法对非左值表达式赋值: " + name);
+            }
+        } else if (stmt.target instanceof SyntaxTree.ArrayAccessExpr) {
+            // 数组元素赋值
+            visitArrayAccessExpr((SyntaxTree.ArrayAccessExpr) stmt.target);
+            Value elemPtr = currentValue;
+            
+            // 确保获取的是指针
+            if (!(elemPtr.getType() instanceof PointerType)) {
+                throw new RuntimeException("数组访问表达式必须返回指针");
+            }
+            
+            // 类型转换（如果需要）
+            Type targetType = ((PointerType) elemPtr.getType()).getPointedType();
+            if (!rightValue.getType().equals(targetType)) {
+                if (targetType == IntegerType.I32 && rightValue.getType() instanceof FloatType) {
+                    rightValue = IRBuilder.createFPToSI(rightValue, IntegerType.I32, currentBlock);
+                } else if (targetType == FloatType.FLOAT && rightValue.getType() instanceof IntegerType) {
+                    rightValue = IRBuilder.createSIToFP(rightValue, FloatType.FLOAT, currentBlock);
+                }
+            }
+            
+            IRBuilder.createStore(rightValue, elemPtr, currentBlock);
+        }
+    }
+    
+    /**
+     * 访问返回语句
+     */
+    private void visitReturnStmt(SyntaxTree.ReturnStmt stmt) {
+        if (stmt.value != null) {
+            // 有返回值
+            visitExpr(stmt.value);
+            Value retValue = currentValue;
+            
+            // 类型转换（如果需要）
+            Type returnType = currentFunction.getReturnType();
+            if (!retValue.getType().equals(returnType)) {
+                if (returnType == IntegerType.I32 && retValue.getType() instanceof FloatType) {
+                    retValue = IRBuilder.createFPToSI(retValue, IntegerType.I32, currentBlock);
+                } else if (returnType == FloatType.FLOAT && retValue.getType() instanceof IntegerType) {
+                    retValue = IRBuilder.createSIToFP(retValue, FloatType.FLOAT, currentBlock);
+                }
+            }
+            
+            IRBuilder.createRet(retValue, currentBlock);
+        } else {
+            // 无返回值
+            IRBuilder.createRet(currentBlock);
+        }
+        
+        // 创建一个不可达的基本块，用于后续指令
+        BasicBlock unreachableBlock = IRBuilder.createBasicBlock(currentFunction);
+        currentBlock = unreachableBlock;
+    }
+    
+    /**
+     * 访问if语句
+     */
+    private void visitIfStmt(SyntaxTree.IfStmt stmt) {
+        // 创建基本块
+        BasicBlock thenBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock elseBlock = stmt.elseBranch != null ? IRBuilder.createBasicBlock(currentFunction) : null;
+        BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
+        
+        // 处理条件表达式
+        visitExpr(stmt.cond);
+        Value condValue = convertToBoolean(currentValue);
+        
+        // 创建条件分支指令
+        if (elseBlock != null) {
+            IRBuilder.createCondBr(condValue, thenBlock, elseBlock, currentBlock);
+        } else {
+            IRBuilder.createCondBr(condValue, thenBlock, mergeBlock, currentBlock);
+        }
+        
+        // 处理then分支
+        currentBlock = thenBlock;
+        visitStmt(stmt.thenBranch);
+        if (!currentBlock.getInstructions().isEmpty() && 
+            !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof ReturnInstruction)) {
+            IRBuilder.createBr(mergeBlock, currentBlock);
+        }
+        
+        // 处理else分支（如果有）
+        if (elseBlock != null) {
+            currentBlock = elseBlock;
+            visitStmt(stmt.elseBranch);
+            if (!currentBlock.getInstructions().isEmpty() && 
+                !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof ReturnInstruction)) {
+                IRBuilder.createBr(mergeBlock, currentBlock);
+            }
+        }
+        
+        // 继续在合并块中生成代码
+        currentBlock = mergeBlock;
+    }
+    
+    /**
+     * 访问while语句
+     */
+    private void visitWhileStmt(SyntaxTree.WhileStmt stmt) {
+        // 创建基本块
+        BasicBlock condBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock bodyBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock exitBlock = IRBuilder.createBasicBlock(currentFunction);
+        
+        // 跳转到条件块
+        IRBuilder.createBr(condBlock, currentBlock);
+        
+        // 处理条件
+        currentBlock = condBlock;
+        visitExpr(stmt.cond);
+        Value condValue = convertToBoolean(currentValue);
+        IRBuilder.createCondBr(condValue, bodyBlock, exitBlock, currentBlock);
+        
+        // 记录循环信息，用于break和continue
+        loopConditionBlocks.push(condBlock);
+        loopExitBlocks.push(exitBlock);
+        
+        // 处理循环体
+        currentBlock = bodyBlock;
+        visitStmt(stmt.body);
+        if (!currentBlock.getInstructions().isEmpty() && 
+            !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof ReturnInstruction)) {
+            IRBuilder.createBr(condBlock, currentBlock);
+        }
+        
+        // 弹出循环信息
+        loopConditionBlocks.pop();
+        loopExitBlocks.pop();
+        
+        // 继续在退出块中生成代码
+        currentBlock = exitBlock;
+    }
+    
+    /**
+     * 访问break语句
+     */
+    private void visitBreakStmt() {
+        if (loopExitBlocks.isEmpty()) {
+            throw new RuntimeException("break语句必须在循环内部");
+        }
+        
+        // 跳转到当前循环的退出块
+        IRBuilder.createBr(loopExitBlocks.peek(), currentBlock);
+        
+        // 创建一个不可达的基本块，用于后续指令
+        BasicBlock unreachableBlock = IRBuilder.createBasicBlock(currentFunction);
+        currentBlock = unreachableBlock;
+    }
+    
+    /**
+     * 访问continue语句
+     */
+    private void visitContinueStmt() {
+        if (loopConditionBlocks.isEmpty()) {
+            throw new RuntimeException("continue语句必须在循环内部");
+        }
+        
+        // 跳转到当前循环的条件块
+        IRBuilder.createBr(loopConditionBlocks.peek(), currentBlock);
+        
+        // 创建一个不可达的基本块，用于后续指令
+        BasicBlock unreachableBlock = IRBuilder.createBasicBlock(currentFunction);
+        currentBlock = unreachableBlock;
+    }
+    
+    /**
+     * 访问表达式
+     */
+    private void visitExpr(SyntaxTree.Expr expr) {
+        if (expr instanceof SyntaxTree.LiteralExpr) {
+            visitLiteralExpr((SyntaxTree.LiteralExpr) expr);
+        } else if (expr instanceof SyntaxTree.VarExpr) {
+            visitVarExpr((SyntaxTree.VarExpr) expr);
+        } else if (expr instanceof SyntaxTree.BinaryExpr) {
+            visitBinaryExpr((SyntaxTree.BinaryExpr) expr);
+        } else if (expr instanceof SyntaxTree.UnaryExpr) {
+            visitUnaryExpr((SyntaxTree.UnaryExpr) expr);
+        } else if (expr instanceof SyntaxTree.CallExpr) {
+            visitCallExpr((SyntaxTree.CallExpr) expr);
+        } else if (expr instanceof SyntaxTree.ArrayAccessExpr) {
+            visitArrayAccessExpr((SyntaxTree.ArrayAccessExpr) expr);
+        } else if (expr instanceof SyntaxTree.ArrayInitExpr) {
+            visitArrayInitExpr((SyntaxTree.ArrayInitExpr) expr);
+        }
+    }
+    
+    /**
+     * 访问字面量表达式
+     */
+    private void visitLiteralExpr(SyntaxTree.LiteralExpr expr) {
+        Object value = expr.value;
+        if (value instanceof Integer) {
+            currentValue = new ConstantInt((Integer) value);
+        } else if (value instanceof Float) {
+            currentValue = new ConstantFloat((Float) value);
+        } else {
+            throw new RuntimeException("不支持的字面量类型: " + value.getClass().getName());
+        }
+    }
+    
+    /**
+     * 访问变量表达式
+     */
+    private void visitVarExpr(SyntaxTree.VarExpr expr) {
+        String name = expr.name;
+        Value value = findVariable(name);
+        
+        if (value == null) {
+            throw new RuntimeException("未定义的变量: " + name);
+        }
+        
+        // 如果是指针类型（局部变量），需要加载其值
+        if (value.getType() instanceof PointerType && !(value instanceof GlobalVariable)) {
+            Type pointedType = ((PointerType) value.getType()).getPointedType();
+            currentValue = IRBuilder.createLoad(value, pointedType, currentBlock);
+        } else {
+            currentValue = value;
+        }
+    }
+    
+    /**
+     * 访问一元表达式
+     */
+    private void visitUnaryExpr(SyntaxTree.UnaryExpr expr) {
+        // 先处理操作数
+        visitExpr(expr.expr);
+        Value operand = currentValue;
+        
+        // 根据操作符类型处理
+        switch (expr.op) {
+            case "+":
+                // 一元加法不需要任何操作
+                break;
+            case "-":
+                // 对于整数，创建0-operand
+                if (operand.getType() instanceof IntegerType) {
+                    Value zero = new ConstantInt(0);
+                    currentValue = IRBuilder.createBinary(OpCode.SUB, zero, operand, currentBlock);
+                }
+                // 对于浮点数，创建0.0-operand
+                else if (operand.getType() instanceof FloatType) {
+                    Value zero = new ConstantFloat(0.0f);
+                    currentValue = IRBuilder.createBinary(OpCode.FSUB, zero, operand, currentBlock);
+                }
+                break;
+            case "!":
+                // 逻辑非：将表达式与0比较，如果等于0则为1，否则为0
+                if (operand.getType() instanceof IntegerType) {
+                    Value zero = new ConstantInt(0);
+                    currentValue = IRBuilder.createICmp(OpCode.EQ, operand, zero, currentBlock);
+                } else if (operand.getType() instanceof FloatType) {
+                    // 将浮点数转为整数再比较
+                    Value intValue = IRBuilder.createFPToSI(operand, IntegerType.I32, currentBlock);
+                    Value zero = new ConstantInt(0);
+                    currentValue = IRBuilder.createICmp(OpCode.EQ, intValue, zero, currentBlock);
+                }
+                break;
+            default:
+                throw new RuntimeException("不支持的一元操作符: " + expr.op);
+        }
+    }
+    
+    /**
+     * 访问二元表达式
+     */
+    private void visitBinaryExpr(SyntaxTree.BinaryExpr expr) {
+        // 先处理左操作数
+        visitExpr(expr.left);
+        Value leftValue = currentValue;
+        
+        // 处理右操作数
+        visitExpr(expr.right);
+        Value rightValue = currentValue;
+        
+        // 类型检查和转换
+        Type leftType = leftValue.getType();
+        Type rightType = rightValue.getType();
+        
+        // 如果操作数类型不一致，需要进行类型转换
+        if (!leftType.equals(rightType)) {
+            // 整数和浮点数运算，将整数转换为浮点数
+            if (leftType instanceof IntegerType && rightType instanceof FloatType) {
+                leftValue = IRBuilder.createSIToFP(leftValue, FloatType.FLOAT, currentBlock);
+                leftType = FloatType.FLOAT;
+            } else if (leftType instanceof FloatType && rightType instanceof IntegerType) {
+                rightValue = IRBuilder.createSIToFP(rightValue, FloatType.FLOAT, currentBlock);
+                rightType = FloatType.FLOAT;
+            }
+        }
+        
+        // 根据操作符和操作数类型生成相应的指令
+        switch (expr.op) {
+            // 算术运算
+            case "+":
+                if (leftType instanceof IntegerType) {
+                    currentValue = IRBuilder.createBinary(OpCode.ADD, leftValue, rightValue, currentBlock);
+                } else { // FloatType
+                    currentValue = IRBuilder.createBinary(OpCode.FADD, leftValue, rightValue, currentBlock);
+                }
+                break;
+            case "-":
+                if (leftType instanceof IntegerType) {
+                    currentValue = IRBuilder.createBinary(OpCode.SUB, leftValue, rightValue, currentBlock);
+                } else { // FloatType
+                    currentValue = IRBuilder.createBinary(OpCode.FSUB, leftValue, rightValue, currentBlock);
+                }
+                break;
+            case "*":
+                if (leftType instanceof IntegerType) {
+                    currentValue = IRBuilder.createBinary(OpCode.MUL, leftValue, rightValue, currentBlock);
+                } else { // FloatType
+                    currentValue = IRBuilder.createBinary(OpCode.FMUL, leftValue, rightValue, currentBlock);
+                }
+                break;
+            case "/":
+                if (leftType instanceof IntegerType) {
+                    currentValue = IRBuilder.createBinary(OpCode.DIV, leftValue, rightValue, currentBlock);
+                } else { // FloatType
+                    currentValue = IRBuilder.createBinary(OpCode.FDIV, leftValue, rightValue, currentBlock);
+                }
+                break;
+            case "%":
+                if (leftType instanceof IntegerType) {
+                    currentValue = IRBuilder.createBinary(OpCode.REM, leftValue, rightValue, currentBlock);
+                } else { // FloatType
+                    currentValue = IRBuilder.createBinary(OpCode.FREM, leftValue, rightValue, currentBlock);
+                }
+                break;
+                
+            // 比较运算
+            case "<":
+                if (leftType instanceof IntegerType) {
+                    currentValue = IRBuilder.createICmp(OpCode.SLT, leftValue, rightValue, currentBlock);
+                } else { // FloatType
+                    currentValue = IRBuilder.createFCmp(OpCode.ULT, leftValue, rightValue, currentBlock);
+                }
+                break;
+            case "<=":
+                if (leftType instanceof IntegerType) {
+                    currentValue = IRBuilder.createICmp(OpCode.SLE, leftValue, rightValue, currentBlock);
+                } else { // FloatType
+                    currentValue = IRBuilder.createFCmp(OpCode.ULE, leftValue, rightValue, currentBlock);
+                }
+                break;
+            case ">":
+                if (leftType instanceof IntegerType) {
+                    currentValue = IRBuilder.createICmp(OpCode.SGT, leftValue, rightValue, currentBlock);
+                } else { // FloatType
+                    currentValue = IRBuilder.createFCmp(OpCode.UGT, leftValue, rightValue, currentBlock);
+                }
+                break;
+            case ">=":
+                if (leftType instanceof IntegerType) {
+                    currentValue = IRBuilder.createICmp(OpCode.SGE, leftValue, rightValue, currentBlock);
+                } else { // FloatType
+                    currentValue = IRBuilder.createFCmp(OpCode.UGE, leftValue, rightValue, currentBlock);
+                }
+                break;
+            case "==":
+                if (leftType instanceof IntegerType) {
+                    currentValue = IRBuilder.createICmp(OpCode.EQ, leftValue, rightValue, currentBlock);
+                } else { // FloatType
+                    currentValue = IRBuilder.createFCmp(OpCode.UEQ, leftValue, rightValue, currentBlock);
+                }
+                break;
+            case "!=":
+                if (leftType instanceof IntegerType) {
+                    currentValue = IRBuilder.createICmp(OpCode.NE, leftValue, rightValue, currentBlock);
+                } else { // FloatType
+                    currentValue = IRBuilder.createFCmp(OpCode.UNE, leftValue, rightValue, currentBlock);
+                }
+                break;
+                
+            // 逻辑运算
+            case "&&":
+                // 短路求值：创建新的基本块
+                BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
+                BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
+                
+                // 左操作数为真时才计算右操作数
+                Value leftCond = convertToBoolean(leftValue);
+                IRBuilder.createCondBr(leftCond, rightBlock, mergeBlock, currentBlock);
+                
+                // 右操作数基本块
+                currentBlock = rightBlock;
+                Value rightCond = convertToBoolean(rightValue);
+                IRBuilder.createBr(mergeBlock, currentBlock);
+                
+                // 合并基本块，使用PHI指令选择结果
+                currentBlock = mergeBlock;
+                Value falseValue = new ConstantInt(0);
+                List<Value> values = new ArrayList<>();
+                values.add(falseValue);
+                values.add(rightCond);
+                List<BasicBlock> blocks = new ArrayList<>();
+                blocks.add(rightBlock.getPredecessors().get(0)); // 左操作数为假的前驱块
+                blocks.add(rightBlock); // 右操作数块
+                currentValue = IRBuilder.createPhi(IntegerType.I1, values, blocks, currentBlock);
+                break;
+                
+            case "||":
+                // 短路求值：创建新的基本块
+                BasicBlock rightBlock2 = IRBuilder.createBasicBlock(currentFunction);
+                BasicBlock mergeBlock2 = IRBuilder.createBasicBlock(currentFunction);
+                
+                // 左操作数为假时才计算右操作数
+                Value leftCond2 = convertToBoolean(leftValue);
+                IRBuilder.createCondBr(leftCond2, mergeBlock2, rightBlock2, currentBlock);
+                
+                // 右操作数基本块
+                currentBlock = rightBlock2;
+                Value rightCond2 = convertToBoolean(rightValue);
+                IRBuilder.createBr(mergeBlock2, currentBlock);
+                
+                // 合并基本块，使用PHI指令选择结果
+                currentBlock = mergeBlock2;
+                Value trueValue = new ConstantInt(1);
+                List<Value> values2 = new ArrayList<>();
+                values2.add(trueValue);
+                values2.add(rightCond2);
+                List<BasicBlock> blocks2 = new ArrayList<>();
+                blocks2.add(rightBlock2.getPredecessors().get(0)); // 左操作数为真的前驱块
+                blocks2.add(rightBlock2); // 右操作数块
+                currentValue = IRBuilder.createPhi(IntegerType.I1, values2, blocks2, currentBlock);
+                break;
+                
+            default:
+                throw new RuntimeException("不支持的二元操作符: " + expr.op);
+        }
+    }
+    
+    /**
+     * 将值转换为布尔值（0或1）
+     */
+    private Value convertToBoolean(Value value) {
+        if (value.getType() instanceof IntegerType && ((IntegerType) value.getType()).getBitWidth() == 1) {
+            return value; // 已经是布尔值
+        } else if (value.getType() instanceof IntegerType) {
+            // 与0比较，不等于0为真
+            Value zero = new ConstantInt(0);
+            return IRBuilder.createICmp(OpCode.NE, value, zero, currentBlock);
+        } else if (value.getType() instanceof FloatType) {
+            // 浮点数转整数后与0比较
+            Value intValue = IRBuilder.createFPToSI(value, IntegerType.I32, currentBlock);
+            Value zero = new ConstantInt(0);
+            return IRBuilder.createICmp(OpCode.NE, intValue, zero, currentBlock);
+        }
+        throw new RuntimeException("无法将类型 " + value.getType() + " 转换为布尔值");
+    }
+    
+    /**
+     * 访问函数调用表达式
+     */
+    private void visitCallExpr(SyntaxTree.CallExpr expr) {
+        // 查找函数
+        String funcName = expr.funcName;
+        Value funcValue = findVariable(funcName);
+        
+        if (funcValue == null || !(funcValue instanceof Function)) {
+            throw new RuntimeException("未定义的函数: " + funcName);
+        }
+        
+        Function function = (Function) funcValue;
+        List<Value> args = new ArrayList<>();
+        
+        // 处理参数
+        for (SyntaxTree.Expr argExpr : expr.args) {
+            visitExpr(argExpr);
+            args.add(currentValue);
+        }
+        
+        // 检查参数类型并进行必要的类型转换
+        List<Argument> funcArgs = function.getArguments();
+        if (args.size() != funcArgs.size()) {
+            throw new RuntimeException("函数 " + funcName + " 参数数量不匹配: 期望 " + 
+                                      funcArgs.size() + ", 实际 " + args.size());
+        }
+        
+        for (int i = 0; i < args.size(); i++) {
+            Value arg = args.get(i);
+            Type paramType = funcArgs.get(i).getType();
+            
+            // 如果类型不匹配，尝试进行类型转换
+            if (!arg.getType().equals(paramType)) {
+                if (arg.getType() instanceof IntegerType && paramType instanceof FloatType) {
+                    // 整数转浮点
+                    args.set(i, IRBuilder.createSIToFP(arg, FloatType.FLOAT, currentBlock));
+                } else if (arg.getType() instanceof FloatType && paramType instanceof IntegerType) {
+                    // 浮点转整数
+                    args.set(i, IRBuilder.createFPToSI(arg, IntegerType.I32, currentBlock));
+                }
+                // 其他类型不匹配的情况可能需要更复杂的处理
+            }
+        }
+        
+        // 特殊处理：starttime和stoptime函数需要额外的参数
+        if (funcName.equals("starttime") || funcName.equals("stoptime")) {
+            args.add(new ConstantInt(0)); // 添加行号参数
+        }
+        
+        // 创建函数调用指令
+        currentValue = IRBuilder.createCall(function, args, currentBlock);
+    }
+    
+    /**
+     * 访问数组访问表达式
+     */
+    private void visitArrayAccessExpr(SyntaxTree.ArrayAccessExpr expr) {
+        // 获取数组变量
+        String arrayName = expr.arrayName;
+        Value arrayPtr = findVariable(arrayName);
+        
+        if (arrayPtr == null) {
+            throw new RuntimeException("未定义的数组: " + arrayName);
+        }
+        
+        // 获取数组维度信息
+        List<Integer> dimensions = findArrayDimensions(arrayName);
+        if (dimensions == null) {
+            throw new RuntimeException("无法获取数组 " + arrayName + " 的维度信息");
+        }
+        
+        // 处理索引表达式
+        List<Value> indices = new ArrayList<>();
+        for (SyntaxTree.Expr indexExpr : expr.indices) {
+            visitExpr(indexExpr);
+            indices.add(currentValue);
+        }
+        
+        // 检查索引数量
+        if (indices.size() > dimensions.size()) {
+            throw new RuntimeException("数组 " + arrayName + " 的索引数量过多");
+        }
+        
+        // 计算偏移量
+        Value offset = null;
+        
+        // 如果是函数参数数组（已经是指针），处理方式不同
+        if (arrayPtr instanceof Argument && arrayPtr.getType() instanceof PointerType) {
+            // 对于多维数组参数，需要特殊处理
+            if (indices.size() == 1) {
+                // 一维数组直接使用索引
+                offset = indices.get(0);
+            } else {
+                // 多维数组需要计算偏移量
+                // 计算每个维度的因子
+                List<Integer> factors = new ArrayList<>();
+                for (int i = 0; i < dimensions.size(); i++) {
+                    int factor = 1;
+                    for (int j = i + 1; j < dimensions.size(); j++) {
+                        factor *= dimensions.get(j);
+                    }
+                    factors.add(factor);
+                }
+                
+                // 计算总偏移量
+                offset = new ConstantInt(0);
+                for (int i = 0; i < indices.size(); i++) {
+                    Value indexFactor = IRBuilder.createBinary(
+                        OpCode.MUL,
+                        indices.get(i),
+                        new ConstantInt(factors.get(i)),
+                        currentBlock
+                    );
+                    offset = IRBuilder.createBinary(OpCode.ADD, offset, indexFactor, currentBlock);
+                }
+            }
+            
+            // 使用GEP指令获取元素指针
+            Type elementType = ((PointerType) arrayPtr.getType()).getPointedType();
+            currentValue = IRBuilder.createGetElementPtr(arrayPtr, offset, currentBlock);
+            
+            // 如果不是访问全部维度，结果是指针；否则加载值
+            if (indices.size() < dimensions.size()) {
+                // 结果是指针，不需要加载
+            } else {
+                // 加载元素值
+                currentValue = IRBuilder.createLoad(currentValue, elementType, currentBlock);
+            }
+        } else {
+            // 本地或全局数组变量
+            // 首先，如果是全局变量或局部变量，需要先获取数组的基址
+            if (arrayPtr instanceof GlobalVariable || 
+                (arrayPtr.getType() instanceof PointerType && 
+                 !(((PointerType) arrayPtr.getType()).getPointedType() instanceof PointerType))) {
+                
+                // 计算每个维度的因子
+                List<Integer> factors = new ArrayList<>();
+                for (int i = 0; i < dimensions.size(); i++) {
+                    int factor = 1;
+                    for (int j = i + 1; j < dimensions.size(); j++) {
+                        factor *= dimensions.get(j);
+                    }
+                    factors.add(factor);
+                }
+                
+                // 计算总偏移量
+                offset = new ConstantInt(0);
+                for (int i = 0; i < indices.size(); i++) {
+                    Value indexFactor = IRBuilder.createBinary(
+                        OpCode.MUL,
+                        indices.get(i),
+                        new ConstantInt(factors.get(i)),
+                        currentBlock
+                    );
+                    offset = IRBuilder.createBinary(OpCode.ADD, offset, indexFactor, currentBlock);
+                }
+                
+                // 使用GEP指令获取元素指针
+                Type elementType = null;
+                if (arrayPtr.getType() instanceof PointerType) {
+                    elementType = ((PointerType) arrayPtr.getType()).getPointedType();
+                }
+                
+                currentValue = IRBuilder.createGetElementPtr(arrayPtr, offset, currentBlock);
+                
+                // 如果不是访问全部维度，结果是指针；否则加载值
+                if (indices.size() < dimensions.size()) {
+                    // 结果是指针，不需要加载
+                } else {
+                    // 加载元素值
+                    currentValue = IRBuilder.createLoad(currentValue, elementType, currentBlock);
+                }
+            }
+        }
+    }
+    
+    /**
+     * 访问数组初始化表达式
+     */
+    private void visitArrayInitExpr(SyntaxTree.ArrayInitExpr expr) {
+        // 暂时不处理数组初始化表达式，这通常在变量声明中处理
+        throw new RuntimeException("数组初始化表达式应在变量声明中处理");
+    }
+    
+    /**
+     * 查找变量
+     */
+    private Value findVariable(String name) {
+        // 从内向外查找符号表
+        for (int i = symbolTables.size() - 1; i >= 0; i--) {
+            HashMap<String, Value> table = symbolTables.get(i);
+            if (table.containsKey(name)) {
+                return table.get(name);
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 添加变量到当前符号表
+     */
+    private void addVariable(String name, Value value) {
+        symbolTables.get(symbolTables.size() - 1).put(name, value);
+    }
+    
+    /**
+     * 添加数组维度信息
+     */
+    private void addArrayDimensions(String name, List<Integer> dimensions) {
+        arrayDimensions.get(arrayDimensions.size() - 1).put(name, dimensions);
+    }
+    
+    /**
+     * 查找数组维度信息
+     */
+    private List<Integer> findArrayDimensions(String name) {
+        for (int i = arrayDimensions.size() - 1; i >= 0; i--) {
+            HashMap<String, List<Integer>> table = arrayDimensions.get(i);
+            if (table.containsKey(name)) {
+                return table.get(name);
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 进入新作用域
+     */
+    private void enterScope() {
+        symbolTables.add(new HashMap<>());
+        arrayDimensions.add(new HashMap<>());
+    }
+    
+    /**
+     * 离开当前作用域
+     */
+    private void exitScope() {
+        symbolTables.remove(symbolTables.size() - 1);
+        arrayDimensions.remove(arrayDimensions.size() - 1);
+    }
+} 
