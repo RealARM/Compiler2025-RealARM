@@ -4,6 +4,10 @@ import IR.OpCode;
 import IR.Type.Type;
 import IR.Value.BasicBlock;
 import IR.Value.Value;
+import IR.Type.IntegerType;
+import IR.Value.ConstantInt;
+import IR.Type.FloatType;
+import IR.Value.ConstantFloat;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -107,6 +111,45 @@ public class PhiInstruction extends Instruction {
         incomingValues.clear();
         for (int i = 0; i < newPredecessors.size() && i < values.size(); i++) {
             incomingValues.put(newPredecessors.get(i), values.get(i));
+        }
+    }
+    
+    /**
+     * 确保PHI节点的输入与基本块的前驱匹配
+     */
+    public void syncWithPredecessors() {
+        if (getParent() == null) return;
+        
+        List<BasicBlock> predecessors = getParent().getPredecessors();
+        Map<BasicBlock, Value> newIncoming = new HashMap<>();
+        
+        // 为每个前驱块找到对应的值，或使用默认值
+        for (BasicBlock pred : predecessors) {
+            if (incomingValues.containsKey(pred)) {
+                // 保留已有的输入值
+                newIncoming.put(pred, incomingValues.get(pred));
+            } else {
+                // 添加默认值（0）
+                Value defaultValue;
+                if (getType() instanceof IntegerType) {
+                    defaultValue = new ConstantInt(0, (IntegerType)getType());
+                } else if (getType() instanceof FloatType) {
+                    defaultValue = new ConstantFloat(0.0f);
+                } else {
+                    // 对于其他类型，使用null作为默认值
+                    continue;
+                }
+                newIncoming.put(pred, defaultValue);
+            }
+        }
+        
+        // 清除所有操作数
+        removeAllOperands();
+        incomingValues.clear();
+        
+        // 添加新的输入值
+        for (Map.Entry<BasicBlock, Value> entry : newIncoming.entrySet()) {
+            addIncoming(entry.getValue(), entry.getKey());
         }
     }
     

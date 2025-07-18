@@ -451,14 +451,30 @@ public class IRBuilder {
     public static PhiInstruction createPhi(Type type, BasicBlock block) {
         String name = "phi_" + tmpCounter++;
         PhiInstruction inst = new PhiInstruction(type, name);
+        
         if (block != null) {
+            // 先添加到基本块
             block.addInstructionFirst(inst);
             
-            // 确保PHI节点与基本块前驱匹配
+            // 再确保前驱关系已正确建立
             List<BasicBlock> predecessors = block.getPredecessors();
             if (!predecessors.isEmpty()) {
-                // 更新PHI节点前驱信息
-                updatePhiNodePredecessors(inst, block);
+                // 为每个前驱块添加一个默认值
+                for (BasicBlock pred : predecessors) {
+                    Value defaultValue;
+                    if (type == IntegerType.I1) {
+                        defaultValue = new ConstantInt(0, IntegerType.I1);
+                    } else if (type instanceof IntegerType) {
+                        defaultValue = new ConstantInt(0);
+                    } else if (type instanceof FloatType) {
+                        defaultValue = new ConstantFloat(0.0f);
+                    } else {
+                        // 默认为null
+                        defaultValue = null;
+                        continue;
+                    }
+                    inst.addIncoming(defaultValue, pred);
+                }
             }
         }
         return inst;
