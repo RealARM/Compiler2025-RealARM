@@ -203,6 +203,8 @@ public class IRPrinter {
             printPhiInstruction((PhiInstruction) inst);
         } else if (inst instanceof ConversionInstruction) {
             printConversionInstruction((ConversionInstruction) inst);
+        } else if (inst instanceof CompareInstruction) {
+            printCompareInstruction((CompareInstruction) inst);
         } else {
             out.print("unknown instruction");
         }
@@ -383,5 +385,20 @@ public class IRPrinter {
         out.print(printValueName(inst.getSource()));
         out.print(" to ");
         out.print(inst.getType());
+    }
+    
+    /**
+     * 打印比较指令
+     */
+    private void printCompareInstruction(CompareInstruction inst) {
+        out.print(inst.getOpcodeName().toLowerCase());
+        out.print(" ");
+        out.print(inst.getPredicate().getName().toLowerCase());
+        out.print(" ");
+        out.print(inst.getLeft().getType());
+        out.print(" ");
+        out.print(printValueName(inst.getLeft()));
+        out.print(", ");
+        out.print(printValueName(inst.getRight()));
     }
 } 
