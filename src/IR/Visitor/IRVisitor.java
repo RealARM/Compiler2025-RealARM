@@ -301,7 +301,7 @@ public class IRVisitor {
                 if (valueToAdd instanceof ConstantInt && elementType == FloatType.F32) {
                     result.add(new ConstantFloat(((ConstantInt) valueToAdd).getValue()));
                 } else if (valueToAdd instanceof ConstantFloat && elementType == IntegerType.I32) {
-                    result.add(new ConstantInt((int) ((ConstantFloat) valueToAdd).getValue()));
+                    result.add(new ConstantInt((int) ((ConstantFloat)valueToAdd).getValue()));
                 } else {
                     result.add((Constant) valueToAdd);
                 }
@@ -601,13 +601,13 @@ public class IRVisitor {
             }
         } else {
             // 其他维度的数组，保持原来的一维处理方式
-            for (int i = 0; i < flattenedValues.size(); i++) {
-                // 计算元素指针
-                Value indexValue = new ConstantInt(i);
-                Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
-                
-                // 存储值
-                IRBuilder.createStore(flattenedValues.get(i), elemPtr, currentBlock);
+        for (int i = 0; i < flattenedValues.size(); i++) {
+            // 计算元素指针
+            Value indexValue = new ConstantInt(i);
+            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+            
+            // 存储值
+            IRBuilder.createStore(flattenedValues.get(i), elemPtr, currentBlock);
             }
         }
     }
@@ -793,14 +793,14 @@ public class IRVisitor {
             }
         } else {
             // 非二维数组，使用原有逻辑
-            flattenArrayInitRecursive(initExpr, result, elementType);
-            
-            // 如果初始化值不足，用0填充
-            while (result.size() < totalSize) {
-                if (elementType == IntegerType.I32) {
-                    result.add(new ConstantInt(0));
-                } else if (elementType == FloatType.F32) {
-                    result.add(new ConstantFloat(0.0f));
+        flattenArrayInitRecursive(initExpr, result, elementType);
+        
+        // 如果初始化值不足，用0填充
+        while (result.size() < totalSize) {
+            if (elementType == IntegerType.I32) {
+                result.add(new ConstantInt(0));
+            } else if (elementType == FloatType.F32) {
+                result.add(new ConstantFloat(0.0f));
                 }
             }
         }
@@ -933,7 +933,10 @@ public class IRVisitor {
         
         // 处理条件表达式
         visitExpr(stmt.cond);
-        Value condValue = convertToBoolean(currentValue);
+        Value condValue = currentValue;
+        
+        // 确保条件值为布尔类型(i1)
+        condValue = convertToBoolean(condValue);
         
         // 创建条件分支指令
         if (elseBlock != null) {
@@ -945,8 +948,9 @@ public class IRVisitor {
         // 处理then分支
         currentBlock = thenBlock;
         visitStmt(stmt.thenBranch);
+        // 如果最后一条指令不是终结指令，添加跳转到合并块
         if (!currentBlock.getInstructions().isEmpty() && 
-            !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof ReturnInstruction)) {
+            !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
             IRBuilder.createBr(mergeBlock, currentBlock);
         }
         
@@ -954,8 +958,9 @@ public class IRVisitor {
         if (elseBlock != null) {
             currentBlock = elseBlock;
             visitStmt(stmt.elseBranch);
+            // 如果最后一条指令不是终结指令，添加跳转到合并块
             if (!currentBlock.getInstructions().isEmpty() && 
-                !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof ReturnInstruction)) {
+                !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
                 IRBuilder.createBr(mergeBlock, currentBlock);
             }
         }
@@ -1247,382 +1252,196 @@ public class IRVisitor {
      * 访问二元表达式
      */
     private void visitBinaryExpr(SyntaxTree.BinaryExpr expr) {
-        // 先处理左操作数
+        String op = expr.op;
+        
+        // 特殊处理逻辑运算符，实现短路评估
+        if (op.equals("&&")) {
+            visitLogicalAnd(expr.left, expr.right);
+            return;
+        } else if (op.equals("||")) {
+            visitLogicalOr(expr.left, expr.right);
+            return;
+        }
+        
+        // 处理普通的二元运算
         visitExpr(expr.left);
         Value leftValue = currentValue;
         
-        // 处理右操作数
         visitExpr(expr.right);
         Value rightValue = currentValue;
         
-        // 类型检查和转换
-        Type leftType = leftValue.getType();
-        Type rightType = rightValue.getType();
-        
-        // 检查是否在全局变量初始化上下文中（currentBlock为null）
-        boolean isGlobalContext = currentBlock == null;
-        
-        // 如果操作数类型不一致，需要进行类型转换
-        if (!leftType.equals(rightType)) {
-            // 整数和浮点数运算，将整数转换为浮点数
-            if (leftType instanceof IntegerType && rightType instanceof FloatType) {
-                // 对于全局变量初始化，尝试直接计算结果
-                if (isGlobalContext) {
-                    if (leftValue instanceof ConstantInt) {
-                        leftValue = new ConstantFloat(((ConstantInt) leftValue).getValue());
-                    } else {
-                        // 创建转换指令但不添加到基本块
-                        leftValue = new ConversionInstruction(leftValue, FloatType.F32, OpCode.SITOFP, "conv_" + tmpCounter++);
-                    }
-                } else {
-                    leftValue = IRBuilder.createIntToFloat(leftValue, currentBlock);
-                }
-                leftType = FloatType.F32;
-            } else if (leftType instanceof FloatType && rightType instanceof IntegerType) {
-                // 对于全局变量初始化，尝试直接计算结果
-                if (isGlobalContext) {
-                    if (rightValue instanceof ConstantInt) {
-                        rightValue = new ConstantFloat(((ConstantInt) rightValue).getValue());
-                    } else {
-                        // 创建转换指令但不添加到基本块
-                        rightValue = new ConversionInstruction(rightValue, FloatType.F32, OpCode.SITOFP, "conv_" + tmpCounter++);
-                    }
-                } else {
-                    rightValue = IRBuilder.createIntToFloat(rightValue, currentBlock);
-                }
-                rightType = FloatType.F32;
+        // 处理比较操作
+        if (isCmpOp(op)) {
+            OpCode compareType;
+            OpCode predicate;
+            
+            // 判断是整数还是浮点比较
+            if (leftValue.getType() instanceof FloatType || rightValue.getType() instanceof FloatType) {
+                compareType = OpCode.FCMP;
+                predicate = getFloatPredicate(op);
+            } else {
+                compareType = OpCode.ICMP;
+                predicate = getIntPredicate(op);
             }
+            
+            currentValue = IRBuilder.createCompare(compareType, predicate, leftValue, rightValue, currentBlock);
+        } else {
+            // 确定操作码
+            OpCode opCode = getOpCodeForBinaryOp(op);
+            
+            // 普通运算
+            currentValue = IRBuilder.createBinaryInst(opCode, leftValue, rightValue, currentBlock);
         }
+    }
+    
+    /**
+     * 处理逻辑与(&&)，实现短路评估
+     */
+    private void visitLogicalAnd(SyntaxTree.Expr left, SyntaxTree.Expr right) {
+        // 创建需要的基本块
+        BasicBlock evalRightBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock endBlock = IRBuilder.createBasicBlock(currentFunction);
         
-        // 根据操作符和操作数类型生成相应的指令
-        switch (expr.op) {
-            // 算术运算
-            case "+":
-                if (leftType instanceof IntegerType) {
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.ADD);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，创建指令但不添加到基本块
-                    if (isGlobalContext) {
-                        currentValue = IRBuilder.createBinaryInstOnly(OpCode.ADD, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createBinaryInst(OpCode.ADD, leftValue, rightValue, currentBlock);
-                    }
-                } else { // FloatType
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.FADD);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，创建指令但不添加到基本块
-                    if (isGlobalContext) {
-                        currentValue = IRBuilder.createBinaryInstOnly(OpCode.FADD, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createBinaryInst(OpCode.FADD, leftValue, rightValue, currentBlock);
-                    }
-                }
-                break;
-            case "-":
-                if (leftType instanceof IntegerType) {
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.SUB);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，创建指令但不添加到基本块
-                    if (isGlobalContext) {
-                        currentValue = IRBuilder.createBinaryInstOnly(OpCode.SUB, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createBinaryInst(OpCode.SUB, leftValue, rightValue, currentBlock);
-                    }
-                } else { // FloatType
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.FSUB);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，创建指令但不添加到基本块
-                    if (isGlobalContext) {
-                        currentValue = IRBuilder.createBinaryInstOnly(OpCode.FSUB, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createBinaryInst(OpCode.FSUB, leftValue, rightValue, currentBlock);
-                    }
-                }
-                break;
-            case "*":
-                if (leftType instanceof IntegerType) {
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.MUL);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，创建指令但不添加到基本块
-                    if (isGlobalContext) {
-                        currentValue = IRBuilder.createBinaryInstOnly(OpCode.MUL, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createBinaryInst(OpCode.MUL, leftValue, rightValue, currentBlock);
-                    }
-                } else { // FloatType
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.FMUL);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，创建指令但不添加到基本块
-                    if (isGlobalContext) {
-                        currentValue = IRBuilder.createBinaryInstOnly(OpCode.FMUL, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createBinaryInst(OpCode.FMUL, leftValue, rightValue, currentBlock);
-                    }
-                }
-                break;
-            case "/":
-                if (leftType instanceof IntegerType) {
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.DIV);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，创建指令但不添加到基本块
-                    if (isGlobalContext) {
-                        currentValue = IRBuilder.createBinaryInstOnly(OpCode.DIV, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createBinaryInst(OpCode.DIV, leftValue, rightValue, currentBlock);
-                    }
-                } else { // FloatType
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.FDIV);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，创建指令但不添加到基本块
-                    if (isGlobalContext) {
-                        currentValue = IRBuilder.createBinaryInstOnly(OpCode.FDIV, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createBinaryInst(OpCode.FDIV, leftValue, rightValue, currentBlock);
-                    }
-                }
-                break;
-            case "%":
-                if (leftType instanceof IntegerType) {
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.REM);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，创建指令但不添加到基本块
-                    if (isGlobalContext) {
-                        currentValue = IRBuilder.createBinaryInstOnly(OpCode.REM, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createBinaryInst(OpCode.REM, leftValue, rightValue, currentBlock);
-                    }
-                } else { // FloatType
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.FREM);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，创建指令但不添加到基本块
-                    if (isGlobalContext) {
-                        currentValue = IRBuilder.createBinaryInstOnly(OpCode.FREM, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createBinaryInst(OpCode.FREM, leftValue, rightValue, currentBlock);
-                    }
-                }
-                break;
-                
-            // 比较运算
-            case "<":
-                if (leftType instanceof IntegerType) {
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.SLT);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，不添加到基本块
-                    if (isGlobalContext) {
-                        // 创建比较指令但不添加到基本块
-                        currentValue = new CompareInstruction(OpCode.ICMP, OpCode.SLT, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createICmp(OpCode.SLT, leftValue, rightValue, currentBlock);
-                    }
-                } else { // FloatType
-                    // 优先尝试直接计算常量结果
-                    if (leftValue instanceof Constant && rightValue instanceof Constant) {
-                        Value constResult = IRBuilder.calculateConstantExpr(leftValue, rightValue, OpCode.ULT);
-                        if (constResult != null) {
-                            currentValue = constResult;
-                            return;
-                        }
-                    }
-                    
-                    // 在全局变量初始化上下文中，不添加到基本块
-                    if (isGlobalContext) {
-                        // 创建比较指令但不添加到基本块
-                        currentValue = new CompareInstruction(OpCode.FCMP, OpCode.ULT, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createFCmp(OpCode.ULT, leftValue, rightValue, currentBlock);
-                    }
-                }
-                break;
-            case "<=":
-                if (leftType instanceof IntegerType) {
-                    // 在全局变量初始化上下文中，不添加到基本块
-                    if (isGlobalContext) {
-                        // 创建比较指令但不添加到基本块
-                        currentValue = new CompareInstruction(OpCode.ICMP, OpCode.SLE, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createICmp(OpCode.SLE, leftValue, rightValue, currentBlock);
-                    }
-                } else { // FloatType
-                    // 在全局变量初始化上下文中，不添加到基本块
-                    if (isGlobalContext) {
-                        // 创建比较指令但不添加到基本块
-                        currentValue = new CompareInstruction(OpCode.FCMP, OpCode.ULE, leftValue, rightValue);
-                    } else {
-                        currentValue = IRBuilder.createFCmp(OpCode.ULE, leftValue, rightValue, currentBlock);
-                    }
-                }
-                break;
-            case ">":
-                if (leftType instanceof IntegerType) {
-                    currentValue = IRBuilder.createICmp(OpCode.SGT, leftValue, rightValue, currentBlock);
-                } else { // FloatType
-                    currentValue = IRBuilder.createFCmp(OpCode.UGT, leftValue, rightValue, currentBlock);
-                }
-                break;
-            case ">=":
-                if (leftType instanceof IntegerType) {
-                    currentValue = IRBuilder.createICmp(OpCode.SGE, leftValue, rightValue, currentBlock);
-                } else { // FloatType
-                    currentValue = IRBuilder.createFCmp(OpCode.UGE, leftValue, rightValue, currentBlock);
-                }
-                break;
-            case "==":
-                if (leftType instanceof IntegerType) {
-                    currentValue = IRBuilder.createICmp(OpCode.EQ, leftValue, rightValue, currentBlock);
-                } else { // FloatType
-                    currentValue = IRBuilder.createFCmp(OpCode.UEQ, leftValue, rightValue, currentBlock);
-                }
-                break;
-            case "!=":
-                if (leftType instanceof IntegerType) {
-                    currentValue = IRBuilder.createICmp(OpCode.NE, leftValue, rightValue, currentBlock);
-                } else { // FloatType
-                    currentValue = IRBuilder.createFCmp(OpCode.UNE, leftValue, rightValue, currentBlock);
-                }
-                break;
-                
-            // 逻辑运算
-            case "&&":
-                // 短路求值：创建新的基本块
-                BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
-                BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
-                
-                // 左操作数为真时才计算右操作数
-                Value leftCond = convertToBoolean(leftValue);
-                IRBuilder.createCondBr(leftCond, rightBlock, mergeBlock, currentBlock);
-                
-                // 右操作数基本块
-                currentBlock = rightBlock;
-                Value rightCond = convertToBoolean(rightValue);
-                IRBuilder.createBr(mergeBlock, currentBlock);
-                
-                // 合并基本块，使用PHI指令选择结果
-                currentBlock = mergeBlock;
-                Value falseValue = new ConstantInt(0);
-                List<Value> values = new ArrayList<>();
-                values.add(falseValue);
-                values.add(rightCond);
-                List<BasicBlock> blocks = new ArrayList<>();
-                blocks.add(rightBlock.getPredecessors().get(0)); // 左操作数为假的前驱块
-                blocks.add(rightBlock); // 右操作数块
-                PhiInstruction phiInst = IRBuilder.createPhi(IntegerType.I1, currentBlock);
-                // 添加PHI节点的输入值
-                phiInst.addIncoming(new ConstantInt(0), blocks.get(0)); // 左操作数为假时，结果为假
-                phiInst.addIncoming(rightCond, blocks.get(1));  // 右操作数决定结果
-                currentValue = phiInst;
-                break;
-                
-            case "||":
-                // 短路求值：创建新的基本块
-                BasicBlock rightBlock2 = IRBuilder.createBasicBlock(currentFunction);
-                BasicBlock mergeBlock2 = IRBuilder.createBasicBlock(currentFunction);
-                
-                // 左操作数为假时才计算右操作数
-                Value leftCond2 = convertToBoolean(leftValue);
-                IRBuilder.createCondBr(leftCond2, mergeBlock2, rightBlock2, currentBlock);
-                
-                // 右操作数基本块
-                currentBlock = rightBlock2;
-                Value rightCond2 = convertToBoolean(rightValue);
-                IRBuilder.createBr(mergeBlock2, currentBlock);
-                
-                // 合并基本块，使用PHI指令选择结果
-                currentBlock = mergeBlock2;
-                Value trueValue = new ConstantInt(1);
-                List<Value> values2 = new ArrayList<>();
-                values2.add(trueValue);
-                values2.add(rightCond2);
-                List<BasicBlock> blocks2 = new ArrayList<>();
-                blocks2.add(rightBlock2.getPredecessors().get(0)); // 左操作数为真的前驱块
-                blocks2.add(rightBlock2); // 右操作数块
-                PhiInstruction phiInst2 = IRBuilder.createPhi(IntegerType.I1, currentBlock);
-                // 添加PHI节点的输入值
-                phiInst2.addIncoming(trueValue, blocks2.get(0));  // 左操作数为真时，结果为真
-                phiInst2.addIncoming(rightCond2, blocks2.get(1)); // 右操作数决定结果
-                currentValue = phiInst2;
-                break;
-                
-            default:
-                throw new RuntimeException("不支持的二元操作符: " + expr.op);
-        }
+        // 处理左操作数
+        visitExpr(left);
+        Value leftValue = currentValue;
+        
+        // 确保左值是布尔类型
+        leftValue = convertToBoolean(leftValue);
+        
+        // 根据左值结果进行条件跳转
+        IRBuilder.createCondBr(leftValue, evalRightBlock, endBlock, currentBlock);
+        
+        // 评估右操作数的块
+        currentBlock = evalRightBlock;
+        visitExpr(right);
+        Value rightValue = currentValue;
+        
+        // 确保右值是布尔类型
+        rightValue = convertToBoolean(rightValue);
+        
+        // 记住右值计算结果
+        Value rightResult = rightValue;
+        
+        // 跳转到结束块
+        IRBuilder.createBr(endBlock, currentBlock);
+        
+        // 结束块
+        currentBlock = endBlock;
+        
+        // 创建结果phi指令
+        PhiInstruction phiInst = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+        phiInst.addIncoming(new ConstantInt(0), currentBlock.getPredecessors().get(0));
+        phiInst.addIncoming(rightResult, evalRightBlock);
+        
+        currentValue = phiInst;
+    }
+    
+    /**
+     * 处理逻辑或(||)，实现短路评估
+     */
+    private void visitLogicalOr(SyntaxTree.Expr left, SyntaxTree.Expr right) {
+        // 创建需要的基本块
+        BasicBlock evalRightBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock endBlock = IRBuilder.createBasicBlock(currentFunction);
+        
+        // 处理左操作数
+        visitExpr(left);
+        Value leftValue = currentValue;
+        
+        // 确保左值是布尔类型
+        leftValue = convertToBoolean(leftValue);
+        
+        // 根据左值结果进行条件跳转
+        IRBuilder.createCondBr(leftValue, endBlock, evalRightBlock, currentBlock);
+        
+        // 评估右操作数的块
+        currentBlock = evalRightBlock;
+        visitExpr(right);
+        Value rightValue = currentValue;
+        
+        // 确保右值是布尔类型
+        rightValue = convertToBoolean(rightValue);
+        
+        // 记住右值计算结果
+        Value rightResult = rightValue;
+        
+        // 跳转到结束块
+        IRBuilder.createBr(endBlock, currentBlock);
+        
+        // 结束块
+        currentBlock = endBlock;
+        
+        // 创建结果phi指令
+        PhiInstruction phiInst = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+        phiInst.addIncoming(new ConstantInt(1), currentBlock.getPredecessors().get(0));
+        phiInst.addIncoming(rightResult, evalRightBlock);
+        
+        currentValue = phiInst;
+    }
+    
+    /**
+     * 判断是否为比较操作符
+     */
+    private boolean isCmpOp(String op) {
+        return op.equals("==") || op.equals("!=") || op.equals("<") || op.equals("<=") || 
+               op.equals(">") || op.equals(">=");
+    }
+    
+    /**
+     * 获取二元操作对应的OpCode
+     */
+    private OpCode getOpCodeForBinaryOp(String op) {
+        return switch (op) {
+            case "+" -> OpCode.ADD;
+            case "-" -> OpCode.SUB;
+            case "*" -> OpCode.MUL;
+            case "/" -> OpCode.DIV;
+            case "%" -> OpCode.REM;
+            case "<<" -> OpCode.SHL;
+            case ">>" -> OpCode.ASHR;
+            case "&" -> OpCode.AND;
+            case "|" -> OpCode.OR;
+            case "^" -> OpCode.XOR;
+            // 添加比较操作符的支持
+            case "==" -> OpCode.ICMP;
+            case "!=" -> OpCode.ICMP;
+            case "<" -> OpCode.ICMP;
+            case "<=" -> OpCode.ICMP;
+            case ">" -> OpCode.ICMP;
+            case ">=" -> OpCode.ICMP;
+            default -> throw new RuntimeException("不支持的二元运算符: " + op);
+        };
+    }
+    
+    /**
+     * 获取整数比较对应的predicate
+     */
+    private OpCode getIntPredicate(String op) {
+        return switch (op) {
+            case "==" -> OpCode.EQ;
+            case "!=" -> OpCode.NE;
+            case "<" -> OpCode.SLT;
+            case "<=" -> OpCode.SLE;
+            case ">" -> OpCode.SGT;
+            case ">=" -> OpCode.SGE;
+            default -> throw new RuntimeException("不支持的比较运算符: " + op);
+        };
+    }
+    
+    /**
+     * 获取浮点比较对应的predicate
+     */
+    private OpCode getFloatPredicate(String op) {
+        return switch (op) {
+            case "==" -> OpCode.UEQ;
+            case "!=" -> OpCode.UNE;
+            case "<" -> OpCode.ULT;
+            case "<=" -> OpCode.ULE;
+            case ">" -> OpCode.UGT;
+            case ">=" -> OpCode.UGE;
+            default -> throw new RuntimeException("不支持的比较运算符: " + op);
+        };
     }
     
     /**
@@ -1732,7 +1551,7 @@ public class IRVisitor {
         if (indices.size() > dimensions.size()) {
             throw new RuntimeException("数组 " + arrayName + " 的索引数量过多");
         }
-
+        
         // 针对二维数组优化
         if (dimensions.size() == 2 && indices.size() == 2) {
             Value firstIndex = indices.get(0); // 行索引
@@ -1741,11 +1560,11 @@ public class IRVisitor {
             
             // 计算 row * cols
             Value rowOffset = IRBuilder.createBinaryInst(
-                OpCode.MUL, 
+                        OpCode.MUL,
                 firstIndex,
                 new ConstantInt(colSize),
-                currentBlock
-            );
+                        currentBlock
+                    );
             
             // 计算 row * cols + col
             Value finalOffset = IRBuilder.createBinaryInst(
@@ -1762,30 +1581,30 @@ public class IRVisitor {
 
         // 对于其他维度的数组，正确计算偏移量
         Value offset = new ConstantInt(0);
-        
-        // 计算每个维度的因子
-        List<Integer> factors = new ArrayList<>();
-        for (int i = 0; i < dimensions.size(); i++) {
-            int factor = 1;
-            for (int j = i + 1; j < dimensions.size(); j++) {
-                factor *= dimensions.get(j);
-            }
-            factors.add(factor);
-        }
-        
-        // 计算总偏移量
-        for (int i = 0; i < indices.size(); i++) {
-            Value indexFactor = IRBuilder.createBinaryInst(
-                OpCode.MUL,
-                indices.get(i),
-                new ConstantInt(factors.get(i)),
-                currentBlock
-            );
-            offset = IRBuilder.createBinaryInst(OpCode.ADD, offset, indexFactor, currentBlock);
-        }
-        
-        // 使用GEP指令获取元素指针
-        currentValue = IRBuilder.createGetElementPtr(arrayPtr, offset, currentBlock);
+                
+                // 计算每个维度的因子
+                List<Integer> factors = new ArrayList<>();
+                for (int i = 0; i < dimensions.size(); i++) {
+                    int factor = 1;
+                    for (int j = i + 1; j < dimensions.size(); j++) {
+                        factor *= dimensions.get(j);
+                    }
+                    factors.add(factor);
+                }
+                
+                // 计算总偏移量
+                for (int i = 0; i < indices.size(); i++) {
+                    Value indexFactor = IRBuilder.createBinaryInst(
+                        OpCode.MUL,
+                        indices.get(i),
+                        new ConstantInt(factors.get(i)),
+                        currentBlock
+                    );
+                    offset = IRBuilder.createBinaryInst(OpCode.ADD, offset, indexFactor, currentBlock);
+                }
+                
+                // 使用GEP指令获取元素指针
+                currentValue = IRBuilder.createGetElementPtr(arrayPtr, offset, currentBlock);
     }
     
     /**

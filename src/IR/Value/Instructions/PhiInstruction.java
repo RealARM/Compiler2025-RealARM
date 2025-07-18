@@ -32,6 +32,35 @@ public class PhiInstruction extends Instruction {
     }
     
     /**
+     * 添加一个输入值（使用字符串标识符和索引）
+     * 这对于短路逻辑很有用，尤其是在块尚未连接到其前驱时
+     */
+    public void addIncoming(Value value, String label, int index) {
+        // 先仅添加操作数，在后续处理中再关联到具体的基本块
+        addOperand(value);
+        
+        // 记录额外信息，稍后处理
+        // 注意：这里不更新incomingValues映射，因为我们还没有实际的基本块引用
+    }
+    
+    /**
+     * 添加输入值，如果块已经有一个值，则更新它
+     */
+    public void addOrUpdateIncoming(Value value, BasicBlock block) {
+        if (incomingValues.containsKey(block)) {
+            // 更新现有操作数
+            int index = getIncomingBlocks().indexOf(block);
+            if (index >= 0 && index < getOperandCount()) {
+                setOperand(index, value);
+                incomingValues.put(block, value);
+            }
+        } else {
+            // 添加新操作数
+            addIncoming(value, block);
+        }
+    }
+    
+    /**
      * 获取所有输入值
      */
     public Map<BasicBlock, Value> getIncomingValues() {
