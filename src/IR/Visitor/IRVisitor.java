@@ -360,13 +360,20 @@ public class IRVisitor {
         visitBlock(funcDef.body);
         
         // 确保函数有返回语句
-        Instruction lastInst = null;
-        if (!currentBlock.getInstructions().isEmpty()) {
-            lastInst = currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1);
-        }
-        
-        if (lastInst == null || !(lastInst instanceof ReturnInstruction)) {
-            // 如果最后一条指令不是返回指令，添加一个默认的返回指令
+        if (currentBlock != null && !currentBlock.getInstructions().isEmpty()) {
+            Instruction lastInst = currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1);
+            if (!(lastInst instanceof ReturnInstruction)) {
+                // 如果最后一条指令不是返回指令，添加一个默认的返回指令
+                if (retType == VoidType.VOID) {
+                    IRBuilder.createReturn(currentBlock); // void返回
+                } else if (retType == IntegerType.I32) {
+                    IRBuilder.createReturn(new ConstantInt(0), currentBlock); // 返回0
+                } else if (retType == FloatType.F32) {
+                    IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock); // 返回0.0
+                }
+            }
+        } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
+            // 如果当前块是空的，添加一个默认的返回指令
             if (retType == VoidType.VOID) {
                 IRBuilder.createReturn(currentBlock); // void返回
             } else if (retType == IntegerType.I32) {
@@ -378,6 +385,43 @@ public class IRVisitor {
         
         // 离开函数作用域
         exitScope();
+        
+        // 清理不可达的基本块
+        cleanupUnreachableBlocks(function);
+    }
+    
+    /**
+     * 清理函数中不可达的基本块
+     */
+    private void cleanupUnreachableBlocks(Function function) {
+        // 标记所有可达的基本块
+        BasicBlock entryBlock = function.getBasicBlocks().get(0);
+        List<BasicBlock> reachableBlocks = new ArrayList<>();
+        markReachableBlocks(entryBlock, reachableBlocks);
+        
+        // 移除所有不可达的基本块
+        List<BasicBlock> allBlocks = new ArrayList<>(function.getBasicBlocks());
+        for (BasicBlock block : allBlocks) {
+            if (!reachableBlocks.contains(block)) {
+                function.removeBasicBlock(block);
+            }
+        }
+    }
+    
+    /**
+     * 递归标记所有可达的基本块
+     */
+    private void markReachableBlocks(BasicBlock block, List<BasicBlock> reachableBlocks) {
+        if (reachableBlocks.contains(block)) {
+            return; // 已经标记过
+        }
+        
+        reachableBlocks.add(block);
+        
+        // 递归标记所有后继块
+        for (BasicBlock successor : block.getSuccessors()) {
+            markReachableBlocks(successor, reachableBlocks);
+        }
     }
     
     /**
@@ -458,12 +502,21 @@ public class IRVisitor {
      * 访问代码块
      */
     private void visitBlock(SyntaxTree.Block block) {
+        // 如果当前块已经终结，不再生成代码
+        if (currentBlock == null) {
+            return;
+        }
+        
         // 进入新的作用域
         enterScope();
         
         // 处理块中的每条语句
         for (SyntaxTree.Stmt stmt : block.stmts) {
             visitStmt(stmt);
+            // 如果当前块已经终结，不再处理后续语句
+            if (currentBlock == null) {
+                break;
+            }
         }
         
         // 离开作用域
@@ -474,6 +527,11 @@ public class IRVisitor {
      * 访问语句
      */
     private void visitStmt(SyntaxTree.Stmt stmt) {
+        // 如果当前块已经终结，不再生成代码
+        if (currentBlock == null) {
+            return;
+        }
+        
         if (stmt instanceof SyntaxTree.ExprStmt) {
             visitExprStmt((SyntaxTree.ExprStmt) stmt);
         } else if (stmt instanceof SyntaxTree.VarDecl) {
@@ -919,15 +977,19 @@ public class IRVisitor {
             IRBuilder.createReturn(currentBlock);
         }
         
-        // 创建一个不可达的基本块，用于后续指令
-        BasicBlock unreachableBlock = IRBuilder.createBasicBlock(currentFunction);
-        currentBlock = unreachableBlock;
+        // 标记当前块为已终结，不再创建新的不可达块
+        currentBlock = null;
     }
     
     /**
      * 访问if语句
      */
     private void visitIfStmt(SyntaxTree.IfStmt stmt) {
+        // 如果当前块已经终结，不再生成代码
+        if (currentBlock == null) {
+            return;
+        }
+        
         // 创建必要的基本块
         BasicBlock thenBlock = IRBuilder.createBasicBlock(currentFunction);
         BasicBlock elseBlock = IRBuilder.createBasicBlock(currentFunction);
@@ -944,7 +1006,7 @@ public class IRVisitor {
         currentBlock = thenBlock;
         visitStmt(stmt.thenBranch);
         // 如果当前块没有终结指令，添加跳转到合并块的指令
-        if (!currentBlock.getInstructions().isEmpty() && 
+        if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
             !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
             IRBuilder.createBr(mergeBlock, currentBlock);
         }
@@ -971,8 +1033,11 @@ public class IRVisitor {
                 currentBlock = elseIfThenBlock;
                 visitStmt(elseIfStmt.thenBranch);
                 // 如果当前块没有终结指令，添加跳转到合并块的指令
-                if (!currentBlock.getInstructions().isEmpty() && 
+                if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
                     !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
+                    IRBuilder.createBr(mergeBlock, currentBlock);
+                } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
+                    // 如果是空块，直接跳转到合并块
                     IRBuilder.createBr(mergeBlock, currentBlock);
                 }
                 
@@ -982,10 +1047,10 @@ public class IRVisitor {
                     visitStmt(elseIfStmt.elseBranch);
                 }
                 // 如果当前块没有终结指令，添加跳转到合并块的指令
-                if (!currentBlock.getInstructions().isEmpty() && 
+                if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
                     !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
                     IRBuilder.createBr(mergeBlock, currentBlock);
-                } else if (currentBlock.getInstructions().isEmpty()) {
+                } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
                     // 如果是空块，直接跳转到合并块
                     IRBuilder.createBr(mergeBlock, currentBlock);
                 }
@@ -993,10 +1058,10 @@ public class IRVisitor {
                 // 普通else分支
                 visitStmt(stmt.elseBranch);
                 // 如果当前块没有终结指令，添加跳转到合并块的指令
-                if (!currentBlock.getInstructions().isEmpty() && 
+                if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
                     !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
                     IRBuilder.createBr(mergeBlock, currentBlock);
-                } else if (currentBlock.getInstructions().isEmpty()) {
+                } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
                     // 如果是空块，直接跳转到合并块
                     IRBuilder.createBr(mergeBlock, currentBlock);
                 }
@@ -1014,6 +1079,11 @@ public class IRVisitor {
      * 访问while语句
      */
     private void visitWhileStmt(SyntaxTree.WhileStmt stmt) {
+        // 如果当前块已经终结，不再生成代码
+        if (currentBlock == null) {
+            return;
+        }
+        
         // 创建基本块
         BasicBlock condBlock = IRBuilder.createBasicBlock(currentFunction);
         BasicBlock bodyBlock = IRBuilder.createBasicBlock(currentFunction);
@@ -1035,8 +1105,10 @@ public class IRVisitor {
         // 处理循环体
         currentBlock = bodyBlock;
         visitStmt(stmt.body);
-        if (!currentBlock.getInstructions().isEmpty() && 
-            !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof ReturnInstruction)) {
+        
+        // 如果循环体没有终结（比如通过break或return），添加跳回条件块的指令
+        if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
+            !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
             IRBuilder.createBr(condBlock, currentBlock);
         }
         
@@ -1059,9 +1131,8 @@ public class IRVisitor {
         // 跳转到当前循环的退出块
         IRBuilder.createBr(loopExitBlocks.peek(), currentBlock);
         
-        // 创建一个不可达的基本块，用于后续指令
-        BasicBlock unreachableBlock = IRBuilder.createBasicBlock(currentFunction);
-        currentBlock = unreachableBlock;
+        // 标记当前块为已终结，不再创建新的不可达块
+        currentBlock = null;
     }
     
     /**
@@ -1075,9 +1146,8 @@ public class IRVisitor {
         // 跳转到当前循环的条件块
         IRBuilder.createBr(loopConditionBlocks.peek(), currentBlock);
         
-        // 创建一个不可达的基本块，用于后续指令
-        BasicBlock unreachableBlock = IRBuilder.createBasicBlock(currentFunction);
-        currentBlock = unreachableBlock;
+        // 标记当前块为已终结，不再创建新的不可达块
+        currentBlock = null;
     }
     
     /**
@@ -1339,6 +1409,11 @@ public class IRVisitor {
      * 处理逻辑与(&&)，实现短路评估
      */
     private void visitLogicalAnd(SyntaxTree.Expr left, SyntaxTree.Expr right) {
+        // 如果当前块已经终结，不再生成代码
+        if (currentBlock == null) {
+            return;
+        }
+        
         // 创建基本块
         BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
         BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
@@ -1376,10 +1451,15 @@ public class IRVisitor {
      * 处理逻辑或(||)，实现短路评估
      */
     private void visitLogicalOr(SyntaxTree.Expr left, SyntaxTree.Expr right) {
+        // 如果当前块已经终结，不再生成代码
+        if (currentBlock == null) {
+            return;
+        }
+        
         // 创建基本块
-                BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
-                BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
-                
+        BasicBlock rightBlock = IRBuilder.createBasicBlock(currentFunction);
+        BasicBlock mergeBlock = IRBuilder.createBasicBlock(currentFunction);
+        
         // 记住左值计算的基本块
         BasicBlock leftBlock = currentBlock;
         
@@ -1391,13 +1471,13 @@ public class IRVisitor {
         IRBuilder.createCondBr(leftValue, mergeBlock, rightBlock, currentBlock);
         
         // 求值右操作数
-                currentBlock = rightBlock;
+        currentBlock = rightBlock;
         visitExpr(right);
         Value rightValue = convertToBoolean(currentValue);
-                IRBuilder.createBr(mergeBlock, currentBlock);
-                
+        IRBuilder.createBr(mergeBlock, currentBlock);
+        
         // 合并结果
-                currentBlock = mergeBlock;
+        currentBlock = mergeBlock;
         
         // 创建phi节点
         PhiInstruction phi = IRBuilder.createPhi(IntegerType.I1, currentBlock);
