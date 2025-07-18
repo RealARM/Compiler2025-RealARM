@@ -140,12 +140,64 @@ public class IRPrinter {
         out.print(bb.getName());
         out.println(":");
         
+        // 检查基本块是否为空
+        if (bb.getInstructions().isEmpty()) {
+            // 如果基本块为空，添加一个默认的无条件跳转或返回指令
+            out.print("  ");
+            
+            // 尝试获取下一个基本块
+            BasicBlock nextBlock = getNextBasicBlock(bb);
+            
+            if (nextBlock != null) {
+                // 添加一个无条件跳转到下一个基本块
+                out.println("br label %" + nextBlock.getName());
+            } else {
+                // 如果没有下一个基本块，添加一个默认返回指令
+                Function parentFunction = bb.getParentFunction();
+                Type returnType = parentFunction.getReturnType();
+                
+                if (returnType instanceof VoidType) {
+                    out.println("ret void");
+                } else if (returnType instanceof IntegerType) {
+                    out.println("ret i32 0");
+                } else if (returnType instanceof FloatType) {
+                    out.println("ret float 0.0");
+                } else {
+                    out.println("ret i32 0");  // 默认返回整数0
+                }
+            }
+            return;
+        }
+        
         // 打印指令
         for (Instruction inst : bb.getInstructions()) {
             out.print("  ");
             printInstruction(inst);
             out.println();
         }
+    }
+    
+    /**
+     * 获取基本块的下一个基本块
+     */
+    private BasicBlock getNextBasicBlock(BasicBlock bb) {
+        // 首先尝试从后继中获取
+        List<BasicBlock> successors = bb.getSuccessors();
+        if (!successors.isEmpty()) {
+            return successors.get(0);
+        }
+        
+        // 如果没有后继，尝试从函数的基本块列表中获取下一个
+        Function function = bb.getParentFunction();
+        List<BasicBlock> blocks = function.getBasicBlocks();
+        
+        for (int i = 0; i < blocks.size() - 1; i++) {
+            if (blocks.get(i) == bb) {
+                return blocks.get(i + 1);
+            }
+        }
+        
+        return null;
     }
     
     /**

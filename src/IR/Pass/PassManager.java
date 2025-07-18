@@ -35,6 +35,9 @@ public class PassManager {
     
     private PassManager() {
         // 私有构造函数，防止外部实例化
+        
+        // 添加默认的Pass
+        addIRPass(new EmptyBlockHandler());
     }
     
     /**
