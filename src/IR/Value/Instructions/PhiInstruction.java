@@ -1,5 +1,6 @@
 package IR.Value.Instructions;
 
+import IR.OpCode;
 import IR.Type.Type;
 import IR.Value.BasicBlock;
 import IR.Value.Value;
@@ -51,25 +52,65 @@ public class PhiInstruction extends Instruction {
         return new ArrayList<>(incomingValues.keySet());
     }
     
+    /**
+     * 修复前驱基本块列表变化后的phi指令
+     * 示例代码中的fixPreBlocks
+     */
+    public void updatePredecessors(List<BasicBlock> oldPredecessors, List<BasicBlock> newPredecessors) {
+        ArrayList<Value> values = new ArrayList<>();
+        
+        for (BasicBlock newPred : newPredecessors) {
+            int index = oldPredecessors.indexOf(newPred);
+            if (index >= 0 && index < getOperandCount()) {
+                values.add(getOperand(index));
+            }
+        }
+        
+        // 清除所有操作数
+        removeAllOperands();
+        
+        // 重新添加操作数
+        for (Value value : values) {
+            addOperand(value);
+        }
+        
+        // 重建incomingValues映射
+        incomingValues.clear();
+        for (int i = 0; i < newPredecessors.size() && i < values.size(); i++) {
+            incomingValues.put(newPredecessors.get(i), values.get(i));
+        }
+    }
+    
+    /**
+     * 移除所有操作数
+     */
+    private void removeAllOperands() {
+        for (int i = getOperandCount() - 1; i >= 0; i--) {
+            removeOperand(i);
+        }
+    }
+    
     @Override
     public String getOpcodeName() {
-        return "phi";
+        return OpCode.PHI.getName();
     }
     
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
-        sb.append(getName()).append(" = ").append(getOpcodeName()).append(" ").append(getType());
+        sb.append(getName()).append(" = ").append(getOpcodeName()).append(" ");
+        sb.append(getType()).append(" ");
         
         boolean first = true;
         for (Map.Entry<BasicBlock, Value> entry : incomingValues.entrySet()) {
             if (!first) {
-                sb.append(",");
+                sb.append(", ");
             } else {
                 first = false;
             }
-            sb.append(" [ ").append(entry.getValue().getName()).append(", %")
-                .append(entry.getKey().getName()).append(" ]");
+            
+            sb.append("[ ").append(entry.getValue().getName())
+              .append(", %").append(entry.getKey().getName()).append(" ]");
         }
         
         return sb.toString();

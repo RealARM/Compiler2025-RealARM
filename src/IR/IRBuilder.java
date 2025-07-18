@@ -36,7 +36,7 @@ public class IRBuilder {
     public static Function createExternalFunction(String name, Type returnType, Module module) {
         Function function = new Function(name, returnType);
         function.setExternal(true);
-        module.addExternalFunction(function);
+        module.addLibFunction(function);
         return function;
     }
     
@@ -238,6 +238,71 @@ public class IRBuilder {
     }
     
     /**
+     * 创建一个简单的GetElementPtr指令（类似示例的PtrInst）
+     */
+    public static GetElementPtrInstruction createGetElementPtr(Value pointer, Value index, BasicBlock block) {
+        String name = "gep_" + tmpCounter++;
+        GetElementPtrInstruction inst = new GetElementPtrInstruction(pointer, index, name);
+        block.addInstruction(inst);
+        return inst;
+    }
+    
+    /**
+     * 创建一个多维索引的GetElementPtr指令
+     */
+    public static GetElementPtrInstruction createGetElementPtr(Value pointer, List<Value> indices, BasicBlock block) {
+        String name = "gep_" + tmpCounter++;
+        GetElementPtrInstruction inst = new GetElementPtrInstruction(pointer, indices, name);
+        block.addInstruction(inst);
+        return inst;
+    }
+    
+    /**
+     * 创建一个类型转换指令
+     */
+    public static ConversionInstruction createConversion(Value value, Type targetType, OpCode conversionType, BasicBlock block) {
+        String name = conversionType.getName() + "_" + tmpCounter++;
+        ConversionInstruction inst = new ConversionInstruction(value, targetType, conversionType, name);
+        block.addInstruction(inst);
+        return inst;
+    }
+    
+    /**
+     * 创建一个整数到浮点数的转换指令
+     */
+    public static ConversionInstruction createIntToFloat(Value value, BasicBlock block) {
+        return createConversion(value, FloatType.F32, OpCode.SITOFP, block);
+    }
+    
+    /**
+     * 创建一个浮点数到整数的转换指令
+     */
+    public static ConversionInstruction createFloatToInt(Value value, BasicBlock block) {
+        return createConversion(value, IntegerType.I32, OpCode.FPTOSI, block);
+    }
+    
+    /**
+     * 创建一个零扩展指令（从较小整数类型扩展到较大整数类型）
+     */
+    public static ConversionInstruction createZeroExtend(Value value, Type targetType, BasicBlock block) {
+        return createConversion(value, targetType, OpCode.ZEXT, block);
+    }
+    
+    /**
+     * 创建一个位截断指令（从较大整数类型截断到较小整数类型）
+     */
+    public static ConversionInstruction createTrunc(Value value, Type targetType, BasicBlock block) {
+        return createConversion(value, targetType, OpCode.TRUNC, block);
+    }
+    
+    /**
+     * 创建一个位类型转换指令（用于指针类型之间的转换）
+     */
+    public static ConversionInstruction createBitCast(Value value, Type targetType, BasicBlock block) {
+        return createConversion(value, targetType, OpCode.BITCAST, block);
+    }
+    
+    /**
      * 创建一个操作数列表
      */
     public static List<Value> createOperandList(Value... operands) {
@@ -246,5 +311,77 @@ public class IRBuilder {
             list.add(op);
         }
         return list;
+    }
+    
+    /**
+     * 计算常量表达式的结果
+     */
+    public static Value calculateConstantExpr(Value left, Value right, OpCode op) {
+        // 整数常量计算
+        if (left instanceof ConstantInt leftInt && right instanceof ConstantInt rightInt) {
+            int leftVal = leftInt.getValue();
+            int rightVal = rightInt.getValue();
+            
+            return switch (op) {
+                case ADD -> createConstantInt(leftVal + rightVal);
+                case SUB -> createConstantInt(leftVal - rightVal);
+                case MUL -> createConstantInt(leftVal * rightVal);
+                case DIV -> createConstantInt(leftVal / rightVal);
+                case REM -> createConstantInt(leftVal % rightVal);
+                case SHL -> createConstantInt(leftVal << rightVal);
+                case LSHR -> createConstantInt(leftVal >>> rightVal);
+                case ASHR -> createConstantInt(leftVal >> rightVal);
+                case AND -> createConstantInt(leftVal & rightVal);
+                case OR -> createConstantInt(leftVal | rightVal);
+                case XOR -> createConstantInt(leftVal ^ rightVal);
+                default -> null;
+            };
+        }
+        
+        // 浮点常量计算
+        if (left instanceof ConstantFloat leftFloat && right instanceof ConstantFloat rightFloat) {
+            float leftVal = leftFloat.getValue();
+            float rightVal = rightFloat.getValue();
+            
+            return switch (op) {
+                case FADD -> createConstantFloat(leftVal + rightVal);
+                case FSUB -> createConstantFloat(leftVal - rightVal);
+                case FMUL -> createConstantFloat(leftVal * rightVal);
+                case FDIV -> createConstantFloat(leftVal / rightVal);
+                case FREM -> createConstantFloat(leftVal % rightVal);
+                default -> null;
+            };
+        }
+        
+        // 混合类型计算（整数和浮点）
+        if (left instanceof ConstantInt leftInt && right instanceof ConstantFloat rightFloat) {
+            float leftVal = leftInt.getValue();
+            float rightVal = rightFloat.getValue();
+            
+            return switch (op) {
+                case FADD -> createConstantFloat(leftVal + rightVal);
+                case FSUB -> createConstantFloat(leftVal - rightVal);
+                case FMUL -> createConstantFloat(leftVal * rightVal);
+                case FDIV -> createConstantFloat(leftVal / rightVal);
+                case FREM -> createConstantFloat(leftVal % rightVal);
+                default -> null;
+            };
+        }
+        
+        if (left instanceof ConstantFloat leftFloat && right instanceof ConstantInt rightInt) {
+            float leftVal = leftFloat.getValue();
+            float rightVal = rightInt.getValue();
+            
+            return switch (op) {
+                case FADD -> createConstantFloat(leftVal + rightVal);
+                case FSUB -> createConstantFloat(leftVal - rightVal);
+                case FMUL -> createConstantFloat(leftVal * rightVal);
+                case FDIV -> createConstantFloat(leftVal / rightVal);
+                case FREM -> createConstantFloat(leftVal % rightVal);
+                default -> null;
+            };
+        }
+        
+        return null; // 无法计算
     }
 } 
