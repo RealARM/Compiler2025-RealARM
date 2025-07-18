@@ -346,9 +346,11 @@ public class IRPrinter {
      * 打印函数调用指令
      */
     private void printCallInstruction(CallInstruction inst) {
-        out.print("call ");
         Function callee = (Function)inst.getOperand(0);
-        out.print(callee.getReturnType());
+        Type returnType = callee.getReturnType();
+        
+        out.print("call ");
+        out.print(returnType);
         out.print(" ");
         out.print(callee.getName());
         out.print("(");
