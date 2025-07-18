@@ -18,7 +18,7 @@ public class CompareInstruction extends Instruction {
      * 创建一个比较指令
      */
     public CompareInstruction(OpCode compareType, OpCode predicate, Value left, Value right) {
-        super(getInstructionName(compareType, predicate), IntegerType.I1); // 比较结果为1位整数（布尔值）
+        super(compareType.getName() + "_" + predicate.getName() + "_result_" + nameCounter++, IntegerType.I1); // 比较结果为1位整数（布尔值）
         
         if (compareType != OpCode.ICMP && compareType != OpCode.FCMP) {
             throw new IllegalArgumentException("比较指令类型必须是icmp或fcmp");
@@ -101,12 +101,5 @@ public class CompareInstruction extends Instruction {
     public String toString() {
         return getName() + " = " + getOpcodeName() + " " + predicate.getName() + " " + 
                getLeft().getType() + " " + getLeft().getName() + ", " + getRight().getName();
-    }
-    
-    /**
-     * 生成指令名称
-     */
-    private static String getInstructionName(OpCode compareType, OpCode predicate) {
-        return compareType.getName() + "_" + predicate.getName() + "_result_" + nameCounter++;
     }
 } 

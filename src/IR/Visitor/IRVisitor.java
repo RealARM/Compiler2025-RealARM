@@ -1311,8 +1311,11 @@ public class IRVisitor {
                 List<BasicBlock> blocks = new ArrayList<>();
                 blocks.add(rightBlock.getPredecessors().get(0)); // 左操作数为假的前驱块
                 blocks.add(rightBlock); // 右操作数块
-                currentValue = IRBuilder.createPhi(IntegerType.I1, currentBlock);
-                // TODO: 添加PHI节点的输入值
+                PhiInstruction phiInst = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+                // 添加PHI节点的输入值
+                phiInst.addIncoming(new ConstantInt(0), blocks.get(0)); // 左操作数为假时，结果为假
+                phiInst.addIncoming(rightCond, blocks.get(1));  // 右操作数决定结果
+                currentValue = phiInst;
                 break;
                 
             case "||":
@@ -1338,8 +1341,11 @@ public class IRVisitor {
                 List<BasicBlock> blocks2 = new ArrayList<>();
                 blocks2.add(rightBlock2.getPredecessors().get(0)); // 左操作数为真的前驱块
                 blocks2.add(rightBlock2); // 右操作数块
-                currentValue = IRBuilder.createPhi(IntegerType.I1, currentBlock);
-                // TODO: 添加PHI节点的输入值
+                PhiInstruction phiInst2 = IRBuilder.createPhi(IntegerType.I1, currentBlock);
+                // 添加PHI节点的输入值
+                phiInst2.addIncoming(trueValue, blocks2.get(0));  // 左操作数为真时，结果为真
+                phiInst2.addIncoming(rightCond2, blocks2.get(1)); // 右操作数决定结果
+                currentValue = phiInst2;
                 break;
                 
             default:

@@ -245,7 +245,6 @@ public class IRBuilder {
      * 创建一个比较指令
      */
     public static CompareInstruction createCompare(OpCode compareType, OpCode predicate, Value left, Value right, BasicBlock block) {
-        String name = compareType.getName().toLowerCase() + "_" + predicate.getName().toLowerCase() + "_" + tmpCounter++;
         CompareInstruction inst = new CompareInstruction(compareType, predicate, left, right);
         if (block != null) {
             block.addInstruction(inst);
