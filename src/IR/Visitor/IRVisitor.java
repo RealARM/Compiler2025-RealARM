@@ -38,6 +38,9 @@ public class IRVisitor {
     // 用于唯一命名
     private static int tmpCounter = 0;
     
+    // 增加跟踪嵌套控制流结构的堆栈
+    private final Stack<BasicBlock> mergeBlockStack = new Stack<>();
+    
     /**
      * 创建一个IR构建访问器
      */
@@ -559,21 +562,17 @@ public class IRVisitor {
      * 访问代码块
      */
     private void visitBlock(SyntaxTree.Block block) {
-        // 如果当前块已经终结，不再生成代码
-        if (currentBlock == null) {
-            return;
-        }
-        
-        // 进入新的作用域
+        // 进入新作用域
         enterScope();
         
-        // 处理块中的每条语句
+        // 访问块内的所有语句
         for (SyntaxTree.Stmt stmt : block.stmts) {
-            visitStmt(stmt);
-            // 如果当前块已经终结，不再处理后续语句
+            // 如果当前块已终结，停止生成后续代码
             if (currentBlock == null) {
                 break;
             }
+            
+            visitStmt(stmt);
         }
         
         // 离开作用域
@@ -1061,14 +1060,22 @@ public class IRVisitor {
         
         // 处理then分支
         currentBlock = thenBlock;
+        
+        // 如果在循环内，将mergeBlock替换为循环条件块
+        BasicBlock realMergeBlock = mergeBlock;
+        if (!mergeBlockStack.isEmpty() && !loopConditionBlocks.isEmpty()) {
+            realMergeBlock = mergeBlockStack.peek();
+        }
+        
         visitStmt(stmt.thenBranch);
+        
         // 如果当前块没有终结指令，添加跳转到合并块的指令
         if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
             !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
-            IRBuilder.createBr(mergeBlock, currentBlock);
+            IRBuilder.createBr(realMergeBlock, currentBlock);
         } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
             // 如果是空块，也要跳转到合并块
-            IRBuilder.createBr(mergeBlock, currentBlock);
+            IRBuilder.createBr(realMergeBlock, currentBlock);
         }
         
         // 处理else分支
@@ -1078,18 +1085,24 @@ public class IRVisitor {
             // 如果当前块没有终结指令，添加跳转到合并块的指令
             if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
                 !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
-                IRBuilder.createBr(mergeBlock, currentBlock);
+                IRBuilder.createBr(realMergeBlock, currentBlock);
             } else if (currentBlock != null && currentBlock.getInstructions().isEmpty()) {
                 // 如果是空块，直接跳转到合并块
-                IRBuilder.createBr(mergeBlock, currentBlock);
+                IRBuilder.createBr(realMergeBlock, currentBlock);
             }
         } else {
             // 没有else分支，直接跳转到合并块
-            IRBuilder.createBr(mergeBlock, currentBlock);
+            IRBuilder.createBr(realMergeBlock, currentBlock);
         }
         
-        // 继续在合并块生成代码
-        currentBlock = mergeBlock;
+        // 只有当不在循环体内部时才使用常规的mergeBlock
+        if (mergeBlockStack.isEmpty()) {
+            // 继续在合并块生成代码
+            currentBlock = mergeBlock;
+        } else {
+            // 如果在循环内部，跳过这个块
+            currentBlock = null;
+        }
     }
     
     /**
@@ -1119,38 +1132,21 @@ public class IRVisitor {
         loopConditionBlocks.push(condBlock);
         loopExitBlocks.push(exitBlock);
         
-        // 保存循环体起始块，用于后续恢复currentBlock
-        BasicBlock loopBodyStart = bodyBlock;
-        
         // 处理循环体
         currentBlock = bodyBlock;
+        
+        // 标记内部控制流的返回目标
+        mergeBlockStack.push(condBlock);
+        
         visitStmt(stmt.body);
+        
+        // 弹出标记
+        mergeBlockStack.pop();
         
         // 如果循环体没有终结（比如通过break或return），添加跳回条件块的指令
         if (currentBlock != null && !currentBlock.getInstructions().isEmpty() && 
             !(currentBlock.getInstructions().get(currentBlock.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
             IRBuilder.createBr(condBlock, currentBlock);
-        }
-        
-        // 检查循环体中生成的所有基本块
-        for (BasicBlock block : currentFunction.getBasicBlocks()) {
-            // 如果块在当前函数中，不是条件块、出口块，且没有终结指令，就添加跳转回条件块
-            if (block != condBlock && block != exitBlock && block != loopBodyStart &&
-                block.getParentFunction() == currentFunction &&
-                block.getInstructions().size() > 0 &&
-                !(block.getInstructions().get(block.getInstructions().size() - 1) instanceof TerminatorInstruction)) {
-                // 只处理循环体内部没有正确终结的基本块
-                boolean isInLoopBody = false;
-                for (BasicBlock pred : block.getPredecessors()) {
-                    if (pred != condBlock && pred != exitBlock) {
-                        isInLoopBody = true;
-                        break;
-                    }
-                }
-                if (isInLoopBody) {
-                    IRBuilder.createBr(condBlock, block);
-                }
-            }
         }
         
         // 弹出循环信息
