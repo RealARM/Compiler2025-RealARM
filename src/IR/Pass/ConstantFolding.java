@@ -137,49 +137,32 @@ public class ConstantFolding implements Pass.IRPass {
             }
         }
         // 浮点运算
-        else if (left instanceof ConstantFloat && right instanceof ConstantFloat) {
-            float leftVal = ((ConstantFloat) left).getValue();
-            float rightVal = ((ConstantFloat) right).getValue();
-            
-            switch (opCode) {
-                case FADD:
-                    result = new ConstantFloat(leftVal + rightVal);
-                    break;
-                case FSUB:
-                    result = new ConstantFloat(leftVal - rightVal);
-                    break;
-                case FMUL:
-                    result = new ConstantFloat(leftVal * rightVal);
-                    break;
-                case FDIV:
-                    if (rightVal != 0) {
-                        result = new ConstantFloat(leftVal / rightVal);
-                    }
-                    break;
-                case FREM:
-                    if (rightVal != 0) {
-                        result = new ConstantFloat(leftVal % rightVal);
-                    }
-                    break;
-                // 浮点比较
-                case UEQ:
-                    result = new ConstantInt(leftVal == rightVal ? 1 : 0);
-                    break;
-                case UNE:
-                    result = new ConstantInt(leftVal != rightVal ? 1 : 0);
-                    break;
-                case ULT:
-                    result = new ConstantInt(leftVal < rightVal ? 1 : 0);
-                    break;
-                case ULE:
-                    result = new ConstantInt(leftVal <= rightVal ? 1 : 0);
-                    break;
-                case UGT:
-                    result = new ConstantInt(leftVal > rightVal ? 1 : 0);
-                    break;
-                case UGE:
-                    result = new ConstantInt(leftVal >= rightVal ? 1 : 0);
-                    break;
+        else if (inst.isFloatingPointOp()) {
+            if (left instanceof ConstantFloat && right instanceof ConstantFloat) {
+                double leftVal = ((ConstantFloat) left).getValue();
+                double rightVal = ((ConstantFloat) right).getValue();
+                
+                switch (inst.getOpCode()) {
+                    case FADD:
+                        result = new ConstantFloat(leftVal + rightVal);
+                        break;
+                    case FSUB:
+                        result = new ConstantFloat(leftVal - rightVal);
+                        break;
+                    case FMUL:
+                        result = new ConstantFloat(leftVal * rightVal);
+                        break;
+                    case FDIV:
+                        if (rightVal != 0.0) {
+                            result = new ConstantFloat(leftVal / rightVal);
+                        }
+                        break;
+                    case FREM:
+                        if (rightVal != 0.0) {
+                            result = new ConstantFloat(leftVal % rightVal);
+                        }
+                        break;
+                }
             }
         }
         

@@ -85,7 +85,7 @@ public class ConstantExpressionEvaluator {
             
             // 整数转浮点数
             if (convInst.getConversionType() == OpCode.SITOFP && operandConst instanceof ConstantInt) {
-                return new ConstantFloat((float) ((ConstantInt) operandConst).getValue());
+                return new ConstantFloat((double) ((ConstantInt) operandConst).getValue());
             }
             // 浮点数转整数
             else if (convInst.getConversionType() == OpCode.FPTOSI && operandConst instanceof ConstantFloat) {
@@ -152,8 +152,8 @@ public class ConstantExpressionEvaluator {
         
         // 浮点常量计算
         if (left instanceof ConstantFloat && right instanceof ConstantFloat) {
-            float leftVal = ((ConstantFloat) left).getValue();
-            float rightVal = ((ConstantFloat) right).getValue();
+            double leftVal = ((ConstantFloat) left).getValue();
+            double rightVal = ((ConstantFloat) right).getValue();
             
             switch (op) {
                 case FADD:
@@ -189,8 +189,8 @@ public class ConstantExpressionEvaluator {
         
         // 混合类型计算（整数和浮点）
         if (left instanceof ConstantInt && right instanceof ConstantFloat) {
-            float leftVal = ((ConstantInt) left).getValue();
-            float rightVal = ((ConstantFloat) right).getValue();
+            double leftVal = ((ConstantInt) left).getValue();
+            double rightVal = ((ConstantFloat) right).getValue();
             
             switch (op) {
                 case FADD:
@@ -213,8 +213,8 @@ public class ConstantExpressionEvaluator {
         }
         
         if (left instanceof ConstantFloat && right instanceof ConstantInt) {
-            float leftVal = ((ConstantFloat) left).getValue();
-            float rightVal = ((ConstantInt) right).getValue();
+            double leftVal = ((ConstantFloat) left).getValue();
+            double rightVal = ((ConstantInt) right).getValue();
             
             switch (op) {
                 case FADD:
@@ -237,5 +237,15 @@ public class ConstantExpressionEvaluator {
         }
         
         return null; // 无法计算
+    }
+
+    /**
+     * 将值提升为浮点类型（如果是整数）
+     */
+    private static Value promoteToFloat(Value value) {
+        if (value.getType() instanceof IntegerType && value instanceof ConstantInt) {
+            return new ConstantFloat((double) ((ConstantInt) value).getValue());
+        }
+        return value;
     }
 } 

@@ -105,7 +105,7 @@ public class IRBuilder {
     /**
      * 创建一个浮点常量
      */
-    public static ConstantFloat createConstantFloat(float value) {
+    public static ConstantFloat createConstantFloat(double value) {
         return new ConstantFloat(value);
     }
     
@@ -176,7 +176,7 @@ public class IRBuilder {
                 // 将整数值转换为浮点值
                 if (value instanceof ConstantInt constInt) {
                     // 常量整数转常量浮点
-                    value = createConstantFloat((float) constInt.getValue());
+                    value = createConstantFloat((double) constInt.getValue());
                 } else {
                     // 非常量整数转浮点
                     value = createIntToFloat(value, block);
@@ -238,74 +238,40 @@ public class IRBuilder {
         
         return new BinaryInstruction(opCode, left, right, left.getType());
     }
-    
+
+    private static OpCode getFloatOpCode(OpCode opCode) {
+        return switch (opCode) {
+            case ADD -> OpCode.FADD;
+            case SUB -> OpCode.FSUB;
+            case MUL -> OpCode.FMUL;
+            case DIV -> OpCode.FDIV;
+            case REM -> OpCode.FREM;
+            default -> opCode;
+        };
+    }
+
     /**
      * 创建一个二元运算指令
      */
     public static BinaryInstruction createBinaryInst(OpCode opCode, Value left, Value right, BasicBlock block) {
-        Type type;
-        Type leftType = left.getType();
-        Type rightType = right.getType();
+        Value promotedLeft = left;
+        Value promotedRight = right;
 
-        // 处理布尔值与整数的混合运算
-        boolean leftIsBool = leftType instanceof IntegerType && ((IntegerType) leftType).getBitWidth() == 1;
-        boolean rightIsBool = rightType instanceof IntegerType && ((IntegerType) rightType).getBitWidth() == 1;
+        // 自动类型提升
+        if (left.getType().isFloatType() || right.getType().isFloatType()) {
+            opCode = getFloatOpCode(opCode);
+            promotedLeft = promoteToFloat(left, block);
+            promotedRight = promoteToFloat(right, block);
+        }
+
+        Type resultType = promotedLeft.getType(); // 默认结果类型与左操作数相同
         
-                 // 如果一个是布尔值(i1)，另一个是整数(i32)，需要特殊处理
-        if (leftIsBool && !rightIsBool && rightType instanceof IntegerType) {
-            // 将布尔值扩展为整数进行比较，这更符合C语言的行为
-            left = createZeroExtend(left, IntegerType.I32, block);
-            leftType = IntegerType.I32;
-        } 
-        else if (rightIsBool && !leftIsBool && leftType instanceof IntegerType) {
-            // 将布尔值扩展为整数进行比较，这更符合C语言的行为
-            right = createZeroExtend(right, IntegerType.I32, block);
-            rightType = IntegerType.I32;
+        // 如果是浮点运算，确定结果类型
+        if (opCode.getName().startsWith("f")) {
+            resultType = FloatType.F64;
         }
-
-        // 如果操作数类型不同，进行类型转换
-        if (!leftType.equals(rightType)) {
-            // 默认使用整数类型
-            type = IntegerType.I32;
-
-            // 处理浮点数和整数的混合运算
-            if (leftType instanceof FloatType && rightType instanceof IntegerType) {
-                // 将整数转为浮点数
-                right = createIntToFloat(right, block);
-                type = FloatType.F32;
-            } 
-            else if (rightType instanceof FloatType && leftType instanceof IntegerType) {
-                // 将整数转为浮点数
-                left = createIntToFloat(left, block);
-                type = FloatType.F32;
-            }
-        } else {
-            type = leftType;
-        }
-
-        // 确保类型不为null
-        if (type == null) {
-            type = IntegerType.I32;
-        }
-
-        // 根据类型调整操作码
-        if (type instanceof FloatType) {
-            // 将整数操作转换为浮点操作
-            switch (opCode) {
-                case ADD: opCode = OpCode.FADD; break;
-                case SUB: opCode = OpCode.FSUB; break;
-                case MUL: opCode = OpCode.FMUL; break;
-                case DIV: opCode = OpCode.FDIV; break;
-                case REM: opCode = OpCode.FREM; break;
-            }
-        }
-
-        // 比较操作的结果总是布尔值（i1类型）
-        if (opCode.isCompare()) {
-            type = IntegerType.I1;
-        }
-
-        BinaryInstruction inst = new BinaryInstruction(opCode, left, right, type);
+        
+        BinaryInstruction inst = new BinaryInstruction(opCode, promotedLeft, promotedRight, resultType);
         if (block != null) {
             block.addInstruction(inst);
         }
@@ -637,7 +603,7 @@ public class IRBuilder {
      * 创建一个整数到浮点数的转换指令
      */
     public static ConversionInstruction createIntToFloat(Value value, BasicBlock block) {
-        return createConversion(value, FloatType.F32, OpCode.SITOFP, block);
+        return createConversion(value, FloatType.F64, OpCode.SITOFP, block);
     }
     
     /**
@@ -683,6 +649,45 @@ public class IRBuilder {
      * 计算常量表达式的结果
      */
     public static Value calculateConstantExpr(Value left, Value right, OpCode op) {
+        if (left.getType().isFloatType() || right.getType().isFloatType()) {
+            if (left instanceof ConstantFloat leftFloat && right instanceof ConstantFloat rightFloat) {
+                double leftVal = leftFloat.getValue();
+                double rightVal = rightFloat.getValue();
+                return switch (op) {
+                    case FADD -> createConstantFloat(leftVal + rightVal);
+                    case FSUB -> createConstantFloat(leftVal - rightVal);
+                    case FMUL -> createConstantFloat(leftVal * rightVal);
+                    case FDIV -> createConstantFloat(leftVal / rightVal);
+                    case FREM -> createConstantFloat(leftVal % rightVal);
+                    default -> null;
+                };
+            }
+            if (left instanceof ConstantInt leftInt && right instanceof ConstantFloat rightFloat) {
+                double leftVal = leftInt.getValue();
+                double rightVal = rightFloat.getValue();
+                return switch (op) {
+                    case FADD -> createConstantFloat(leftVal + rightVal);
+                    case FSUB -> createConstantFloat(leftVal - rightVal);
+                    case FMUL -> createConstantFloat(leftVal * rightVal);
+                    case FDIV -> createConstantFloat(leftVal / rightVal);
+                    case FREM -> createConstantFloat(leftVal % rightVal);
+                    default -> null;
+                };
+            }
+            if (left instanceof ConstantFloat leftFloat && right instanceof ConstantInt rightInt) {
+                double leftVal = leftFloat.getValue();
+                double rightVal = rightInt.getValue();
+                return switch (op) {
+                    case FADD -> createConstantFloat(leftVal + rightVal);
+                    case FSUB -> createConstantFloat(leftVal - rightVal);
+                    case FMUL -> createConstantFloat(leftVal * rightVal);
+                    case FDIV -> createConstantFloat(leftVal / rightVal);
+                    case FREM -> createConstantFloat(leftVal % rightVal);
+                    default -> null;
+                };
+            }
+        }
+        
         // 整数常量计算
         if (left instanceof ConstantInt leftInt && right instanceof ConstantInt rightInt) {
             int leftVal = leftInt.getValue();
@@ -704,51 +709,23 @@ public class IRBuilder {
             };
         }
         
-        // 浮点常量计算
-        if (left instanceof ConstantFloat leftFloat && right instanceof ConstantFloat rightFloat) {
-            float leftVal = leftFloat.getValue();
-            float rightVal = rightFloat.getValue();
-            
-            return switch (op) {
-                case FADD -> createConstantFloat(leftVal + rightVal);
-                case FSUB -> createConstantFloat(leftVal - rightVal);
-                case FMUL -> createConstantFloat(leftVal * rightVal);
-                case FDIV -> createConstantFloat(leftVal / rightVal);
-                case FREM -> createConstantFloat(leftVal % rightVal);
-                default -> null;
-            };
-        }
-        
-        // 混合类型计算（整数和浮点）
-        if (left instanceof ConstantInt leftInt && right instanceof ConstantFloat rightFloat) {
-            float leftVal = leftInt.getValue();
-            float rightVal = rightFloat.getValue();
-            
-            return switch (op) {
-                case FADD -> createConstantFloat(leftVal + rightVal);
-                case FSUB -> createConstantFloat(leftVal - rightVal);
-                case FMUL -> createConstantFloat(leftVal * rightVal);
-                case FDIV -> createConstantFloat(leftVal / rightVal);
-                case FREM -> createConstantFloat(leftVal % rightVal);
-                default -> null;
-            };
-        }
-        
-        if (left instanceof ConstantFloat leftFloat && right instanceof ConstantInt rightInt) {
-            float leftVal = leftFloat.getValue();
-            float rightVal = rightInt.getValue();
-            
-            return switch (op) {
-                case FADD -> createConstantFloat(leftVal + rightVal);
-                case FSUB -> createConstantFloat(leftVal - rightVal);
-                case FMUL -> createConstantFloat(leftVal * rightVal);
-                case FDIV -> createConstantFloat(leftVal / rightVal);
-                case FREM -> createConstantFloat(leftVal % rightVal);
-                default -> null;
-            };
-        }
-        
         return null; // 无法计算
+    }
+
+    private static Value promoteToFloat(Value value, BasicBlock block) {
+        Type type = value.getType();
+        if (type.isFloatType()) {
+            return value;
+        }
+
+        if (value instanceof ConstantInt constInt) {
+            // 整数常量转浮点
+            return createConstantFloat((double) constInt.getValue());
+        } else if (value.getType().isIntegerType()) {
+            // 整数变量转浮点
+            return createIntToFloat(value, block);
+        }
+        return value;
     }
 
     /**

@@ -100,12 +100,8 @@ public class IRPrinter {
         if (constant instanceof ConstantInt) {
             out.print(((ConstantInt) constant).getValue());
         } else if (constant instanceof ConstantFloat) {
-            // Convert the float value to its hexadecimal representation
-            float value = ((ConstantFloat) constant).getValue();
-            // Convert to raw bits
-            int bits = Float.floatToRawIntBits(value);
-            // Format as hexadecimal string
-            out.print("0x" + Integer.toHexString(bits));
+            double value = ((ConstantFloat) constant).getValue();
+            out.print("0x" + Long.toHexString(Double.doubleToLongBits(value)));
         }
     }
     
@@ -189,7 +185,7 @@ public class IRPrinter {
                 } else if (returnType instanceof IntegerType) {
                     out.println("ret i32 0");
                 } else if (returnType instanceof FloatType) {
-                    out.println("ret float 0.0");
+                    out.println("ret float 0x0000000000000000");
                 } else {
                     out.println("ret i32 0");  // 默认返回整数0
                 }
@@ -297,11 +293,23 @@ public class IRPrinter {
     private void printBinaryInstruction(BinaryInstruction inst) {
         out.print(inst.getOpcodeName().toLowerCase());
         out.print(" ");
-        out.print(inst.getOperand(0).getType());
+        out.print(inst.getType());
         out.print(" ");
-        out.print(printValueName(inst.getOperand(0)));
+        
+        // 特殊处理浮点常量
+        if (inst.getLeft() instanceof ConstantFloat) {
+            out.print(inst.getLeft());
+        } else {
+            out.print(printValueName(inst.getLeft()));
+        }
+        
         out.print(", ");
-        out.print(printValueName(inst.getOperand(1)));
+        
+        if (inst.getRight() instanceof ConstantFloat) {
+            out.print(inst.getRight());
+        } else {
+            out.print(printValueName(inst.getRight()));
+        }
     }
     
     /**
@@ -322,16 +330,21 @@ public class IRPrinter {
      * 打印存储指令
      */
     private void printStoreInstruction(StoreInstruction inst) {
-        out.print("store ");
-        Value value = inst.getValue();
-        Value pointer = inst.getPointer();
-        out.print(value.getType());
+        out.print(inst.getOpcodeName().toLowerCase());
         out.print(" ");
-        out.print(printValueName(value));
+        out.print(inst.getValue().getType());
+        out.print(" ");
+        // 对于浮点常量，需要特殊处理
+        if (inst.getValue() instanceof ConstantFloat) {
+            double value = ((ConstantFloat) inst.getValue()).getValue();
+            out.print("0x" + Long.toHexString(Double.doubleToLongBits(value)));
+        } else {
+            out.print(printValueName(inst.getValue()));
+        }
         out.print(", ");
-        out.print(pointer.getType());
+        out.print(inst.getPointer().getType());
         out.print(" ");
-        out.print(printValueName(pointer));
+        out.print(printValueName(inst.getPointer()));
     }
     
     /**

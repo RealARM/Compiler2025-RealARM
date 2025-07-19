@@ -102,10 +102,10 @@ public class IRVisitor {
         declareLibFunction("putarray", VoidType.VOID, IntegerType.I32, new PointerType(IntegerType.I32));
         
         // 浮点操作函数
-        declareLibFunction("getfloat", FloatType.F32);
-        declareLibFunction("putfloat", VoidType.VOID, FloatType.F32);
-        declareLibFunction("getfarray", IntegerType.I32, new PointerType(FloatType.F32));
-        declareLibFunction("putfarray", VoidType.VOID, IntegerType.I32, new PointerType(FloatType.F32));
+        declareLibFunction("getfloat", FloatType.F64);
+        declareLibFunction("putfloat", VoidType.VOID, FloatType.F64);
+        declareLibFunction("getfarray", IntegerType.I32, new PointerType(FloatType.F64));
+        declareLibFunction("putfarray", VoidType.VOID, IntegerType.I32, new PointerType(FloatType.F64));
         
         // 时间函数
         declareLibFunction("starttime", VoidType.VOID, IntegerType.I32);
@@ -144,7 +144,7 @@ public class IRVisitor {
                 baseType = IntegerType.I32;
                 break;
             case "float":
-                baseType = FloatType.F32;
+                baseType = FloatType.F64;
                 break;
             default:
                 throw new RuntimeException("不支持的变量类型: " + baseTypeStr);
@@ -175,9 +175,9 @@ public class IRVisitor {
                             if (baseType == IntegerType.I32 && initValue instanceof ConstantFloat) {
                                 // 浮点数常量转整数
                                 initValue = new ConstantInt((int)((ConstantFloat)initValue).getValue());
-                            } else if (baseType == FloatType.F32 && initValue instanceof ConstantInt) {
+                            } else if (baseType == FloatType.F64 && initValue instanceof ConstantInt) {
                                 // 整数常量转浮点数
-                                initValue = new ConstantFloat((float)((ConstantInt)initValue).getValue());
+                                initValue = new ConstantFloat((double)((ConstantInt)initValue).getValue());
                             }
                         } else if (currentValue instanceof Constant) {
                             // 如果是常量但不需要进一步评估
@@ -186,8 +186,8 @@ public class IRVisitor {
                             // 类型转换处理
                             if (baseType == IntegerType.I32 && initValue instanceof ConstantFloat) {
                                 initValue = new ConstantInt((int)((ConstantFloat)initValue).getValue());
-                            } else if (baseType == FloatType.F32 && initValue instanceof ConstantInt) {
-                                initValue = new ConstantFloat((float)((ConstantInt)initValue).getValue());
+                            } else if (baseType == FloatType.F64 && initValue instanceof ConstantInt) {
+                                initValue = new ConstantFloat((double)((ConstantInt)initValue).getValue());
                             }
                         } else {
                             throw new RuntimeException("全局变量初始化必须是常量表达式");
@@ -200,7 +200,7 @@ public class IRVisitor {
                     if (baseType == IntegerType.I32) {
                         initValue = new ConstantInt(0);
                     } else { // FloatType
-                        initValue = new ConstantFloat(0.0f);
+                        initValue = new ConstantFloat(0.0);
                     }
                 }
                 
@@ -282,7 +282,7 @@ public class IRVisitor {
             if (elementType == IntegerType.I32) {
                 initValues.add(new ConstantInt(0));
             } else { // FloatType
-                initValues.add(new ConstantFloat(0.0f));
+                initValues.add(new ConstantFloat(0.0));
             }
         }
         
@@ -317,8 +317,8 @@ public class IRVisitor {
                 }
                 
                 // 类型转换处理
-                if (valueToAdd instanceof ConstantInt && elementType == FloatType.F32) {
-                    result.add(new ConstantFloat(((ConstantInt) valueToAdd).getValue()));
+                if (valueToAdd instanceof ConstantInt && elementType.isFloatType()) {
+                    result.add(new ConstantFloat((double)((ConstantInt) valueToAdd).getValue()));
                 } else if (valueToAdd instanceof ConstantFloat && elementType == IntegerType.I32) {
                     result.add(new ConstantInt((int) ((ConstantFloat)valueToAdd).getValue()));
                 } else {
@@ -344,7 +344,7 @@ public class IRVisitor {
                 retType = IntegerType.I32;
                 break;
             case "float":
-                retType = FloatType.F32;
+                retType = FloatType.F64;
                 break;
             case "void":
                 retType = VoidType.VOID;
@@ -405,8 +405,8 @@ public class IRVisitor {
                         }
                         
                         IRBuilder.createReturn(returnValue, currentBlock);
-                    } else if (retType == FloatType.F32) {
-                        IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock); // 返回0.0
+                    } else if (retType.isFloatType()) {
+                        IRBuilder.createReturn(new ConstantFloat(0.0), currentBlock); // 返回0.0
                     }
                 }
             } else {
@@ -415,8 +415,8 @@ public class IRVisitor {
                     IRBuilder.createReturn(currentBlock); // void返回
                 } else if (retType == IntegerType.I32) {
                     IRBuilder.createReturn(new ConstantInt(0), currentBlock); // 返回0
-                } else if (retType == FloatType.F32) {
-                    IRBuilder.createReturn(new ConstantFloat(0.0f), currentBlock); // 返回0.0
+                } else if (retType.isFloatType()) {
+                    IRBuilder.createReturn(new ConstantFloat(0.0), currentBlock); // 返回0.0
                 }
             }
         }
@@ -440,8 +440,8 @@ public class IRVisitor {
                         IRBuilder.createReturn(block);
                     } else if (retType == IntegerType.I32) {
                         IRBuilder.createReturn(new ConstantInt(0), block);
-                    } else if (retType == FloatType.F32) {
-                        IRBuilder.createReturn(new ConstantFloat(0.0f), block);
+                    } else if (retType.isFloatType()) {
+                        IRBuilder.createReturn(new ConstantFloat(0.0), block);
                     }
                 }
             } else {
@@ -457,8 +457,8 @@ public class IRVisitor {
                             IRBuilder.createReturn(block);
                         } else if (retType == IntegerType.I32) {
                             IRBuilder.createReturn(new ConstantInt(0), block);
-                        } else if (retType == FloatType.F32) {
-                            IRBuilder.createReturn(new ConstantFloat(0.0f), block);
+                        } else if (retType.isFloatType()) {
+                            IRBuilder.createReturn(new ConstantFloat(0.0), block);
                         }
                     }
                 }
@@ -517,7 +517,7 @@ public class IRVisitor {
                 type = isArray ? new PointerType(IntegerType.I32) : IntegerType.I32;
                 break;
             case "float":
-                type = isArray ? new PointerType(FloatType.F32) : FloatType.F32;
+                type = isArray ? new PointerType(FloatType.F64) : FloatType.F64;
                 break;
             default:
                 throw new RuntimeException("不支持的参数类型: " + typeStr);
@@ -655,7 +655,7 @@ public class IRVisitor {
                 baseType = IntegerType.I32;
                 break;
             case "float":
-                baseType = FloatType.F32;
+                baseType = FloatType.F64;
                 break;
             default:
                 throw new RuntimeException("不支持的变量类型: " + baseTypeStr);
@@ -681,8 +681,8 @@ public class IRVisitor {
                     // 默认初始化为0
                     if (baseType == IntegerType.I32) {
                         IRBuilder.createStore(new ConstantInt(0), allocaInst, currentBlock);
-                    } else if (baseType == FloatType.F32) {
-                        IRBuilder.createStore(new ConstantFloat(0.0f), allocaInst, currentBlock);
+                    } else if (baseType == FloatType.F64) {
+                        IRBuilder.createStore(new ConstantFloat(0.0), allocaInst, currentBlock);
                     }
                 }
                 
@@ -690,11 +690,147 @@ public class IRVisitor {
                 addVariable(name, allocaInst);
             } else {
                 // 数组变量
-                SyntaxTree.ArrayInitExpr initExpr = varDef.init instanceof SyntaxTree.ArrayInitExpr ? 
-                                                  (SyntaxTree.ArrayInitExpr) varDef.init : null;
+                // 检查是否是特殊情况，包含数组访问表达式的初始化
+                boolean hasArrayAccess = false;
+                if (varDef.init instanceof SyntaxTree.ArrayInitExpr) {
+                    SyntaxTree.ArrayInitExpr arrayInit = (SyntaxTree.ArrayInitExpr) varDef.init;
+                    for (SyntaxTree.Expr expr : arrayInit.elements) {
+                        if (expr instanceof SyntaxTree.ArrayAccessExpr) {
+                            hasArrayAccess = true;
+                            break;
+                        }
+                    }
+                }
                 
-                // 使用processLocalArrayDecl处理数组声明和初始化
-                processLocalArrayDecl(name, baseType, dims, initExpr);
+                // 计算数组总大小
+                int totalSize = 1;
+                for (Integer dim : dims) {
+                    totalSize *= dim;
+                }
+                
+                // 创建数组分配指令
+                AllocaInstruction arrayPtr = IRBuilder.createArrayAlloca(baseType, totalSize, currentBlock);
+                
+                // 添加到符号表
+                addVariable(name, arrayPtr);
+                
+                // 存储维度信息
+                addArrayDimensions(name, dims);
+                
+                if (hasArrayAccess && varDef.init instanceof SyntaxTree.ArrayInitExpr) {
+                    // 先初始化为0
+                    for (int i = 0; i < totalSize; i++) {
+                        Value indexValue = new ConstantInt(i);
+                        Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                        if (baseType == IntegerType.I32) {
+                            IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
+                        } else { // FloatType
+                            IRBuilder.createStore(new ConstantFloat(0.0), elemPtr, currentBlock);
+                        }
+                    }
+                    
+                    // 计算索引因子
+                    List<Integer> factors = new ArrayList<>();
+                    for (int i = 0; i < dims.size(); i++) {
+                        int factor = 1;
+                        for (int j = i + 1; j < dims.size(); j++) {
+                            factor *= dims.get(j);
+                        }
+                        factors.add(factor);
+                    }
+                    
+                    // 直接处理一维平铺的数组初始化
+                    List<SyntaxTree.Expr> elements = ((SyntaxTree.ArrayInitExpr) varDef.init).elements;
+                    int currentPos = 0;
+                    
+                    for (SyntaxTree.Expr expr : elements) {
+                        // 如果超出数组范围，停止初始化
+                        if (currentPos >= totalSize) break;
+                        
+                        // 如果是数组访问表达式，需要特殊处理
+                        if (expr instanceof SyntaxTree.ArrayAccessExpr) {
+                            // 访问数组表达式获取值
+                            visitArrayAccessExprAndLoad((SyntaxTree.ArrayAccessExpr) expr);
+                            Value value = currentValue;
+                            
+                            // 类型转换
+                            if (!value.getType().equals(baseType)) {
+                                if (baseType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                                    value = IRBuilder.createFloatToInt(value, currentBlock);
+                                } else if (baseType == FloatType.F64 && value.getType() instanceof IntegerType) {
+                                    value = IRBuilder.createIntToFloat(value, currentBlock);
+                                }
+                            }
+                            
+                            // 存储值
+                            Value indexValue = new ConstantInt(currentPos);
+                            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                            IRBuilder.createStore(value, elemPtr, currentBlock);
+                        } 
+                        // 如果是数组初始化表达式，处理嵌套初始化
+                        else if (expr instanceof SyntaxTree.ArrayInitExpr) {
+                            SyntaxTree.ArrayInitExpr subInit = (SyntaxTree.ArrayInitExpr) expr;
+                            
+                            // 处理嵌套初始化的元素
+                            for (int i = 0; i < Math.min(subInit.elements.size(), dims.get(dims.size() - 1)); i++) {
+                                if (currentPos >= totalSize) break;
+                                
+                                SyntaxTree.Expr subExpr = subInit.elements.get(i);
+                                
+                                // 访问表达式获取值
+                                if (subExpr instanceof SyntaxTree.ArrayAccessExpr) {
+                                    visitArrayAccessExprAndLoad((SyntaxTree.ArrayAccessExpr) subExpr);
+                                } else {
+                                    visitExpr(subExpr);
+                                }
+                                Value value = currentValue;
+                                
+                                // 类型转换
+                                if (!value.getType().equals(baseType)) {
+                                    if (baseType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                                        value = IRBuilder.createFloatToInt(value, currentBlock);
+                                    } else if (baseType == FloatType.F64 && value.getType() instanceof IntegerType) {
+                                        value = IRBuilder.createIntToFloat(value, currentBlock);
+                                    }
+                                }
+                                
+                                // 存储值
+                                Value indexValue = new ConstantInt(currentPos);
+                                Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                                IRBuilder.createStore(value, elemPtr, currentBlock);
+                                
+                                currentPos++;
+                            }
+                        } 
+                        // 处理普通表达式
+                        else {
+                            visitExpr(expr);
+                            Value value = currentValue;
+                            
+                            // 类型转换
+                            if (!value.getType().equals(baseType)) {
+                                if (baseType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                                    value = IRBuilder.createFloatToInt(value, currentBlock);
+                                } else if (baseType == FloatType.F64 && value.getType() instanceof IntegerType) {
+                                    value = IRBuilder.createIntToFloat(value, currentBlock);
+                                }
+                            }
+                            
+                            // 存储值
+                            Value indexValue = new ConstantInt(currentPos);
+                            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                            IRBuilder.createStore(value, elemPtr, currentBlock);
+                        }
+                        
+                        currentPos++;
+                    }
+                } else if (varDef.init != null) {
+                    // 标准数组初始化
+                    SyntaxTree.ArrayInitExpr initExpr = varDef.init instanceof SyntaxTree.ArrayInitExpr ? 
+                                                      (SyntaxTree.ArrayInitExpr) varDef.init : null;
+                    processLocalArrayDecl(name, baseType, dims, initExpr);
+                }
+                // 否则保持默认值
             }
         }
     }
@@ -707,7 +843,7 @@ public class IRVisitor {
             case "int":
                 return IntegerType.I32;
             case "float":
-                return FloatType.F32;
+                return FloatType.F64;
             default:
                 throw new RuntimeException("不支持的类型: " + typeName);
         }
@@ -739,8 +875,8 @@ public class IRVisitor {
             Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
             if (elementType == IntegerType.I32) {
                 IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
-            } else if (elementType == FloatType.F32) {
-                IRBuilder.createStore(new ConstantFloat(0.0f), elemPtr, currentBlock);
+            } else if (elementType == FloatType.F64) {
+                IRBuilder.createStore(new ConstantFloat(0.0), elemPtr, currentBlock);
             }
         }
         
@@ -772,21 +908,13 @@ public class IRVisitor {
             SyntaxTree.ArrayInitExpr arrayInit = (SyntaxTree.ArrayInitExpr) expr;
             int elementCount = arrayInit.elements.size();
             
-            // 检查特殊情况：当处理{2, 1, 8}这样的元素列表但我们位于维度<dims.size()-1时
-            // 这表明这是一个平面列表需要按顺序放入最内层维度
-            if (dimLevel == dims.size() - 2 && elementCount > 0 && 
-                !(arrayInit.elements.get(0) instanceof SyntaxTree.ArrayInitExpr)) {
-                
-                // 这是一个平面列表，需要按顺序放入最后一维
-                // 处理c[2][0][0], c[2][0][1], c[2][0][2]这样的情形
-                
-                // 固定前面所有维度
-                // 在c[7][1][5]中，如果dimLevel=1，则indices=[2, 0, x]表示在c[2][0][x]
-                for (int i = 0; i < Math.min(elementCount, dims.get(dims.size()-1)); i++) {
-                    // 更新最后一维的索引
-                    indices[dims.size()-1] = i;
+            // 如果当前维度已经是最后一维，则在这一维中按顺序初始化元素
+            if (dimLevel == dims.size() - 1) {
+                for (int i = 0; i < Math.min(elementCount, dims.get(dimLevel)); i++) {
+                    // 更新当前维度的索引
+                    indices[dimLevel] = i;
                     
-                    // 获取值
+                    // 获取当前元素的表达式
                     SyntaxTree.Expr element = arrayInit.elements.get(i);
                     
                     // 计算线性索引
@@ -795,15 +923,21 @@ public class IRVisitor {
                         linearIndex += indices[j] * factors.get(j);
                     }
                     
-                    // 访问表达式获取值
-                    visitExpr(element);
+                    // 处理表达式
+                    if (element instanceof SyntaxTree.ArrayAccessExpr) {
+                        // 数组访问需要特殊处理，确保我们获取的是正确的值
+                        visitArrayAccessExprAndLoad((SyntaxTree.ArrayAccessExpr) element);
+                    } else {
+                        // 访问表达式获取值
+                        visitExpr(element);
+                    }
                     Value value = currentValue;
                     
                     // 类型转换（如果需要）
                     if (!value.getType().equals(elementType)) {
                         if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
                             value = IRBuilder.createFloatToInt(value, currentBlock);
-                        } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
+                        } else if (elementType == FloatType.F64 && value.getType() instanceof IntegerType) {
                             value = IRBuilder.createIntToFloat(value, currentBlock);
                         }
                     }
@@ -813,72 +947,147 @@ public class IRVisitor {
                     Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
                     IRBuilder.createStore(value, elemPtr, currentBlock);
                 }
-                return;
             }
-            
-            // 正常处理嵌套结构
-            for (int i = 0; i < Math.min(elementCount, dims.get(dimLevel)); i++) {
-                // 更新当前维度的索引
-                indices[dimLevel] = i;
+            // 对于非最后一维，我们需要区分处理方式
+            else {
+                // 检查是否是花括号混合形式的初始化
+                boolean hasNestedArray = false;
+                for (SyntaxTree.Expr element : arrayInit.elements) {
+                    if (element instanceof SyntaxTree.ArrayInitExpr) {
+                        hasNestedArray = true;
+                        break;
+                    }
+                }
                 
-                // 处理当前元素
-                SyntaxTree.Expr element = arrayInit.elements.get(i);
-                
-                if (element instanceof SyntaxTree.ArrayInitExpr) {
-                    // 如果是数组初始化表达式，递归处理下一个维度
-                    initializeArray(element, arrayPtr, dims, factors, indices, dimLevel + 1, elementType);
+                if (hasNestedArray) {
+                    // 有嵌套数组，按照正常的多维数组处理
+                    int curIdx = 0; // 当前处理的元素在当前维度的索引
+                    
+                    for (int i = 0; i < elementCount; i++) {
+                        SyntaxTree.Expr element = arrayInit.elements.get(i);
+                        
+                        if (element instanceof SyntaxTree.ArrayInitExpr) {
+                            // 如果是嵌套数组，则作为下一个维度整体处理
+                            if (curIdx < dims.get(dimLevel)) {
+                                indices[dimLevel] = curIdx++;
+                                initializeArray(element, arrayPtr, dims, factors, indices, dimLevel + 1, elementType);
+                            }
+                        } else {
+                            // 单个元素，放在当前维度的对应位置，下一维度的第一个位置
+                            if (curIdx < dims.get(dimLevel)) {
+                                indices[dimLevel] = curIdx++;
+                                
+                                // 将下一维度的索引设为0
+                                for (int j = dimLevel + 1; j < dims.size(); j++) {
+                                    indices[j] = 0;
+                                }
+                                
+                                // 计算线性索引
+                                int linearIndex = 0;
+                                for (int j = 0; j < dims.size(); j++) {
+                                    linearIndex += indices[j] * factors.get(j);
+                                }
+                                
+                                // 处理表达式
+                                if (element instanceof SyntaxTree.ArrayAccessExpr) {
+                                    // 数组访问需要特殊处理，确保我们获取的是正确的值
+                                    visitArrayAccessExprAndLoad((SyntaxTree.ArrayAccessExpr) element);
+                                } else {
+                                    // 访问表达式获取值
+                                    visitExpr(element);
+                                }
+                                Value value = currentValue;
+                                
+                                // 类型转换
+                                if (!value.getType().equals(elementType)) {
+                                    if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                                        value = IRBuilder.createFloatToInt(value, currentBlock);
+                                    } else if (elementType == FloatType.F64 && value.getType() instanceof IntegerType) {
+                                        value = IRBuilder.createIntToFloat(value, currentBlock);
+                                    }
+                                }
+                                
+                                // 存储值
+                                Value indexValue = new ConstantInt(linearIndex);
+                                Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                                IRBuilder.createStore(value, elemPtr, currentBlock);
+                            }
+                        }
+                    }
                 } else {
-                    // 如果是单个值（非数组初始化表达式），但我们还有更多维度
-                    // 则默认填充到第一个位置[x,y,0,0,...]
-                    if (dimLevel < dims.size() - 1) {
-                        // 将剩余维度的索引设为0
-                        for (int j = dimLevel + 1; j < dims.size(); j++) {
-                            indices[j] = 0;
+                    // 没有嵌套数组，按照一维数组平铺处理
+                    int currentPos = 0;
+                    for (int i = 0; i < dims.get(dimLevel) && currentPos < elementCount; i++) {
+                        indices[dimLevel] = i;
+                        
+                        // 对于当前维度的每个位置，填充下一维度的元素
+                        for (int j = 0; j < dims.get(dimLevel + 1) && currentPos < elementCount; j++) {
+                            indices[dimLevel + 1] = j;
+                            
+                            // 将剩余维度的索引设为0
+                            for (int k = dimLevel + 2; k < dims.size(); k++) {
+                                indices[k] = 0;
+                            }
+                            
+                            // 计算线性索引
+                            int linearIndex = 0;
+                            for (int k = 0; k < dims.size(); k++) {
+                                linearIndex += indices[k] * factors.get(k);
+                            }
+                            
+                            // 获取当前元素
+                            SyntaxTree.Expr element = arrayInit.elements.get(currentPos++);
+                            
+                            // 处理表达式
+                            if (element instanceof SyntaxTree.ArrayAccessExpr) {
+                                // 数组访问需要特殊处理，确保我们获取的是正确的值
+                                visitArrayAccessExprAndLoad((SyntaxTree.ArrayAccessExpr) element);
+                            } else {
+                                // 访问表达式获取值
+                                visitExpr(element);
+                            }
+                            Value value = currentValue;
+                            
+                            // 类型转换
+                            if (!value.getType().equals(elementType)) {
+                                if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                                    value = IRBuilder.createFloatToInt(value, currentBlock);
+                                } else if (elementType == FloatType.F64 && value.getType() instanceof IntegerType) {
+                                    value = IRBuilder.createIntToFloat(value, currentBlock);
+                                }
+                            }
+                            
+                            // 存储值
+                            Value indexValue = new ConstantInt(linearIndex);
+                            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                            IRBuilder.createStore(value, elemPtr, currentBlock);
                         }
                     }
-                    
-                    // 计算线性索引
-                    int linearIndex = 0;
-                    for (int j = 0; j < dims.size(); j++) {
-                        linearIndex += indices[j] * factors.get(j);
-                    }
-                    
-                    // 访问表达式获取值
-                    visitExpr(element);
-                    Value value = currentValue;
-                    
-                    // 类型转换（如果需要）
-                    if (!value.getType().equals(elementType)) {
-                        if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
-                            value = IRBuilder.createFloatToInt(value, currentBlock);
-                        } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
-                            value = IRBuilder.createIntToFloat(value, currentBlock);
-                        }
-                    }
-                    
-                    // 创建指针并存储值
-                    Value indexValue = new ConstantInt(linearIndex);
-                    Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
-                    IRBuilder.createStore(value, elemPtr, currentBlock);
                 }
             }
         } else {
             // 处理单个值作为数组元素
-            // 计算线性索引（与visitArrayAccessExpr相同）
+            // 计算线性索引
             int linearIndex = 0;
             for (int i = 0; i < dims.size(); i++) {
                 linearIndex += indices[i] * factors.get(i);
             }
             
-            // 访问表达式获取值
-            visitExpr(expr);
+            // 处理表达式
+            if (expr instanceof SyntaxTree.ArrayAccessExpr) {
+                // 数组访问需要特殊处理，确保我们获取的是正确的值
+                visitArrayAccessExprAndLoad((SyntaxTree.ArrayAccessExpr) expr);
+            } else {
+                // 访问表达式获取值
+                visitExpr(expr);
+            }
             Value value = currentValue;
             
             // 类型转换（如果需要）
             if (!value.getType().equals(elementType)) {
                 if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
                     value = IRBuilder.createFloatToInt(value, currentBlock);
-                } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
+                } else if (elementType == FloatType.F64 && value.getType() instanceof IntegerType) {
                     value = IRBuilder.createIntToFloat(value, currentBlock);
                 }
             }
@@ -1175,7 +1384,7 @@ public class IRVisitor {
         if (value instanceof Integer) {
             currentValue = new ConstantInt((Integer) value);
         } else if (value instanceof Float) {
-            currentValue = new ConstantFloat((Float) value);
+            currentValue = new ConstantFloat(((Float) value).doubleValue());
         } else {
             throw new RuntimeException("不支持的字面量类型: " + value.getClass().getName());
         }
@@ -1216,6 +1425,13 @@ public class IRVisitor {
      * 访问表达式，并确保加载指针类型的值
      */
     private void visitExprAndLoad(SyntaxTree.Expr expr) {
+        // 数组访问表达式特殊处理
+        if (expr instanceof SyntaxTree.ArrayAccessExpr) {
+            // 特殊处理数组访问表达式，确保我们获取元素的值
+            visitArrayAccessExprAndLoad((SyntaxTree.ArrayAccessExpr) expr);
+            return;
+        }
+        
         visitExpr(expr);
         
         // 如果结果是指针类型，并且不是数组访问（因为数组访问可能是左值），需要加载值
@@ -1326,7 +1542,7 @@ public class IRVisitor {
                     }
                     // 对于浮点数，创建0.0-operand
                     else if (operand.getType() instanceof FloatType) {
-                        Value zero = new ConstantFloat(0.0f);
+                        Value zero = new ConstantFloat(0.0);
                         currentValue = IRBuilder.createBinaryInst(OpCode.FSUB, zero, operand, currentBlock);
                     }
                 }
@@ -1962,7 +2178,121 @@ public class IRVisitor {
         
         // 初始化数组元素
         if (initExpr != null) {
-            processArrayInit(initExpr, arrayPtr, dimensions, elementType);
+            // 如果数组初始化中包含特殊元素如a[3][0]，我们需要先处理这些表达式
+            // 先简单检查是否存在数组访问表达式
+            boolean hasArrayAccess = false;
+            for (SyntaxTree.Expr expr : initExpr.elements) {
+                if (expr instanceof SyntaxTree.ArrayAccessExpr) {
+                    hasArrayAccess = true;
+                    break;
+                }
+            }
+            
+            // 如果包含数组访问表达式，需要特殊处理
+            if (hasArrayAccess) {
+                // 先把整个数组初始化为0
+                for (int i = 0; i < totalSize; i++) {
+                    Value indexValue = new ConstantInt(i);
+                    Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                    if (elementType == IntegerType.I32) {
+                        IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
+                    } else { // FloatType
+                        IRBuilder.createStore(new ConstantFloat(0.0), elemPtr, currentBlock);
+                    }
+                }
+                
+                // 直接处理一维平铺的数组初始化
+                List<Integer> factors = new ArrayList<>();
+                for (int i = 0; i < dimensions.size(); i++) {
+                    int factor = 1;
+                    for (int j = i + 1; j < dimensions.size(); j++) {
+                        factor *= dimensions.get(j);
+                    }
+                    factors.add(factor);
+                }
+                
+                int currentPos = 0;
+                for (SyntaxTree.Expr expr : initExpr.elements) {
+                    if (currentPos >= totalSize) break;
+                    
+                    // 计算当前元素在数组中的位置
+                    int[] indices = new int[dimensions.size()];
+                    int remaining = currentPos;
+                    for (int i = 0; i < dimensions.size(); i++) {
+                        indices[i] = remaining / factors.get(i);
+                        remaining %= factors.get(i);
+                    }
+                    
+                    // 计算线性索引
+                    int linearIndex = 0;
+                    for (int i = 0; i < dimensions.size(); i++) {
+                        linearIndex += indices[i] * factors.get(i);
+                    }
+                    
+                    // 访问表达式获取值
+                    if (expr instanceof SyntaxTree.ArrayAccessExpr) {
+                        visitArrayAccessExprAndLoad((SyntaxTree.ArrayAccessExpr) expr);
+                    } else if (expr instanceof SyntaxTree.ArrayInitExpr) {
+                        // 对于嵌套数组初始化，跳过当前级别，继续处理下一级别
+                        SyntaxTree.ArrayInitExpr subInit = (SyntaxTree.ArrayInitExpr) expr;
+                        
+                        // 计算当前维度的大小
+                        int currentDimSize = dimensions.get(0);
+                        for (int i = 0; i < Math.min(subInit.elements.size(), dimensions.get(1)); i++) {
+                            if (currentPos + i >= totalSize) break;
+                            
+                            SyntaxTree.Expr subExpr = subInit.elements.get(i);
+                            
+                            // 访问表达式获取值
+                            if (subExpr instanceof SyntaxTree.ArrayAccessExpr) {
+                                visitArrayAccessExprAndLoad((SyntaxTree.ArrayAccessExpr) subExpr);
+                            } else {
+                                visitExpr(subExpr);
+                            }
+                            Value value = currentValue;
+                            
+                            // 类型转换
+                            if (!value.getType().equals(elementType)) {
+                                if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                                    value = IRBuilder.createFloatToInt(value, currentBlock);
+                                } else if (elementType == FloatType.F64 && value.getType() instanceof IntegerType) {
+                                    value = IRBuilder.createIntToFloat(value, currentBlock);
+                                }
+                            }
+                            
+                            // 存储到数组元素位置
+                            Value storeIndex = new ConstantInt(linearIndex + i);
+                            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, storeIndex, currentBlock);
+                            IRBuilder.createStore(value, elemPtr, currentBlock);
+                        }
+                        
+                        currentPos += dimensions.get(1); // 跳过一整个子数组
+                        continue;
+                    } else {
+                        visitExpr(expr);
+                    }
+                    Value value = currentValue;
+                    
+                    // 类型转换
+                    if (!value.getType().equals(elementType)) {
+                        if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                            value = IRBuilder.createFloatToInt(value, currentBlock);
+                        } else if (elementType == FloatType.F64 && value.getType() instanceof IntegerType) {
+                            value = IRBuilder.createIntToFloat(value, currentBlock);
+                        }
+                    }
+                    
+                    // 存储到数组元素位置
+                    Value indexValue = new ConstantInt(linearIndex);
+                    Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                    IRBuilder.createStore(value, elemPtr, currentBlock);
+                    
+                    currentPos++;
+                }
+            } else {
+                // 正常处理数组初始化
+                processArrayInit(initExpr, arrayPtr, dimensions, elementType);
+            }
         }
         // 如果没有初始化表达式，不进行任何初始化
     }
@@ -2037,5 +2367,29 @@ public class IRVisitor {
             // 否则使用异或运算
             return IRBuilder.createBinaryInst(OpCode.XOR, boolValue, new ConstantInt(1, IntegerType.I1), block);
         }
+    }
+
+    /**
+     * 访问一个表达式，如果是常量，尝试获取它的实际值
+     */
+    private Value getConstantValue(SyntaxTree.Expr expr) {
+        // 保存当前值
+        Value oldValue = currentValue;
+        
+        // 访问表达式
+        visitExprAndLoad(expr);
+        Value result = currentValue;
+        
+        // 尝试评估为常量
+        if (result != null) {
+            Constant constResult = IR.Pass.ConstantExpressionEvaluator.evaluate(result);
+            if (constResult != null) {
+                result = constResult;
+            }
+        }
+        
+        // 恢复当前值
+        currentValue = oldValue;
+        return result;
     }
 } 
