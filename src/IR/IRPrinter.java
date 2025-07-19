@@ -100,7 +100,12 @@ public class IRPrinter {
         if (constant instanceof ConstantInt) {
             out.print(((ConstantInt) constant).getValue());
         } else if (constant instanceof ConstantFloat) {
-            out.print(((ConstantFloat) constant).getValue());
+            // Convert the float value to its hexadecimal representation
+            float value = ((ConstantFloat) constant).getValue();
+            // Convert to raw bits
+            int bits = Float.floatToRawIntBits(value);
+            // Format as hexadecimal string
+            out.print("0x" + Integer.toHexString(bits));
         }
     }
     
