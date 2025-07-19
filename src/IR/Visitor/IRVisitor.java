@@ -717,246 +717,160 @@ public class IRVisitor {
      * 处理数组初始化
      */
     private void processArrayInit(SyntaxTree.ArrayInitExpr initExpr, Value arrayPtr, List<Integer> dims, Type elementType) {
-        List<Value> flattenedValues = flattenArrayInit(initExpr, dims, elementType);
-        
-        // 特殊处理二维数组
-        if (dims.size() == 2) {
-            int rows = dims.get(0);
-            int cols = dims.get(1);
-            
-            for (int i = 0; i < Math.min(flattenedValues.size(), rows * cols); i++) {
-                // 计算正确的行列索引
-                int row = i / cols;
-                int col = i % cols;
-                
-                // 计算正确的一维偏移: row * cols + col
-                int offset = row * cols + col;
-                Value indexValue = new ConstantInt(offset);
-                Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
-                
-                // 存储值
-                IRBuilder.createStore(flattenedValues.get(i), elemPtr, currentBlock);
+        // 计算索引因子（与数组访问完全相同的逻辑）
+        List<Integer> factors = new ArrayList<>();
+        for (int i = 0; i < dims.size(); i++) {
+            int factor = 1;
+            for (int j = i + 1; j < dims.size(); j++) {
+                factor *= dims.get(j);
             }
-        } else {
-            // 其他维度的数组，保持原来的一维处理方式
-        for (int i = 0; i < flattenedValues.size(); i++) {
-            // 计算元素指针
-            Value indexValue = new ConstantInt(i);
-            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
-            
-            // 存储值
-            IRBuilder.createStore(flattenedValues.get(i), elemPtr, currentBlock);
-            }
+            factors.add(factor);
         }
-    }
-    
-    /**
-     * 将嵌套的数组初始化表达式展平为一维值列表
-     */
-    private List<Value> flattenArrayInit(SyntaxTree.ArrayInitExpr initExpr, List<Integer> dims, Type elementType) {
-        List<Value> result = new ArrayList<>();
         
         // 计算数组总大小
         int totalSize = 1;
-        for (int dim : dims) {
+        for (Integer dim : dims) {
             totalSize *= dim;
         }
         
-        // 对于二维数组，需要特别处理嵌套的初始化表达式
-        if (dims.size() == 2) {
-            int rows = dims.get(0);
-            int cols = dims.get(1);
-            
-            // 如果是带嵌套的二维数组初始化 {{...}, {...}, ...}
-            if (initExpr.elements.size() > 0 && initExpr.elements.get(0) instanceof SyntaxTree.ArrayInitExpr) {
-                // 处理每一行
-                for (int i = 0; i < Math.min(rows, initExpr.elements.size()); i++) {
-                    SyntaxTree.Expr rowExpr = initExpr.elements.get(i);
-                    if (rowExpr instanceof SyntaxTree.ArrayInitExpr) {
-                        SyntaxTree.ArrayInitExpr rowInit = (SyntaxTree.ArrayInitExpr) rowExpr;
-                        // 处理这一行中的每个元素
-                        for (int j = 0; j < Math.min(cols, rowInit.elements.size()); j++) {
-                            visitExpr(rowInit.elements.get(j));
-                            Value value = currentValue;
-                            
-                            // 类型转换（如果需要）
-                            if (!value.getType().equals(elementType)) {
-                                if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
-                                    value = IRBuilder.createFloatToInt(value, currentBlock);
-                                } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
-                                    value = IRBuilder.createIntToFloat(value, currentBlock);
-                                }
-                            }
-                            result.add(value);
-                        }
-                        
-                        // 如果这一行的元素不足，用0填充
-                        for (int j = rowInit.elements.size(); j < cols; j++) {
-                            if (elementType == IntegerType.I32) {
-                                result.add(new ConstantInt(0));
-                            } else if (elementType == FloatType.F32) {
-                                result.add(new ConstantFloat(0.0f));
-                            }
-                        }
-                    } else {
-                        // 这一行不是数组初始化表达式，按单个元素处理并填充剩余元素
-                        visitExpr(rowExpr);
-                        Value value = currentValue;
-                        
-                        // 类型转换（如果需要）
-                        if (!value.getType().equals(elementType)) {
-                            if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
-                                value = IRBuilder.createFloatToInt(value, currentBlock);
-                            } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
-                                value = IRBuilder.createIntToFloat(value, currentBlock);
-                            }
-                        }
-                        result.add(value);
-                        
-                        // 填充这一行剩余的元素
-                        for (int j = 1; j < cols; j++) {
-                            if (elementType == IntegerType.I32) {
-                                result.add(new ConstantInt(0));
-                            } else if (elementType == FloatType.F32) {
-                                result.add(new ConstantFloat(0.0f));
-                            }
-                        }
-                    }
-                }
-                
-                // 如果行数不足，用0填充剩余的行
-                for (int i = initExpr.elements.size(); i < rows; i++) {
-                    for (int j = 0; j < cols; j++) {
-                        if (elementType == IntegerType.I32) {
-                            result.add(new ConstantInt(0));
-                        } else if (elementType == FloatType.F32) {
-                            result.add(new ConstantFloat(0.0f));
-                        }
-                    }
-                }
-            } else {
-                // 处理混合形式的初始化，如 {1, 2, {3}, {5}, 7, 8}
-                int currentRow = 0;
-                int currentCol = 0;
-                
-                // 将初始化元素映射到二维数组中
-                for (SyntaxTree.Expr element : initExpr.elements) {
-                    // 检查当前位置是否在数组范围内
-                    if (currentRow >= rows) {
-                        break;
-                    }
-                    
-                    if (element instanceof SyntaxTree.ArrayInitExpr) {
-                        // 处理嵌套数组初始化 {3} 或 {5}
-                        SyntaxTree.ArrayInitExpr nestedInit = (SyntaxTree.ArrayInitExpr) element;
-                        
-                        // 获取嵌套数组的第一个元素
-                        if (!nestedInit.elements.isEmpty()) {
-                            visitExpr(nestedInit.elements.get(0));
-                            Value value = currentValue;
-                            
-                            // 类型转换（如果需要）
-                            if (!value.getType().equals(elementType)) {
-                                if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
-                                    value = IRBuilder.createFloatToInt(value, currentBlock);
-                                } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
-                                    value = IRBuilder.createIntToFloat(value, currentBlock);
-                                }
-                            }
-                            
-                            // 计算正确的一维索引并存储值
-                            int index = currentRow * cols + currentCol;
-                            while (result.size() <= index) {
-                                result.add(new ConstantInt(0)); // 填充中间可能的空隙
-                            }
-                            result.set(index, value);
-                        }
-                        
-                        // 移动到下一位置
-                        currentCol++;
-                        if (currentCol >= cols) {
-                            currentRow++;
-                            currentCol = 0;
-                        }
-                        
-                        // 嵌套数组的其他元素会被忽略，其位置填0
-                        if (currentRow < rows && currentCol < cols) {
-                            int index = currentRow * cols + currentCol;
-                            while (result.size() <= index) {
-                                result.add(new ConstantInt(0));
-                            }
-                            result.set(index, new ConstantInt(0));
-                            
-                            // 移动到下一位置
-                            currentCol++;
-                            if (currentCol >= cols) {
-                                currentRow++;
-                                currentCol = 0;
-                            }
-                        }
-                    } else {
-                        // 处理单个元素
-                        visitExpr(element);
-                        Value value = currentValue;
-                        
-                        // 类型转换（如果需要）
-                        if (!value.getType().equals(elementType)) {
-                            if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
-                                value = IRBuilder.createFloatToInt(value, currentBlock);
-                            } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
-                                value = IRBuilder.createIntToFloat(value, currentBlock);
-                            }
-                        }
-                        
-                        // 计算正确的一维索引并存储值
-                        int index = currentRow * cols + currentCol;
-                        while (result.size() <= index) {
-                            result.add(new ConstantInt(0)); // 填充中间可能的空隙
-                        }
-                        result.set(index, value);
-                        
-                        // 移动到下一位置
-                        currentCol++;
-                        if (currentCol >= cols) {
-                            currentRow++;
-                            currentCol = 0;
-                        }
-                    }
-                }
-                
-                // 确保结果大小正确
-                while (result.size() < totalSize) {
-                    result.add(new ConstantInt(0));
-                }
-            }
-        } else {
-            // 非二维数组，使用原有逻辑
-        flattenArrayInitRecursive(initExpr, result, elementType);
-        
-        // 如果初始化值不足，用0填充
-        while (result.size() < totalSize) {
+        // 初始化所有元素为0（防止部分初始化）
+        for (int i = 0; i < totalSize; i++) {
+            Value indexValue = new ConstantInt(i);
+            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
             if (elementType == IntegerType.I32) {
-                result.add(new ConstantInt(0));
+                IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
             } else if (elementType == FloatType.F32) {
-                result.add(new ConstantFloat(0.0f));
-                }
+                IRBuilder.createStore(new ConstantFloat(0.0f), elemPtr, currentBlock);
             }
         }
         
-        return result;
+        // 使用嵌套数组初始化表达式的结构进行初始化
+        // 创建索引数组跟踪当前位置
+        int[] indices = new int[dims.size()];
+        for (int i = 0; i < indices.length; i++) {
+            indices[i] = 0; // 初始化所有索引为0
+        }
+        
+        // 递归处理数组初始化，保持与数组访问相同的线性偏移计算逻辑
+        initializeArray(initExpr, arrayPtr, dims, factors, indices, 0, elementType);
     }
     
     /**
-     * 递归展平数组初始化表达式
+     * 递归初始化数组元素
+     * @param expr 初始化表达式
+     * @param arrayPtr 数组指针
+     * @param dims 数组维度
+     * @param factors 线性索引计算因子
+     * @param indices 当前索引数组
+     * @param dimLevel 当前维度级别
+     * @param elementType 元素类型
      */
-    private void flattenArrayInitRecursive(SyntaxTree.Expr expr, List<Value> result, Type elementType) {
+    private void initializeArray(SyntaxTree.Expr expr, Value arrayPtr, List<Integer> dims, 
+                                List<Integer> factors, int[] indices, int dimLevel, Type elementType) {
+        // 处理多级嵌套的数组初始化
         if (expr instanceof SyntaxTree.ArrayInitExpr) {
             SyntaxTree.ArrayInitExpr arrayInit = (SyntaxTree.ArrayInitExpr) expr;
-            for (SyntaxTree.Expr element : arrayInit.elements) {
-                flattenArrayInitRecursive(element, result, elementType);
+            int elementCount = arrayInit.elements.size();
+            
+            // 检查特殊情况：当处理{2, 1, 8}这样的元素列表但我们位于维度<dims.size()-1时
+            // 这表明这是一个平面列表需要按顺序放入最内层维度
+            if (dimLevel == dims.size() - 2 && elementCount > 0 && 
+                !(arrayInit.elements.get(0) instanceof SyntaxTree.ArrayInitExpr)) {
+                
+                // 这是一个平面列表，需要按顺序放入最后一维
+                // 处理c[2][0][0], c[2][0][1], c[2][0][2]这样的情形
+                
+                // 固定前面所有维度
+                // 在c[7][1][5]中，如果dimLevel=1，则indices=[2, 0, x]表示在c[2][0][x]
+                for (int i = 0; i < Math.min(elementCount, dims.get(dims.size()-1)); i++) {
+                    // 更新最后一维的索引
+                    indices[dims.size()-1] = i;
+                    
+                    // 获取值
+                    SyntaxTree.Expr element = arrayInit.elements.get(i);
+                    
+                    // 计算线性索引
+                    int linearIndex = 0;
+                    for (int j = 0; j < dims.size(); j++) {
+                        linearIndex += indices[j] * factors.get(j);
+                    }
+                    
+                    // 访问表达式获取值
+                    visitExpr(element);
+                    Value value = currentValue;
+                    
+                    // 类型转换（如果需要）
+                    if (!value.getType().equals(elementType)) {
+                        if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                            value = IRBuilder.createFloatToInt(value, currentBlock);
+                        } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
+                            value = IRBuilder.createIntToFloat(value, currentBlock);
+                        }
+                    }
+                    
+                    // 创建指针并存储值
+                    Value indexValue = new ConstantInt(linearIndex);
+                    Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                    IRBuilder.createStore(value, elemPtr, currentBlock);
+                }
+                return;
+            }
+            
+            // 正常处理嵌套结构
+            for (int i = 0; i < Math.min(elementCount, dims.get(dimLevel)); i++) {
+                // 更新当前维度的索引
+                indices[dimLevel] = i;
+                
+                // 处理当前元素
+                SyntaxTree.Expr element = arrayInit.elements.get(i);
+                
+                if (element instanceof SyntaxTree.ArrayInitExpr) {
+                    // 如果是数组初始化表达式，递归处理下一个维度
+                    initializeArray(element, arrayPtr, dims, factors, indices, dimLevel + 1, elementType);
+                } else {
+                    // 如果是单个值（非数组初始化表达式），但我们还有更多维度
+                    // 则默认填充到第一个位置[x,y,0,0,...]
+                    if (dimLevel < dims.size() - 1) {
+                        // 将剩余维度的索引设为0
+                        for (int j = dimLevel + 1; j < dims.size(); j++) {
+                            indices[j] = 0;
+                        }
+                    }
+                    
+                    // 计算线性索引
+                    int linearIndex = 0;
+                    for (int j = 0; j < dims.size(); j++) {
+                        linearIndex += indices[j] * factors.get(j);
+                    }
+                    
+                    // 访问表达式获取值
+                    visitExpr(element);
+                    Value value = currentValue;
+                    
+                    // 类型转换（如果需要）
+                    if (!value.getType().equals(elementType)) {
+                        if (elementType == IntegerType.I32 && value.getType() instanceof FloatType) {
+                            value = IRBuilder.createFloatToInt(value, currentBlock);
+                        } else if (elementType == FloatType.F32 && value.getType() instanceof IntegerType) {
+                            value = IRBuilder.createIntToFloat(value, currentBlock);
+                        }
+                    }
+                    
+                    // 创建指针并存储值
+                    Value indexValue = new ConstantInt(linearIndex);
+                    Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                    IRBuilder.createStore(value, elemPtr, currentBlock);
+                }
             }
         } else {
-            // 处理单个元素
+            // 处理单个值作为数组元素
+            // 计算线性索引（与visitArrayAccessExpr相同）
+            int linearIndex = 0;
+            for (int i = 0; i < dims.size(); i++) {
+                linearIndex += indices[i] * factors.get(i);
+            }
+            
+            // 访问表达式获取值
             visitExpr(expr);
             Value value = currentValue;
             
@@ -969,7 +883,10 @@ public class IRVisitor {
                 }
             }
             
-            result.add(value);
+            // 创建指针并存储值
+            Value indexValue = new ConstantInt(linearIndex);
+            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+            IRBuilder.createStore(value, elemPtr, currentBlock);
         }
     }
     
@@ -1338,26 +1255,7 @@ public class IRVisitor {
             throw new RuntimeException("数组 " + arrayName + " 的索引数量过多");
         }
 
-        // 对二维数组特殊处理
-        if (dimensions.size() == 2 && indices.size() == 2) {
-            // 获取行列索引
-            Value rowIndex = indices.get(0);
-            Value colIndex = indices.get(1);
-            int colSize = dimensions.get(1);
-            
-            // 计算一维偏移量: row * cols + col
-            Value rowOffset = IRBuilder.createBinaryInst(OpCode.MUL, rowIndex, new ConstantInt(colSize), currentBlock);
-            Value finalOffset = IRBuilder.createBinaryInst(OpCode.ADD, rowOffset, colIndex, currentBlock);
-            
-            // 获取元素指针
-            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, finalOffset, currentBlock);
-            
-            // 加载值
-            currentValue = IRBuilder.createLoad(elemPtr, currentBlock);
-            return;
-        }
-        
-        // 其他维度的数组处理
+        // 通用计算索引逻辑（对所有维度通用）
         Value offset = new ConstantInt(0);
         List<Integer> factors = new ArrayList<>();
         
@@ -2009,59 +1907,30 @@ public class IRVisitor {
             throw new RuntimeException("数组 " + arrayName + " 的索引数量过多");
         }
         
-        // 针对二维数组优化
-        if (dimensions.size() == 2 && indices.size() == 2) {
-            Value firstIndex = indices.get(0); // 行索引
-            Value secondIndex = indices.get(1); // 列索引
-            int colSize = dimensions.get(1); // 列数
-            
-            // 计算 row * cols
-            Value rowOffset = IRBuilder.createBinaryInst(
-                        OpCode.MUL,
-                firstIndex,
-                new ConstantInt(colSize),
-                        currentBlock
-                    );
-            
-            // 计算 row * cols + col
-            Value finalOffset = IRBuilder.createBinaryInst(
-                OpCode.ADD,
-                rowOffset,
-                secondIndex,
+        // 计算每个维度的因子（通用逻辑，适用于任何维度）
+        List<Integer> factors = new ArrayList<>();
+        for (int i = 0; i < dimensions.size(); i++) {
+            int factor = 1;
+            for (int j = i + 1; j < dimensions.size(); j++) {
+                factor *= dimensions.get(j);
+            }
+            factors.add(factor);
+        }
+        
+        // 计算线性偏移量（通用逻辑，适用于任何维度）
+        Value offset = new ConstantInt(0);
+        for (int i = 0; i < indices.size(); i++) {
+            Value indexFactor = IRBuilder.createBinaryInst(
+                OpCode.MUL,
+                indices.get(i),
+                new ConstantInt(factors.get(i)),
                 currentBlock
             );
-            
-            // 使用最终偏移量获取元素指针
-            currentValue = IRBuilder.createGetElementPtr(arrayPtr, finalOffset, currentBlock);
-            return;
+            offset = IRBuilder.createBinaryInst(OpCode.ADD, offset, indexFactor, currentBlock);
         }
-
-        // 对于其他维度的数组，正确计算偏移量
-        Value offset = new ConstantInt(0);
-                
-                // 计算每个维度的因子
-                List<Integer> factors = new ArrayList<>();
-                for (int i = 0; i < dimensions.size(); i++) {
-                    int factor = 1;
-                    for (int j = i + 1; j < dimensions.size(); j++) {
-                        factor *= dimensions.get(j);
-                    }
-                    factors.add(factor);
-                }
-                
-                // 计算总偏移量
-                for (int i = 0; i < indices.size(); i++) {
-                    Value indexFactor = IRBuilder.createBinaryInst(
-                        OpCode.MUL,
-                        indices.get(i),
-                        new ConstantInt(factors.get(i)),
-                        currentBlock
-                    );
-                    offset = IRBuilder.createBinaryInst(OpCode.ADD, offset, indexFactor, currentBlock);
-                }
-                
-                // 使用GEP指令获取元素指针
-                currentValue = IRBuilder.createGetElementPtr(arrayPtr, offset, currentBlock);
+        
+        // 使用GEP指令获取元素指针
+        currentValue = IRBuilder.createGetElementPtr(arrayPtr, offset, currentBlock);
     }
     
     /**
@@ -2094,19 +1963,8 @@ public class IRVisitor {
         // 初始化数组元素
         if (initExpr != null) {
             processArrayInit(initExpr, arrayPtr, dimensions, elementType);
-        } else {
-            // 如果没有初始化表达式，初始化为0
-            for (int i = 0; i < totalSize; i++) {
-                Value indexValue = new ConstantInt(i);
-                Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
-                
-                if (elementType == IntegerType.I32) {
-                    IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
-                } else if (elementType == FloatType.F32) {
-                    IRBuilder.createStore(new ConstantFloat(0.0f), elemPtr, currentBlock);
-                }
-            }
         }
+        // 如果没有初始化表达式，不进行任何初始化
     }
     
     /**
