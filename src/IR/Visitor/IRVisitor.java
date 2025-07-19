@@ -1437,12 +1437,20 @@ public class IRVisitor {
                 // 逻辑非：将表达式与0比较，如果等于0则为1，否则为0
                 if (operand.getType() instanceof IntegerType) {
                     Value zero = new ConstantInt(0);
-                    currentValue = IRBuilder.createICmp(OpCode.EQ, operand, zero, currentBlock);
+                    // 先生成布尔值结果
+                    Value boolResult = IRBuilder.createICmp(OpCode.EQ, operand, zero, currentBlock);
+                    
+                    // 在SysY语言中，逻辑运算的结果通常在比较中使用，需要扩展为整数
+                    // 将i1类型扩展为i32类型
+                    currentValue = IRBuilder.createZeroExtend(boolResult, IntegerType.I32, currentBlock);
                 } else if (operand.getType() instanceof FloatType) {
                     // 将浮点数转为整数再比较
                     Value intValue = IRBuilder.createFloatToInt(operand, currentBlock);
                     Value zero = new ConstantInt(0);
-                    currentValue = IRBuilder.createICmp(OpCode.EQ, intValue, zero, currentBlock);
+                    Value boolResult = IRBuilder.createICmp(OpCode.EQ, intValue, zero, currentBlock);
+                    
+                    // 将i1类型扩展为i32类型
+                    currentValue = IRBuilder.createZeroExtend(boolResult, IntegerType.I32, currentBlock);
                 }
                 break;
             default:
@@ -1486,8 +1494,33 @@ public class IRVisitor {
                 predicate = getIntPredicate(op);
             }
             
-            currentValue = IRBuilder.createCompare(compareType, predicate, leftValue, rightValue, currentBlock);
+            // 创建比较指令，生成布尔值结果(i1类型)
+            Value compResult = IRBuilder.createCompare(compareType, predicate, leftValue, rightValue, currentBlock);
+            
+            // 在SysY语言中，比较结果通常需要在后续表达式中使用，需要将i1类型提升为i32类型
+            // 这样可以避免类型不匹配的问题
+            currentValue = IRBuilder.createZeroExtend(compResult, IntegerType.I32, currentBlock);
         } else {
+            // 判断左右值是否有布尔值和整数混合的情况
+            if (op.equals("==") || op.equals("!=")) {
+                // 对于相等和不等比较，可能是布尔值和整数的比较
+                boolean leftIsBool = leftValue.getType() instanceof IntegerType && 
+                                    ((IntegerType) leftValue.getType()).getBitWidth() == 1;
+                boolean rightIsBool = rightValue.getType() instanceof IntegerType && 
+                                     ((IntegerType) rightValue.getType()).getBitWidth() == 1;
+                
+                // 如果一个是布尔值，另一个是整数，将整数转为布尔值
+                if (leftIsBool && !rightIsBool && rightValue.getType() instanceof IntegerType) {
+                    // 将右侧整数转为布尔值 (非零为真)
+                    Value zero = new ConstantInt(0);
+                    rightValue = IRBuilder.createICmp(OpCode.NE, rightValue, zero, currentBlock);
+                } else if (rightIsBool && !leftIsBool && leftValue.getType() instanceof IntegerType) {
+                    // 将左侧整数转为布尔值 (非零为真)
+                    Value zero = new ConstantInt(0);
+                    leftValue = IRBuilder.createICmp(OpCode.NE, leftValue, zero, currentBlock);
+                }
+            }
+            
             // 确定操作码
             OpCode opCode = getOpCodeForBinaryOp(op);
             
@@ -1565,7 +1598,9 @@ public class IRVisitor {
                 
                 // 求值下一个操作数
                 visitExpr(operands.get(i+1));
-                currentValue = convertToBoolean(currentValue);
+                Value boolValue = convertToBoolean(currentValue);
+                // 保存转换后的布尔值，以便PHI节点使用
+                currentValue = boolValue;
             }
         }
         
@@ -1585,6 +1620,13 @@ public class IRVisitor {
         // 最后一个表达式的结果
         if (!evalBlocks.isEmpty()) {
             BasicBlock lastEvalBlock = evalBlocks.get(evalBlocks.size() - 1);
+            // 确保我们使用的是布尔值结果，而不是函数调用结果
+            if (!(currentValue.getType() instanceof IntegerType) || 
+                ((IntegerType)currentValue.getType()).getBitWidth() != 1) {
+                // 如果当前值不是布尔类型，需要转换为布尔值
+                Value zero = new ConstantInt(0);
+                currentValue = IRBuilder.createICmp(OpCode.NE, currentValue, zero, currentBlock);
+            }
             phi.addIncoming(currentValue, lastEvalBlock);
         }
         
@@ -1660,6 +1702,9 @@ public class IRVisitor {
                 // 处理当前操作数
                 visitExpr(operands.get(i));
                 Value currValue = convertToBoolean(currentValue);
+                
+                // 保存转换后的布尔值，以便PHI节点使用
+                currentValue = currValue;
                 
                 // 最后一个操作数直接跳转到合并块
                 if (i == operands.size() - 1) {

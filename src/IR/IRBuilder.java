@@ -247,6 +247,22 @@ public class IRBuilder {
         Type leftType = left.getType();
         Type rightType = right.getType();
 
+        // 处理布尔值与整数的混合运算
+        boolean leftIsBool = leftType instanceof IntegerType && ((IntegerType) leftType).getBitWidth() == 1;
+        boolean rightIsBool = rightType instanceof IntegerType && ((IntegerType) rightType).getBitWidth() == 1;
+        
+                 // 如果一个是布尔值(i1)，另一个是整数(i32)，需要特殊处理
+        if (leftIsBool && !rightIsBool && rightType instanceof IntegerType) {
+            // 将布尔值扩展为整数进行比较，这更符合C语言的行为
+            left = createZeroExtend(left, IntegerType.I32, block);
+            leftType = IntegerType.I32;
+        } 
+        else if (rightIsBool && !leftIsBool && leftType instanceof IntegerType) {
+            // 将布尔值扩展为整数进行比较，这更符合C语言的行为
+            right = createZeroExtend(right, IntegerType.I32, block);
+            rightType = IntegerType.I32;
+        }
+
         // 如果操作数类型不同，进行类型转换
         if (!leftType.equals(rightType)) {
             // 默认使用整数类型
