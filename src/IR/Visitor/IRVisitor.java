@@ -1927,39 +1927,52 @@ public class IRVisitor {
         Function function = (Function) funcValue;
         List<Value> args = new ArrayList<>();
         
-        // 处理参数
-        for (SyntaxTree.Expr argExpr : expr.args) {
-            visitExpr(argExpr);
-            args.add(currentValue);
-        }
-        
-        // 特殊处理：starttime和stoptime函数需要额外的参数
-        if (funcName.equals("starttime") || funcName.equals("stoptime")) {
-            args.add(new ConstantInt(0)); // 添加行号参数
-        }
-        
-        // 检查参数类型并进行必要的类型转换
+        // 获取函数参数类型列表
         List<Argument> funcArgs = function.getArguments();
-        if (args.size() != funcArgs.size()) {
+        if (expr.args.size() != funcArgs.size()) {
             throw new RuntimeException("函数 " + funcName + " 参数数量不匹配: 期望 " + 
-                                      funcArgs.size() + ", 实际 " + args.size());
+                                      funcArgs.size() + ", 实际 " + expr.args.size());
         }
         
-        for (int i = 0; i < args.size(); i++) {
-            Value arg = args.get(i);
+        // 处理参数
+        for (int i = 0; i < expr.args.size(); i++) {
+            SyntaxTree.Expr argExpr = expr.args.get(i);
             Type paramType = funcArgs.get(i).getType();
+            
+            // 特别处理数组参数 - 如果参数是数组且函数期望指针类型
+            if (argExpr instanceof SyntaxTree.VarExpr && paramType instanceof PointerType) {
+                String arrayName = ((SyntaxTree.VarExpr) argExpr).name;
+                Value arrayVar = findVariable(arrayName);
+                
+                // 检查是否是数组
+                if (findArrayDimensions(arrayName) != null) {
+                    // 直接使用数组指针，不加载值
+                    args.add(arrayVar);
+                    continue;
+                }
+            }
+            
+            // 常规参数处理
+            visitExpr(argExpr);
+            Value arg = currentValue;
             
             // 如果类型不匹配，尝试进行类型转换
             if (!arg.getType().equals(paramType)) {
                 if (arg.getType() instanceof IntegerType && paramType instanceof FloatType) {
                     // 整数转浮点
-                    args.set(i, IRBuilder.createIntToFloat(arg, currentBlock));
+                    arg = IRBuilder.createIntToFloat(arg, currentBlock);
                 } else if (arg.getType() instanceof FloatType && paramType instanceof IntegerType) {
                     // 浮点转整数
-                    args.set(i, IRBuilder.createFloatToInt(arg, currentBlock));
+                    arg = IRBuilder.createFloatToInt(arg, currentBlock);
                 }
-                // 其他类型不匹配的情况可能需要更复杂的处理
             }
+            
+            args.add(arg);
+        }
+        
+        // 特殊处理：starttime和stoptime函数需要额外的参数
+        if (funcName.equals("starttime") || funcName.equals("stoptime")) {
+            args.add(new ConstantInt(0)); // 添加行号参数
         }
         
         // 创建函数调用指令
