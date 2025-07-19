@@ -2054,19 +2054,34 @@ public class IRVisitor {
             Type paramType = funcArgs.get(i).getType();
             
             // 特别处理数组参数 - 如果参数是数组且函数期望指针类型
-            if (argExpr instanceof SyntaxTree.VarExpr && paramType instanceof PointerType) {
-                String arrayName = ((SyntaxTree.VarExpr) argExpr).name;
-                Value arrayVar = findVariable(arrayName);
-                
-                // 检查是否是数组
-                if (findArrayDimensions(arrayName) != null) {
-                    // 直接使用数组指针，不加载值
-                    args.add(arrayVar);
-                    continue;
+            if (paramType instanceof PointerType) {
+                // 对于变量引用，检查是否是数组
+                if (argExpr instanceof SyntaxTree.VarExpr) {
+                    String arrayName = ((SyntaxTree.VarExpr) argExpr).name;
+                    Value arrayVar = findVariable(arrayName);
+                    
+                    // 检查是否是数组
+                    if (findArrayDimensions(arrayName) != null) {
+                        // 直接使用数组指针，不加载值
+                        args.add(arrayVar);
+                        continue;
+                    }
+                }
+                // 对于数组元素访问，需要传递指针而非值
+                else if (argExpr instanceof SyntaxTree.ArrayAccessExpr) {
+                    // 获取数组元素指针而非加载值
+                    visitArrayAccessExpr((SyntaxTree.ArrayAccessExpr) argExpr);
+                    Value elemPtr = currentValue;
+                    
+                    // 确保获取的是指针
+                    if (elemPtr.getType() instanceof PointerType) {
+                        args.add(elemPtr);
+                        continue;
+                    }
                 }
             }
             
-            // 常规参数处理
+            // 常规参数处理（非指针类型或非数组访问）
             visitExpr(argExpr);
             Value arg = currentValue;
             
