@@ -54,6 +54,9 @@ public class PassManager {
         // 控制流优化
         addIRPass(new BranchSimplifier());
         
+        // 全局值编号优化 (GVN)
+        addIRPass(new GVN());
+        
         // 无用代码消除
         addIRPass(new DCE());
     }
