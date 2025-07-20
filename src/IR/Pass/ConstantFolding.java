@@ -168,7 +168,18 @@ public class ConstantFolding implements Pass.IRPass {
         
         // 如果成功折叠，替换指令
         if (result != null) {
-            inst.replaceAllUsesWith(result);
+            // 替换指令的所有使用
+            for (Value user : new ArrayList<>(inst.getUsers())) {
+                if (user instanceof Instruction userInst) {
+                    for (int i = 0; i < userInst.getOperandCount(); i++) {
+                        if (userInst.getOperand(i) == inst) {
+                            userInst.setOperand(i, result);
+                        }
+                    }
+                }
+            }
+            
+            // 移除指令
             inst.removeFromParent();
             return true;
         }

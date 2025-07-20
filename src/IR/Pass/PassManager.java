@@ -37,7 +37,25 @@ public class PassManager {
         // 私有构造函数，防止外部实例化
         
         // 添加默认的Pass
+        initializePasses();
+    }
+    
+    /**
+     * 初始化默认的优化Pass
+     */
+    private void initializePasses() {
+        // 基本块处理
         addIRPass(new EmptyBlockHandler());
+        
+        // 常量处理
+        addIRPass(new ConstantPropagation());
+        addIRPass(new ConstantFolding());
+        
+        // 控制流优化
+        addIRPass(new BranchSimplifier());
+        
+        // 无用代码消除
+        addIRPass(new DCE());
     }
     
     /**
@@ -151,5 +169,34 @@ public class PassManager {
         
         // 再运行函数级Pass
         runFunctionPassesOnModule(module);
+    }
+    
+    /**
+     * 运行优化组合
+     * @param module 要优化的模块
+     * @param optimizationLevel 优化级别 (0-3)
+     */
+    public void optimize(Module module, int optimizationLevel) {
+        clearAnalysisResults(); // 清除之前的分析结果
+        
+        if (optimizationLevel <= 0) {
+            // 不进行优化
+            return;
+        }
+        
+        // 基本优化 (O1)
+        runIRPasses(module);
+        
+        if (optimizationLevel >= 2) {
+            // 中等优化 (O2)
+            // 再次运行基本优化，因为之前的优化可能创造了新的机会
+            runIRPasses(module);
+        }
+        
+        if (optimizationLevel >= 3) {
+            // 激进优化 (O3)
+            // 第三轮优化
+            runIRPasses(module);
+        }
     }
 } 

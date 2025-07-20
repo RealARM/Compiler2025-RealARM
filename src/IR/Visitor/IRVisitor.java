@@ -108,8 +108,12 @@ public class IRVisitor {
         declareLibFunction("putfarray", VoidType.VOID, IntegerType.I32, new PointerType(FloatType.F64));
         
         // 时间函数
-        declareLibFunction("starttime", VoidType.VOID, IntegerType.I32);
-        declareLibFunction("stoptime", VoidType.VOID, IntegerType.I32);
+        Function startTimeFunc = declareLibFunction("_sysy_starttime", VoidType.VOID, IntegerType.I32);
+        Function stopTimeFunc = declareLibFunction("_sysy_stoptime", VoidType.VOID, IntegerType.I32);
+        
+        // 将C代码中使用的函数名也添加到符号表中，以便在C代码调用时能够找到这些函数
+        symbolTables.get(0).put("starttime", startTimeFunc);
+        symbolTables.get(0).put("stoptime", stopTimeFunc);
         
         // 内存操作函数
         declareLibFunction("memset", VoidType.VOID, new PointerType(IntegerType.I32), IntegerType.I32, IntegerType.I32);
@@ -118,7 +122,7 @@ public class IRVisitor {
     /**
      * 声明标准库函数
      */
-    private void declareLibFunction(String name, Type returnType, Type... argTypes) {
+    private Function declareLibFunction(String name, Type returnType, Type... argTypes) {
         Function func = IRBuilder.createExternalFunction("@" + name, returnType, module);
         
         // 添加参数
@@ -128,6 +132,8 @@ public class IRVisitor {
         
         // 将函数添加到符号表
         symbolTables.get(0).put(name, func);
+        
+        return func;
     }
     
     /**
@@ -2041,6 +2047,27 @@ public class IRVisitor {
         Function function = (Function) funcValue;
         List<Value> args = new ArrayList<>();
         
+        // 特殊处理：starttime和stoptime函数需要添加行号参数
+        // 如果调用的是C函数名，实际上是调用_sysy_前缀的函数
+        if (funcName.equals("starttime") || funcName.equals("stoptime")) {
+            // 不需要额外检查参数数量，直接添加行号参数
+            // 默认使用行号0
+            args.add(new ConstantInt(0));
+            
+            // 如果调用的是starttime，创建对_sysy_starttime的调用
+            if (funcName.equals("starttime")) {
+                // 创建函数调用指令
+                currentValue = IRBuilder.createCall((Function)findVariable("_sysy_starttime"), args, currentBlock);
+                return;
+            } 
+            // 如果调用的是stoptime，创建对_sysy_stoptime的调用
+            else { 
+                // 创建函数调用指令
+                currentValue = IRBuilder.createCall((Function)findVariable("_sysy_stoptime"), args, currentBlock);
+                return;
+            }
+        }
+        
         // 获取函数参数类型列表
         List<Argument> funcArgs = function.getArguments();
         if (expr.args.size() != funcArgs.size()) {
@@ -2097,11 +2124,6 @@ public class IRVisitor {
             }
             
             args.add(arg);
-        }
-        
-        // 特殊处理：starttime和stoptime函数需要额外的参数
-        if (funcName.equals("starttime") || funcName.equals("stoptime")) {
-            args.add(new ConstantInt(0)); // 添加行号参数
         }
         
         // 创建函数调用指令
