@@ -51,6 +51,9 @@ public class PassManager {
         addIRPass(new ConstantPropagation());
         addIRPass(new ConstantFolding());
         
+        // 指令组合优化
+        addIRPass(new InstCombine());
+        
         // 控制流优化
         addIRPass(new BranchSimplifier());
         

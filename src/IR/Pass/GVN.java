@@ -2,6 +2,7 @@ package IR.Pass;
 
 import IR.Module;
 import IR.OpCode;
+import IR.Pass.Utils.DominatorAnalysis;
 import IR.Value.BasicBlock;
 import IR.Value.ConstantInt;
 import IR.Value.ConstantFloat;
@@ -13,10 +14,7 @@ import IR.Value.Instructions.PhiInstruction;
 import IR.Value.Value;
 import IR.Value.User;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.List;
+import java.util.*;
 
 /**
  * 全局值编号(Global Value Numbering)优化
@@ -25,16 +23,18 @@ import java.util.List;
 public class GVN implements Pass.IRPass {
 
     // 哈希值到指令的映射
-    private final HashMap<String, Value> gvnMap = new HashMap<>();
+    private final Map<String, Value> gvnMap = new HashMap<>();
     
     // 已访问的指令集合
-    private final HashSet<Instruction> visited = new HashSet<>();
+    private final Set<Instruction> visited = new HashSet<>();
     
     // 当前处理的基本块
     private BasicBlock currentBlock;
     
     // 支配关系记录
-    private HashMap<BasicBlock, HashSet<BasicBlock>> dominatorMap;
+    private Map<BasicBlock, Set<BasicBlock>> dominatorMap;
+    private Map<BasicBlock, BasicBlock> immediateDominators;
+    private List<BasicBlock> domOrderBlocks;
 
     @Override
     public String getName() {
@@ -72,7 +72,7 @@ public class GVN implements Pass.IRPass {
         boolean modified = false;
         
         // 按照支配树的顺序处理基本块
-        List<BasicBlock> blocks = getBlocksInDominatorOrder(function);
+        List<BasicBlock> blocks = domOrderBlocks;
         
         for (BasicBlock block : blocks) {
             currentBlock = block;
@@ -93,39 +93,10 @@ public class GVN implements Pass.IRPass {
      * 计算函数中的支配关系
      */
     private void computeDominators(Function function) {
-        dominatorMap = new HashMap<>();
-        
-        // 初始化支配关系
-        for (BasicBlock block : function.getBasicBlocks()) {
-            dominatorMap.put(block, new HashSet<>());
-        }
-        
-        // 每个块支配自己
-        for (BasicBlock block : function.getBasicBlocks()) {
-            dominatorMap.get(block).add(block);
-        }
-        
-        // 入口块支配所有块
-        BasicBlock entry = function.getEntryBlock();
-        if (entry != null) {
-            for (BasicBlock block : function.getBasicBlocks()) {
-                if (block != entry) {
-                    dominatorMap.get(entry).add(block);
-                }
-            }
-        }
-        
-        // TODO: 实现完整的支配关系计算
-        // 这里简化处理，实际应该使用迭代数据流分析算法计算完整的支配关系
-    }
-
-    /**
-     * 获取按支配顺序排列的基本块
-     */
-    private List<BasicBlock> getBlocksInDominatorOrder(Function function) {
-        // 简单实现：先返回按程序顺序排列的基本块
-        // 实际应该按照支配树的前序遍历顺序返回
-        return function.getBasicBlocks();
+        // 使用DominatorAnalysis工具计算支配关系
+        dominatorMap = DominatorAnalysis.computeDominators(function);
+        immediateDominators = DominatorAnalysis.computeImmediateDominators(dominatorMap);
+        domOrderBlocks = DominatorAnalysis.getBlocksInDominatorOrder(function, immediateDominators);
     }
 
     /**
@@ -230,7 +201,7 @@ public class GVN implements Pass.IRPass {
             return true;
         }
         
-        HashSet<BasicBlock> dominated = dominatorMap.get(block1);
+        Set<BasicBlock> dominated = dominatorMap.get(block1);
         return dominated != null && dominated.contains(block2);
     }
 
