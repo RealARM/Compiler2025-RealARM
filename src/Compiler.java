@@ -28,7 +28,7 @@ public class Compiler {
         }
 
         String sourcePath = args[0];
-        String targetPath = args[1];       // IR输出文件路径，为null时输出到控制台
+        String targetPath = args.length > 1 ? args[1] : null;       // IR输出文件路径，为null时输出到控制台
         
         // 配置选项
         boolean lexOnly = false;        // 是否仅执行词法分析
