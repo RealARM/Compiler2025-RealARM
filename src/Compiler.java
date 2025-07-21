@@ -9,6 +9,7 @@ import IR.IRPrinter;
 import IR.Module;
 import IR.Pass.PassManager;
 import IR.Visitor.IRVisitor;
+import Backend.Armv8.Armv8CodeGen;
 
 import java.io.FileReader;
 import java.io.FileOutputStream;
@@ -28,13 +29,15 @@ public class Compiler {
         }
 
         String sourcePath = args[0];
-        String targetPath = args[1];       // IR输出文件路径，为null时输出到控制台
+        String targetPath = args.length > 1 ? args[1] : null;       // IR输出文件路径，为null时输出到控制台
+        String armOutputPath = args.length > 2 ? args[2] : "armv8_backend.s"; // ARM汇编输出文件路径
         
         // 配置选项
         boolean lexOnly = false;        // 是否仅执行词法分析
         boolean printAST = false;       // 是否打印语法树
         boolean generateIR = true;      // 是否生成IR
         boolean printIR = true;         // 是否打印IR
+        boolean generateARM = true;     // 是否生成ARM汇编代码
         int optimizationLevel = 2;      // 优化级别 (0-3)
         boolean debug = true;          // 是否打印调试信息
         
@@ -111,8 +114,39 @@ public class Compiler {
                 }
             }
             
+            // 生成ARM汇编代码
+            if (generateARM) {
+                generateARMCode(irModule, armOutputPath);
+            }
+            
         } catch (Exception e) {
             System.err.println("编译失败: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * 生成ARM汇编代码
+     */
+    private static void generateARMCode(Module irModule, String outputPath) {
+        try {
+            System.out.println("\n开始生成ARM汇编代码...");
+            
+            // 创建ARM代码生成器
+            Armv8CodeGen armv8CodeGen = new Armv8CodeGen(irModule);
+            
+            // 运行代码生成
+            armv8CodeGen.run();
+            
+            // 输出ARM代码到文件
+            if (outputPath != null) {
+                armv8CodeGen.dump();
+                System.out.println("ARM汇编代码已输出到文件: " + outputPath);
+            } else {
+                System.out.println("ARM汇编代码生成完成，但未指定输出文件。");
+            }
+        } catch (Exception e) {
+            System.err.println("ARM代码生成失败: " + e.getMessage());
             e.printStackTrace();
         }
     }
