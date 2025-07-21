@@ -47,6 +47,9 @@ public class PassManager {
         // 基本块处理
         addIRPass(new EmptyBlockHandler());
         
+        // 删除单跳转基本块优化
+        addIRPass(new RemoveSingleJumpBB());
+        
         // 常量处理
         addIRPass(new ConstantPropagation());
         addIRPass(new ConstantFolding());
