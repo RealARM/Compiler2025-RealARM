@@ -35,7 +35,7 @@ public class Compiler {
         boolean printAST = false;       // 是否打印语法树
         boolean generateIR = true;      // 是否生成IR
         boolean printIR = true;         // 是否打印IR
-        int optimizationLevel = 0;      // 优化级别 (0-3)
+        int optimizationLevel = 2;      // 优化级别 (0-3)
         boolean debug = true;          // 是否打印调试信息
         
         try {

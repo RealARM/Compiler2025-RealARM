@@ -51,8 +51,14 @@ public class PassManager {
         addIRPass(new ConstantPropagation());
         addIRPass(new ConstantFolding());
         
+        // 指令组合优化
+        addIRPass(new InstCombine());
+        
         // 控制流优化
         addIRPass(new BranchSimplifier());
+        
+        // 全局值编号优化 (GVN)
+        addIRPass(new GVN());
         
         // 无用代码消除
         addIRPass(new DCE());
