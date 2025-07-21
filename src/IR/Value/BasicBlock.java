@@ -25,6 +25,8 @@ public class BasicBlock extends Value {
     
     private static int blockCounter = 0; // 用于生成唯一的块标签
     private int loopDepth = 0;           // 所在循环的深度
+    private int domLevel = 0;            // 支配树中的深度级别
+    private BasicBlock idominator = null; // 直接支配者
     
     /**
      * 创建一个基本块
@@ -356,6 +358,34 @@ public class BasicBlock extends Value {
      */
     public void setLoopDepth(int depth) {
         this.loopDepth = depth;
+    }
+    
+    /**
+     * 获取支配树中的深度级别
+     */
+    public int getDomLevel() {
+        return domLevel;
+    }
+    
+    /**
+     * 设置支配树中的深度级别
+     */
+    public void setDomLevel(int level) {
+        this.domLevel = level;
+    }
+    
+    /**
+     * 获取直接支配者
+     */
+    public BasicBlock getIdominator() {
+        return idominator;
+    }
+    
+    /**
+     * 设置直接支配者
+     */
+    public void setIdominator(BasicBlock idom) {
+        this.idominator = idom;
     }
     
     /**
