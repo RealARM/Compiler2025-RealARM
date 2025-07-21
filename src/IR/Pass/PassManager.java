@@ -51,6 +51,9 @@ public class PassManager {
         addIRPass(new ConstantPropagation());
         addIRPass(new ConstantFolding());
         
+        // 全局变量优化
+        addIRPass(new GlobalValueLocalize());
+        
         // 指令组合优化
         addIRPass(new InstCombine());
         
@@ -136,8 +139,8 @@ public class PassManager {
      */
     public void runFunctionPassesOnModule(Module module) {
         for (Function function : module.functions()) {
-            // 跳过外部函数
-            if (function.isExternal()) {
+            // 检查是否为库函数（外部函数），跳过库函数
+            if (module.libFunctions().contains(function)) {
                 continue;
             }
             

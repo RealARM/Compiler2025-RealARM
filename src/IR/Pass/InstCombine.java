@@ -8,6 +8,7 @@ import IR.Value.BasicBlock;
 import IR.Value.ConstantInt;
 import IR.Value.Function;
 import IR.Value.Instructions.BinaryInstruction;
+import IR.Value.Instructions.CompareInstruction;
 import IR.Value.Instructions.Instruction;
 import IR.Value.Value;
 import IR.Value.User;
@@ -57,15 +58,110 @@ public class InstCombine implements Pass.IRPass {
                     continue;
                 }
                 
-                // 只处理二元运算指令
+                // 处理二元运算指令
                 if (inst instanceof BinaryInstruction binInst) {
                     boolean instChanged = optimizeBinaryInstruction(binInst);
+                    changed |= instChanged;
+                }
+                
+                // 处理比较指令
+                if (inst instanceof CompareInstruction cmpInst) {
+                    boolean instChanged = optimizeCompareInstruction(cmpInst);
                     changed |= instChanged;
                 }
             }
         }
         
         return changed;
+    }
+    
+    /**
+     * 优化比较指令
+     * 对形如 i * const < const 或 i + const < const 的比较指令进行优化
+     * @return 如果指令被优化则返回true
+     */
+    private boolean optimizeCompareInstruction(CompareInstruction cmpInst) {
+        Value left = cmpInst.getLeft();
+        Value right = cmpInst.getRight();
+        
+        // 只处理整数比较
+        if (!cmpInst.isIntegerCompare()) {
+            return false;
+        }
+        
+        // 只处理右操作数是常量的情况
+        if (!(right instanceof ConstantInt rightConst)) {
+            return false;
+        }
+        
+        // 处理左操作数是二元指令的情况
+        if (left instanceof BinaryInstruction binInst) {
+            return optimizeCompareWithBinary(cmpInst, binInst, rightConst);
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 优化左操作数是二元指令的比较指令
+     */
+    private boolean optimizeCompareWithBinary(CompareInstruction cmpInst, BinaryInstruction binInst, ConstantInt rightConst) {
+        Value binLeft = binInst.getOperand(0);
+        Value binRight = binInst.getOperand(1);
+        OpCode binOpCode = binInst.getOpCode();
+        int rightValue = rightConst.getValue();
+        
+        // 只处理二元指令右操作数是常量的情况
+        if (binRight instanceof ConstantInt binRightConst) {
+            int binRightValue = binRightConst.getValue();
+            
+            // 处理加法：(x + const1) < const2 => x < (const2 - const1)
+            if (binOpCode == OpCode.ADD) {
+                ConstantInt newConst = new ConstantInt(rightValue - binRightValue, (IntegerType)rightConst.getType());
+                cmpInst.setOperand(0, binLeft);
+                cmpInst.setOperand(1, newConst);
+                return true;
+            }
+            
+            // 处理减法：(x - const1) < const2 => x < (const2 + const1)
+            else if (binOpCode == OpCode.SUB) {
+                ConstantInt newConst = new ConstantInt(rightValue + binRightValue, (IntegerType)rightConst.getType());
+                cmpInst.setOperand(0, binLeft);
+                cmpInst.setOperand(1, newConst);
+                return true;
+            }
+            
+            // 处理乘法：(x * const1) < const2 => x < (const2 / const1)，仅当const1为非零且能整除时
+            else if (binOpCode == OpCode.MUL && binRightValue != 0 && rightValue % binRightValue == 0) {
+                ConstantInt newConst = new ConstantInt(rightValue / binRightValue, (IntegerType)rightConst.getType());
+                cmpInst.setOperand(0, binLeft);
+                cmpInst.setOperand(1, newConst);
+                return true;
+            }
+        }
+        
+        // 处理二元指令左操作数是常量的情况
+        else if (binLeft instanceof ConstantInt binLeftConst) {
+            int binLeftValue = binLeftConst.getValue();
+            
+            // 处理加法：(const1 + x) < const2 => x < (const2 - const1)
+            if (binOpCode == OpCode.ADD) {
+                ConstantInt newConst = new ConstantInt(rightValue - binLeftValue, (IntegerType)rightConst.getType());
+                cmpInst.setOperand(0, binRight);
+                cmpInst.setOperand(1, newConst);
+                return true;
+            }
+            
+            // 处理乘法：(const1 * x) < const2 => x < (const2 / const1)，仅当const1为非零且能整除时
+            else if (binOpCode == OpCode.MUL && binLeftValue != 0 && rightValue % binLeftValue == 0) {
+                ConstantInt newConst = new ConstantInt(rightValue / binLeftValue, (IntegerType)rightConst.getType());
+                cmpInst.setOperand(0, binRight);
+                cmpInst.setOperand(1, newConst);
+                return true;
+            }
+        }
+        
+        return false;
     }
     
     /**
