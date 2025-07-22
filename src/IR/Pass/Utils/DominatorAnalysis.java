@@ -214,4 +214,113 @@ public class DominatorAnalysis {
         
         return result;
     }
+    
+    /**
+     * 获取按支配树后序遍历排列的基本块列表
+     * @param function 待分析的函数
+     * @return 按支配树后序遍历排列的基本块列表
+     */
+    public static List<BasicBlock> getDomPostOrder(Function function) {
+        List<BasicBlock> result = new ArrayList<>();
+        Set<BasicBlock> visited = new HashSet<>();
+        
+        // 获取入口基本块
+        BasicBlock entry = function.getEntryBlock();
+        if (entry == null) {
+            return result;
+        }
+        
+        // 执行后序遍历
+        postOrderTraversal(entry, visited, result);
+        
+        return result;
+    }
+    
+    /**
+     * 支配树的后序遍历辅助方法
+     * @param block 当前基本块
+     * @param visited 已访问的基本块集合
+     * @param result 结果列表
+     */
+    private static void postOrderTraversal(BasicBlock block, Set<BasicBlock> visited, 
+            List<BasicBlock> result) {
+        if (visited.contains(block)) {
+            return;
+        }
+        
+        visited.add(block);
+        
+        // 遍历当前块支配的子节点
+        for (BasicBlock succ : block.getSuccessors()) {
+            if (!visited.contains(succ)) {
+                postOrderTraversal(succ, visited, result);
+            }
+        }
+        
+        // 后序遍历：先添加所有子节点，再添加自身
+        result.add(block);
+    }
+    
+    /**
+     * 计算并设置支配树（直接支配者和支配级别）
+     * @param function 待分析的函数
+     */
+    public static void computeDominatorTree(Function function) {
+        // 计算支配关系
+        Map<BasicBlock, Set<BasicBlock>> dominators = computeDominators(function);
+        
+        // 计算直接支配者关系
+        Map<BasicBlock, BasicBlock> idoms = computeImmediateDominators(dominators);
+        
+        // 重置所有块的直接支配者和支配级别
+        for (BasicBlock block : function.getBasicBlocks()) {
+            block.setIdominator(null);
+            block.setDomLevel(0);
+        }
+        
+        // 设置直接支配者关系
+        for (Map.Entry<BasicBlock, BasicBlock> entry : idoms.entrySet()) {
+            BasicBlock block = entry.getKey();
+            BasicBlock idom = entry.getValue();
+            block.setIdominator(idom);
+        }
+        
+        // 计算支配级别（入口块级别为0，其他块级别为其直接支配者级别+1）
+        BasicBlock entry = function.getEntryBlock();
+        if (entry != null) {
+            computeDomLevelDFS(entry, 0);
+        }
+    }
+    
+    /**
+     * 深度优先搜索计算支配级别
+     * @param block 当前块
+     * @param level 当前级别
+     */
+    private static void computeDomLevelDFS(BasicBlock block, int level) {
+        block.setDomLevel(level);
+        
+        // 遍历当前块直接支配的所有块
+        for (BasicBlock dominated : findDominatedBlocks(block)) {
+            computeDomLevelDFS(dominated, level + 1);
+        }
+    }
+    
+    /**
+     * 查找被指定块直接支配的所有块
+     * @param dominator 支配者
+     * @return 被直接支配的块列表
+     */
+    private static List<BasicBlock> findDominatedBlocks(BasicBlock dominator) {
+        List<BasicBlock> dominated = new ArrayList<>();
+        Function function = dominator.getParentFunction();
+        
+        for (BasicBlock block : function.getBasicBlocks()) {
+            if (block.getIdominator() == dominator) {
+                dominated.add(block);
+            }
+        }
+        
+        return dominated;
+    }
 } 

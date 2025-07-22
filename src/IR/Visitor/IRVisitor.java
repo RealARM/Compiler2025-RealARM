@@ -1579,7 +1579,7 @@ public class IRVisitor {
     }
     
     /**
-     * 访问二元表达式
+     * 访问二元表达式（非递归迭代实现）
      */
     private void visitBinaryExpr(SyntaxTree.BinaryExpr expr) {
         String op = expr.op;
@@ -1593,13 +1593,74 @@ public class IRVisitor {
             return;
         }
         
-        // 处理普通的二元运算
-        visitExpr(expr.left);
-        Value leftValue = currentValue;
+        // 使用迭代算法处理二元表达式树
+        // 定义表达式处理的状态: 0=未处理，1=已处理左操作数
+        class ExprState {
+            SyntaxTree.Expr expr;
+            int state;
+            Value leftValue; // 存储左操作数的值
+            
+            ExprState(SyntaxTree.Expr expr, int state) {
+                this.expr = expr;
+                this.state = state;
+                this.leftValue = null;
+            }
+        }
         
-        visitExpr(expr.right);
-        Value rightValue = currentValue;
+        Stack<ExprState> stack = new Stack<>();
+        stack.push(new ExprState(expr, 0));
         
+        while (!stack.isEmpty()) {
+            ExprState current = stack.peek();
+            
+            if (current.expr instanceof SyntaxTree.BinaryExpr) {
+                SyntaxTree.BinaryExpr binaryExpr = (SyntaxTree.BinaryExpr) current.expr;
+                String currentOp = binaryExpr.op;
+                
+                // 如果是逻辑运算符，应该已经在外部处理过了
+                if (currentOp.equals("&&") || currentOp.equals("||")) {
+                    throw new RuntimeException("逻辑运算符应该已经被单独处理");
+                }
+                
+                if (current.state == 0) {
+                    // 先处理左子表达式
+                    current.state = 1;
+                    stack.push(new ExprState(binaryExpr.left, 0));
+                } else {
+                    // 已处理左子表达式，现在处理右子表达式
+                    stack.pop(); // 弹出当前表达式
+                    
+                    Value leftValue = current.leftValue != null ? current.leftValue : currentValue;
+                    
+                    // 处理右子表达式
+                    visitExpr(binaryExpr.right);
+                    Value rightValue = currentValue;
+                    
+                    // 根据操作符处理结果
+                    processBinaryOperation(currentOp, leftValue, rightValue);
+                    
+                    // 如果栈不为空，将结果保存到上层表达式的leftValue中
+                    if (!stack.isEmpty()) {
+                        stack.peek().leftValue = currentValue;
+                    }
+                }
+            } else {
+                // 处理非二元表达式
+                stack.pop();
+                visitExpr(current.expr);
+                
+                // 如果栈不为空，将结果保存到上层表达式的leftValue中
+                if (!stack.isEmpty()) {
+                    stack.peek().leftValue = currentValue;
+                }
+            }
+        }
+    }
+    
+    /**
+     * 处理二元运算操作
+     */
+    private void processBinaryOperation(String op, Value leftValue, Value rightValue) {
         // 处理比较操作
         if (isCmpOp(op)) {
             OpCode compareType;
@@ -1618,7 +1679,6 @@ public class IRVisitor {
             Value compResult = IRBuilder.createCompare(compareType, predicate, leftValue, rightValue, currentBlock);
             
             // 在SysY语言中，比较结果通常需要在后续表达式中使用，需要将i1类型提升为i32类型
-            // 这样可以避免类型不匹配的问题
             currentValue = IRBuilder.createZeroExtend(compResult, IntegerType.I32, currentBlock);
         } else {
             // 判断左右值是否有布尔值和整数混合的情况
