@@ -247,11 +247,19 @@ public class IRVisitor {
                 // 处理数组初始化
                 if (varDef.init != null) {
                     if (varDef.init instanceof SyntaxTree.ArrayInitExpr) {
-                        // 处理数组初始化表达式
-                        List<Value> initValues = processGlobalArrayInit((SyntaxTree.ArrayInitExpr) varDef.init, 
-                                                                       dims, 
-                                                                       baseType);
-                        arrayVar.setArrayValues(initValues);
+                        // 检查是否是全零初始化数组
+                        boolean isAllZero = isAllZeroInitializer((SyntaxTree.ArrayInitExpr) varDef.init);
+                        
+                        if (isAllZero) {
+                            // 全零初始化，直接使用zeroinitializer
+                            arrayVar.setZeroInitialized(totalSize);
+                        } else {
+                            // 处理数组初始化表达式
+                            List<Value> initValues = processGlobalArrayInit((SyntaxTree.ArrayInitExpr) varDef.init, 
+                                                                           dims, 
+                                                                           baseType);
+                            arrayVar.setArrayValues(initValues);
+                        }
                     } else {
                         throw new RuntimeException("全局数组初始化必须使用数组初始化表达式");
                     }
@@ -265,6 +273,43 @@ public class IRVisitor {
                 addVariable(name, arrayVar);
             }
         }
+    }
+    
+    /**
+     * 检查数组初始化表达式是否全为零值
+     * @param initExpr 数组初始化表达式
+     * @return 如果全为零值返回true，否则返回false
+     */
+    private boolean isAllZeroInitializer(SyntaxTree.ArrayInitExpr initExpr) {
+        // 检查是否是空初始化 {}
+        if (initExpr.elements.isEmpty()) {
+            return true;
+        }
+        
+        for (SyntaxTree.Expr expr : initExpr.elements) {
+            if (expr instanceof SyntaxTree.ArrayInitExpr) {
+                // 递归检查嵌套数组
+                if (!isAllZeroInitializer((SyntaxTree.ArrayInitExpr) expr)) {
+                    return false;
+                }
+            } else if (expr instanceof SyntaxTree.LiteralExpr) {
+                // 检查字面量是否为0
+                Object value = ((SyntaxTree.LiteralExpr) expr).value;
+                if (value instanceof Integer && (Integer) value != 0) {
+                    return false;
+                } else if (value instanceof Float && (Float) value != 0.0f) {
+                    return false;
+                } else if (value instanceof Double && (Double) value != 0.0) {
+                    return false;
+                }
+            } else {
+                // 非字面量表达式，保守估计可能非零
+                return false;
+            }
+        }
+        
+        // 如果数组为空或所有元素都是0，则返回true
+        return true;
     }
     
     /**
