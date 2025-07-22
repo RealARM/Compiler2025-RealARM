@@ -324,61 +324,140 @@ public class IRVisitor {
             totalSize *= dim;
         }
         
-        // 收集初始化值
-        List<Value> initValues = new ArrayList<>();
-        flattenGlobalArrayInit(initExpr, initValues, elementType);
+        // 检查是否是全零初始化数组
+        boolean isAllZero = isAllZeroInitializer(initExpr);
         
-        // 如果初始化值不足，用0填充
-        while (initValues.size() < totalSize) {
+        if (isAllZero) {
+            // 全零初始化，返回空列表表示使用zeroinitializer
+            return new ArrayList<>();
+        }
+        
+        // 初始化结果列表，先全部填充0
+        List<Value> result = new ArrayList<>(totalSize);
+        for (int i = 0; i < totalSize; i++) {
             if (elementType == IntegerType.I32) {
-                initValues.add(new ConstantInt(0));
+                result.add(new ConstantInt(0));
             } else { // FloatType
-                initValues.add(new ConstantFloat(0.0));
+                result.add(new ConstantFloat(0.0));
             }
         }
         
-        return initValues;
+        // 递归填充初始化值
+        int[] indices = new int[dims.size()];
+        fillArrayInitValues(initExpr, result, elementType, dims, indices, 0);
+        
+        return result;
     }
-    
+
     /**
-     * 展平全局数组初始化表达式
+     * 递归填充多维数组的初始化值
+     * @param expr 初始化表达式
+     * @param result 结果列表
+     * @param elementType 元素类型
+     * @param dims 每个维度的大小
+     * @param indices 当前索引数组
+     * @param dimLevel 当前维度级别
      */
-    private void flattenGlobalArrayInit(SyntaxTree.Expr expr, List<Value> result, Type elementType) {
+    private void fillArrayInitValues(SyntaxTree.Expr expr, List<Value> result,
+                                   Type elementType, List<Integer> dims, 
+                                   int[] indices, int dimLevel) {
         if (expr instanceof SyntaxTree.ArrayInitExpr) {
             SyntaxTree.ArrayInitExpr arrayInit = (SyntaxTree.ArrayInitExpr) expr;
-            for (SyntaxTree.Expr element : arrayInit.elements) {
-                flattenGlobalArrayInit(element, result, elementType);
+            
+            // 处理当前维度的每个元素
+            for (int i = 0; i < Math.min(arrayInit.elements.size(), dims.get(dimLevel)); i++) {
+                indices[dimLevel] = i;
+                
+                if (dimLevel < dims.size() - 1) {
+                    // 非最后维度，递归处理子数组
+                    if (i < arrayInit.elements.size() && arrayInit.elements.get(i) instanceof SyntaxTree.ArrayInitExpr) {
+                        // 如果子元素是数组初始化表达式，递归处理下一维度
+                        fillArrayInitValues(arrayInit.elements.get(i), result, elementType, dims, indices, dimLevel + 1);
+                    } else if (i < arrayInit.elements.size()) {
+                        // 如果子元素不是数组初始化表达式但当前不是最后维度，
+                        // 将该元素放在下一维度的首位置，其余位置填0
+                        indices[dimLevel + 1] = 0;
+                        fillSingleElement(arrayInit.elements.get(i), result, elementType, dims, indices);
+                        
+                        // 重置下一维度的索引，保持当前维度索引不变
+                        for (int j = dimLevel + 1; j < indices.length; j++) {
+                            indices[j] = 0;
+                        }
+                    }
+                } else {
+                    // 最后一维，处理单个元素
+                    if (i < arrayInit.elements.size()) {
+                        fillSingleElement(arrayInit.elements.get(i), result, elementType, dims, indices);
+                    }
+                }
             }
         } else {
-            // 处理表达式元素
-            currentValue = null;
-            visitExpr(expr);
+            // 单个元素直接填充
+            fillSingleElement(expr, result, elementType, dims, indices);
+        }
+    }
+
+    /**
+     * 填充单个数组元素
+     * @param expr 表达式
+     * @param result 结果列表
+     * @param elementType 元素类型
+     * @param dims 每个维度的大小
+     * @param indices 当前索引数组
+     */
+    private void fillSingleElement(SyntaxTree.Expr expr, List<Value> result,
+                                 Type elementType, List<Integer> dims, int[] indices) {
+        // 计算线性索引
+        int linearIndex = calculateLinearIndex(dims, indices);
+        
+        // 处理表达式
+        currentValue = null;
+        visitExpr(expr);
+        
+        if (currentValue != null) {
+            Constant constResult = IR.Pass.ConstantExpressionEvaluator.evaluate(currentValue);
+            Value valueToAdd = null;
             
-            if (currentValue != null) {
-                // 尝试将表达式结果评估为常量
-                Constant constResult = IR.Pass.ConstantExpressionEvaluator.evaluate(currentValue);
-                Value valueToAdd = null;
-                
-                if (constResult != null) {
-                    valueToAdd = constResult;
-                } else if (currentValue instanceof Constant) {
-                    valueToAdd = currentValue;
-                } else {
-                    throw new RuntimeException("全局数组初始化必须使用常量表达式");
-                }
-                
-                // 类型转换处理
-                if (valueToAdd instanceof ConstantInt && elementType.isFloatType()) {
-                    result.add(new ConstantFloat((double)((ConstantInt) valueToAdd).getValue()));
-                } else if (valueToAdd instanceof ConstantFloat && elementType == IntegerType.I32) {
-                    result.add(new ConstantInt((int) ((ConstantFloat)valueToAdd).getValue()));
-                } else {
-                    result.add((Constant) valueToAdd);
-                }
+            if (constResult != null) {
+                valueToAdd = constResult;
+            } else if (currentValue instanceof Constant) {
+                valueToAdd = currentValue;
             } else {
-                throw new RuntimeException("全局数组初始化表达式计算失败");
+                throw new RuntimeException("全局数组初始化必须使用常量表达式");
+            }
+            
+            // 类型转换
+            if (valueToAdd instanceof ConstantInt && elementType.isFloatType()) {
+                result.set(linearIndex, new ConstantFloat((double)((ConstantInt) valueToAdd).getValue()));
+            } else if (valueToAdd instanceof ConstantFloat && elementType == IntegerType.I32) {
+                result.set(linearIndex, new ConstantInt((int) ((ConstantFloat)valueToAdd).getValue()));
+            } else {
+                result.set(linearIndex, (Constant) valueToAdd);
+            }
+        } else {
+            throw new RuntimeException("全局数组初始化表达式计算失败");
+        }
+    }
+
+    /**
+     * 计算多维数组的线性索引
+     * @param dims 每个维度的大小
+     * @param indices 当前索引数组
+     * @return 线性索引
+     */
+    private int calculateLinearIndex(List<Integer> dims, int[] indices) {
+        int linearIndex = 0;
+        int factor = 1;
+        
+        // 从最后一个维度开始计算
+        for (int i = dims.size() - 1; i >= 0; i--) {
+            linearIndex += indices[i] * factor;
+            if (i > 0) {
+                factor *= dims.get(i);
             }
         }
+        
+        return linearIndex;
     }
     
     /**
@@ -2496,42 +2575,4 @@ public class IRVisitor {
         arrayDimensions.remove(arrayDimensions.size() - 1);
     }
 
-    /**
-     * 获取布尔值的否定结果
-     * 例如：true -> false, false -> true
-     */
-    private Value getNegatedBooleanValue(Value boolValue, BasicBlock block) {
-        if (boolValue instanceof ConstantInt) {
-            // 如果是常量，直接求反
-            int value = ((ConstantInt) boolValue).getValue();
-            return new ConstantInt(value == 0 ? 1 : 0, IntegerType.I1);
-        } else {
-            // 否则使用异或运算
-            return IRBuilder.createBinaryInst(OpCode.XOR, boolValue, new ConstantInt(1, IntegerType.I1), block);
-        }
-    }
-
-    /**
-     * 访问一个表达式，如果是常量，尝试获取它的实际值
-     */
-    private Value getConstantValue(SyntaxTree.Expr expr) {
-        // 保存当前值
-        Value oldValue = currentValue;
-        
-        // 访问表达式
-        visitExprAndLoad(expr);
-        Value result = currentValue;
-        
-        // 尝试评估为常量
-        if (result != null) {
-            Constant constResult = IR.Pass.ConstantExpressionEvaluator.evaluate(result);
-            if (constResult != null) {
-                result = constResult;
-            }
-        }
-        
-        // 恢复当前值
-        currentValue = oldValue;
-        return result;
-    }
 } 
