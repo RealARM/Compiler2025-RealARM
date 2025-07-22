@@ -43,6 +43,6 @@ public class ConstantFloat extends Constant {
         }
         
         // 使用Double.doubleToLongBits来获取64位表示
-        return "0x" + Long.toHexString(Double.doubleToLongBits(value));
+        return "0x" + Long.toHexString(Double.doubleToLongBits((float) value));
     }
 } 

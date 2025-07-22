@@ -234,6 +234,11 @@ public class IRPrinter {
         if (name.startsWith("@")) {
             return name;
         }
+
+        // 浮点常量用0x开头
+        if (value instanceof ConstantFloat) {
+            return "0x" + Long.toHexString(Double.doubleToLongBits((float)((ConstantFloat) value).getValue()));
+        }
         
         // 数字常量不需要前缀
         if (value instanceof Constant) {
