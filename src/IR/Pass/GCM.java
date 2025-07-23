@@ -24,6 +24,9 @@ public class GCM implements IRPass {
     // 调试模式
     private boolean debug = false;
     
+    // 基本块数量阈值，超过此阈值的函数将跳过GCM优化
+    private final int MAX_BLOCKS_THRESHOLD = 1000;
+    
     @Override
     public boolean run(Module module) {
         boolean changed = false;
@@ -34,7 +37,20 @@ public class GCM implements IRPass {
         for (Function function : module.functions()) {
             // 只处理有多个基本块的函数
             if (function.getBasicBlocks().size() > 1) {
-                if (debug) System.out.println("[GCM] Processing function: " + function.getName() + " with " + function.getBasicBlocks().size() + " blocks");
+                int blockCount = function.getBasicBlocks().size();
+                if (debug) {
+                    System.out.println("[GCM] Processing function: " + function.getName() + " with " + blockCount + " blocks");
+                }
+                
+                // 检查基本块数量是否超过阈值
+                if (blockCount > MAX_BLOCKS_THRESHOLD) {
+                    if (debug) {
+                        System.out.println("[GCM] Skipping function: " + function.getName() + 
+                                         " - too many blocks (" + blockCount + " > " + MAX_BLOCKS_THRESHOLD + ")");
+                    }
+                    continue; // 跳过此函数
+                }
+                
                 runGCMForFunction(function);
                 changed = true;
             } else if (debug) {
@@ -53,42 +69,100 @@ public class GCM implements IRPass {
         // 清空已访问指令集
         visited.clear();
         
+        long startTime = System.currentTimeMillis();
         if (debug) System.out.println("[GCM] Running loop analysis for: " + function.getName());
         // 运行循环信息分析
         LoopAnalysis.runLoopInfo(function);
+        long loopAnalysisTime = System.currentTimeMillis();
+        if (debug) System.out.println("[GCM] Loop analysis completed in " + (loopAnalysisTime - startTime) + "ms");
         
         if (debug) System.out.println("[GCM] Computing dominator tree for: " + function.getName());
-        // 计算支配树关系，初始化支配级别和直接支配者
-        DominatorAnalysis.computeDominatorTree(function);
+        
+        // 添加更详细的调试输出来跟踪支配树计算进度
+        if (debug) {
+            System.out.println("[GCM] Function entry block: " + function.getEntryBlock());
+            System.out.println("[GCM] Starting dominator tree computation...");
+        }
+        
+        try {
+            // 计算支配树关系，初始化支配级别和直接支配者
+            DominatorAnalysis.computeDominatorTree(function);
+            long domTreeTime = System.currentTimeMillis();
+            if (debug) System.out.println("[GCM] Dominator tree computed in " + (domTreeTime - loopAnalysisTime) + "ms");
+        } catch (Exception e) {
+            System.err.println("[GCM] Error computing dominator tree: " + e.getMessage());
+            e.printStackTrace();
+            return;
+        }
+        
+        // 添加检查以验证支配树是否正确构建
+        if (debug) {
+            int bbWithIdom = 0;
+            for (BasicBlock bb : function.getBasicBlocks()) {
+                if (bb.getIdominator() != null) {
+                    bbWithIdom++;
+                }
+            }
+            System.out.println("[GCM] Dominator tree stats: " + bbWithIdom + "/" + function.getBasicBlocks().size() + " blocks have an immediate dominator");
+        }
         
         // 获取后序遍历的基本块列表并反转（成为前序遍历）
+        if (debug) System.out.println("[GCM] Getting post-order traversal...");
         List<BasicBlock> postOrder = DominatorAnalysis.getDomPostOrder(function);
+        if (debug) System.out.println("[GCM] Post-order traversal completed with " + postOrder.size() + " blocks");
+        
         Collections.reverse(postOrder);
+        
+        if (debug && postOrder.size() != function.getBasicBlocks().size()) {
+            System.out.println("[GCM] Warning: Post-order size (" + postOrder.size() + 
+                              ") doesn't match block count (" + function.getBasicBlocks().size() + ")");
+        }
         
         // 收集所有指令
         List<Instruction> instructions = new ArrayList<>();
+        int instCount = 0;
+        if (debug) System.out.println("[GCM] Collecting instructions from all blocks...");
         for (BasicBlock bb : postOrder) {
             instructions.addAll(bb.getInstructions());
+            instCount += bb.getInstructions().size();
+            
+            // 每处理1000个基本块打印一次进度
+            if (debug && instCount % 1000 == 0) {
+                System.out.println("[GCM] Collected " + instCount + " instructions so far...");
+            }
         }
         
         if (debug) System.out.println("[GCM] Total instructions to process: " + instructions.size());
         
         // 第一阶段：尽早调度指令
+        long earlyStartTime = System.currentTimeMillis();
         if (debug) System.out.println("[GCM] Starting early scheduling phase");
         int earlyMoved = 0;
+        int processedCount = 0;
         for (Instruction instruction : instructions) {
             boolean wasMoved = scheduleEarly(instruction, function);
             if (wasMoved) earlyMoved++;
+            
+            // 每处理1000条指令打印一次进度
+            processedCount++;
+            if (debug && processedCount % 1000 == 0) {
+                System.out.println("[GCM] Early scheduling progress: " + processedCount + "/" + instructions.size() + 
+                                  " instructions, " + earlyMoved + " moved");
+            }
         }
-        if (debug) System.out.println("[GCM] Early scheduling completed, moved " + earlyMoved + " instructions");
+        long earlyEndTime = System.currentTimeMillis();
+        if (debug) System.out.println("[GCM] Early scheduling completed, moved " + earlyMoved + 
+                                      " instructions in " + (earlyEndTime - earlyStartTime) + "ms");
         
         // 重置已访问指令集
         visited.clear();
         
         // 第二阶段：尽晚调度指令（反转指令列表）
+        long lateStartTime = System.currentTimeMillis();
         if (debug) System.out.println("[GCM] Starting late scheduling phase");
         Collections.reverse(instructions);
         int lateMoved = 0;
+        processedCount = 0;
         for (Instruction instruction : instructions) {
             // 确保指令有父块
             if (instruction.getParent() != null) {
@@ -97,8 +171,21 @@ public class GCM implements IRPass {
             } else if (debug) {
                 System.out.println("[GCM] Warning: Skipping instruction with null parent: " + instruction);
             }
+            
+            // 每处理1000条指令打印一次进度
+            processedCount++;
+            if (debug && processedCount % 1000 == 0) {
+                System.out.println("[GCM] Late scheduling progress: " + processedCount + "/" + instructions.size() + 
+                                  " instructions, " + lateMoved + " moved");
+            }
         }
-        if (debug) System.out.println("[GCM] Late scheduling completed, moved " + lateMoved + " instructions");
+        long lateEndTime = System.currentTimeMillis();
+        if (debug) System.out.println("[GCM] Late scheduling completed, moved " + lateMoved + 
+                                     " instructions in " + (lateEndTime - lateStartTime) + "ms");
+        
+        long totalTime = System.currentTimeMillis() - startTime;
+        if (debug) System.out.println("[GCM] Total optimization time for function " + function.getName() + 
+                                     ": " + totalTime + "ms");
     }
     
     /**
@@ -268,24 +355,72 @@ public class GCM implements IRPass {
         BasicBlock origBB1 = bb1;
         BasicBlock origBB2 = bb2;
         
+        // 添加LCA计算的详细日志
+        boolean verboseDebug = false; // 只在需要非常详细调试时启用
+        
+        if (verboseDebug && debug) {
+            System.out.println("[GCM] Finding LCA of " + bb1 + "(level:" + bb1.getDomLevel() + ") and " 
+                             + bb2 + "(level:" + bb2.getDomLevel() + ")");
+        }
+        
         // 使支配级别相同
+        int steps = 0;
+        int maxSteps = 10000; // 安全措施，防止无限循环
+        
         while (bb1.getDomLevel() < bb2.getDomLevel()) {
+            steps++;
+            if (steps > maxSteps) {
+                System.err.println("[GCM] Warning: Exceeded " + maxSteps + " steps while equalizing dom levels. Possible infinite loop.");
+                System.err.println("[GCM] Original blocks: " + origBB1 + " and " + origBB2);
+                System.err.println("[GCM] Current blocks: " + bb1 + "(level:" + bb1.getDomLevel() 
+                                 + ") and " + bb2 + "(level:" + bb2.getDomLevel() + ")");
+                return bb1; // 中断执行并返回当前结果
+            }
+            
             bb2 = bb2.getIdominator();
             if (bb2 == null) {
                 if (debug) System.out.println("[GCM] Warning: bb2 reached null while finding LCA of " + origBB1 + " and " + origBB2);
                 return bb1;
             }
+            
+            if (verboseDebug && debug && steps % 100 == 0) {
+                System.out.println("[GCM] LCA step " + steps + ": bb2 now " + bb2 + "(level:" + bb2.getDomLevel() + ")");
+            }
         }
+        
+        steps = 0;
         while (bb2.getDomLevel() < bb1.getDomLevel()) {
+            steps++;
+            if (steps > maxSteps) {
+                System.err.println("[GCM] Warning: Exceeded " + maxSteps + " steps while equalizing dom levels. Possible infinite loop.");
+                System.err.println("[GCM] Original blocks: " + origBB1 + " and " + origBB2);
+                System.err.println("[GCM] Current blocks: " + bb1 + "(level:" + bb1.getDomLevel() 
+                                 + ") and " + bb2 + "(level:" + bb2.getDomLevel() + ")");
+                return bb2; // 中断执行并返回当前结果
+            }
+            
             bb1 = bb1.getIdominator();
             if (bb1 == null) {
                 if (debug) System.out.println("[GCM] Warning: bb1 reached null while finding LCA of " + origBB1 + " and " + origBB2);
                 return bb2;
             }
+            
+            if (verboseDebug && debug && steps % 100 == 0) {
+                System.out.println("[GCM] LCA step " + steps + ": bb1 now " + bb1 + "(level:" + bb1.getDomLevel() + ")");
+            }
         }
         
         // 同时向上遍历直到找到共同祖先
+        steps = 0;
         while (bb1 != bb2) {
+            steps++;
+            if (steps > maxSteps) {
+                System.err.println("[GCM] Warning: Exceeded " + maxSteps + " steps while finding common ancestor. Possible infinite loop.");
+                System.err.println("[GCM] Original blocks: " + origBB1 + " and " + origBB2);
+                System.err.println("[GCM] Current blocks: " + bb1 + " and " + bb2);
+                return bb1; // 中断执行并返回当前结果
+            }
+            
             bb1 = bb1.getIdominator();
             bb2 = bb2.getIdominator();
             
@@ -293,6 +428,10 @@ public class GCM implements IRPass {
             if (bb1 == null || bb2 == null) {
                 if (debug) System.out.println("[GCM] Error: Failed to find LCA for " + origBB1 + " and " + origBB2);
                 return (bb1 != null) ? bb1 : bb2;
+            }
+            
+            if (verboseDebug && debug && steps % 100 == 0) {
+                System.out.println("[GCM] LCA step " + steps + ": bb1=" + bb1 + ", bb2=" + bb2);
             }
         }
         
