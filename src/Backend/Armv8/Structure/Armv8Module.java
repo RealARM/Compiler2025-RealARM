@@ -39,12 +39,11 @@ public class Armv8Module {
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
-        // 设置为ARMv8-A架构
         sb.append(".arch armv8-a\n\n");
         
         if(!dataGlobalVariables.isEmpty()) {
             sb.append(".data\n");
-            sb.append(".align\t3\n"); // 8字节对齐(2^3)
+            sb.append(".align\t3\n");
             for (Armv8GlobalVariable globalVariable : dataGlobalVariables) {
                 sb.append(globalVariable.dump());
             }

@@ -140,7 +140,7 @@ public class Compiler {
             
             // 输出ARM代码到文件
             if (outputPath != null) {
-                armv8CodeGen.dump();
+                armv8CodeGen.dump(outputPath);
                 System.out.println("ARM汇编代码已输出到文件: " + outputPath);
             } else {
                 System.out.println("ARM汇编代码生成完成，但未指定输出文件。");

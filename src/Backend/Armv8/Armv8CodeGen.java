@@ -58,56 +58,49 @@ public class Armv8CodeGen {
     private void generateGlobalVariable(GlobalVariable globalVariable) {
         // 生成全局变量的实现
         String varName = removeLeadingAt(globalVariable.getName());
-        ArrayList<Byte> initialValues = new ArrayList<>();
-        int byteSize;
+        ArrayList<Number> initialValues = new ArrayList<>();
         
         // 获取类型的元素类型
         Type elementType = globalVariable.getElementType();
+        int byteSize = elementType.getSize();
+        boolean isFloat = elementType instanceof FloatType;
         
         if (globalVariable.isArray()) {
-            // 数组类型全局变量
             byteSize = globalVariable.getArraySize() * elementType.getSize();
-            
             // 处理数组初始化
             if (globalVariable.isZeroInitialized()) {
                 // 零初始化的数组
-                initialValues = null; // Armv8GlobalVariable will handle zero initialization
+                initialValues = null;
             } else if (globalVariable.hasInitializer() && globalVariable.getArrayValues() != null) {
                 // 带有初始化列表的数组
                 List<Value> arrayValues = globalVariable.getArrayValues();
                 for (Value val : arrayValues) {
                     if (val instanceof ConstantInt) {
-                        long intValue = ((ConstantInt) val).getValue();
-                        // 将整数值转换为字节数组
-                        int valueSize = elementType.getSize();
-                        for (int i = 0; i < valueSize; i++) {
-                            initialValues.add((byte) ((intValue >> (i * 8)) & 0xFF));
-                        }
+                        // 处理整型值
+                        initialValues.add(((ConstantInt) val).getValue());
+                    } else if (val instanceof ConstantFloat) {
+                        // 处理浮点值
+                        initialValues.add(((ConstantFloat) val).getValue());
                     }
                 }
             }
         } else {
-            // 非数组类型全局变量
-            byteSize = elementType.getSize();
-            
             // 处理单个值的初始化
             if (globalVariable.hasInitializer()) {
                 Value initializer = globalVariable.getInitializer();
                 if (initializer instanceof ConstantInt) {
-                    long intValue = ((ConstantInt) initializer).getValue();
-                    // 将整数值转换为字节数组
-                    for (int i = 0; i < byteSize; i++) {
-                        initialValues.add((byte) ((intValue >> (i * 8)) & 0xFF));
-                    }
+                    initialValues.add(((ConstantInt) initializer).getValue());
+                } else if (initializer instanceof ConstantFloat) {
+                    initialValues.add(((ConstantFloat) initializer).getValue());
                 }
             } else {
                 // 未初始化的变量
-                initialValues = null; // Armv8GlobalVariable will handle zero initialization
+                initialValues = null;
             }
         }
         
         // 创建ARM全局变量并添加到模块
-        Armv8GlobalVariable armv8GlobalVar = new Armv8GlobalVariable(varName, initialValues, byteSize);
+        Armv8GlobalVariable armv8GlobalVar = new Armv8GlobalVariable(varName, initialValues, byteSize, isFloat);
         
         // 根据是否有初始值决定放在data段还是bss段
         if (initialValues == null || initialValues.isEmpty()) {
@@ -135,70 +128,31 @@ public class Armv8CodeGen {
             value2Label.put(basicBlock, armv8Block);
             curArmv8Function.addBlock(armv8Block);
         }
-
+        // 计算栈大小并完成函数
+        int stackSize = calculateStackSize(function);
+        curArmv8Function.setStackSize(stackSize);
         // 为每个基本块生成代码
         for (BasicBlock basicBlock : function.getBasicBlocks()) {
             curArmv8Block = (Armv8Block) value2Label.get(basicBlock);
             generateBasicBlock(basicBlock);
         }
 
-        // 计算栈大小并完成函数
-        int stackSize = calculateStackSize(function);
-        curArmv8Function.setStackSize(stackSize);
     }
 
-    // 计算函数需要的栈空间大小
     private int calculateStackSize(Function function) {
         int size = 0;
+        int localVarCount = 0;
         
-        // 遍历所有基本块的所有指令，检查需要的局部变量空间
+        // 遍历所有基本块的所有指令，统计局部变量的数量
         for (BasicBlock block : function.getBasicBlocks()) {
             for (Instruction instruction : block.getInstructions()) {
                 if (instruction instanceof AllocaInstruction) {
-                    AllocaInstruction alloca = (AllocaInstruction) instruction;
-                    // 获取分配的类型大小，并进行必要的对齐
-                    Type allocatedType = alloca.getAllocatedType();
-                    int typeSize;
-                    
-                    if (alloca.isArrayAllocation()) {
-                        // 如果是数组类型，计算数组总大小
-                        typeSize = allocatedType.getSize() * alloca.getArraySize();
-                    } else {
-                        // 单个元素大小
-                        typeSize = allocatedType.getSize();
-                    }
-                    
-                    // 按8字节对齐
-                    size += (typeSize + 7) / 8 * 8;
+                    localVarCount++;
                 }
             }
         }
-        
-        // 检查函数调用，确保有足够的空间保存寄存器和参数
-        int maxCalleeArgs = 0;
-        for (BasicBlock block : function.getBasicBlocks()) {
-            for (Instruction instruction : block.getInstructions()) {
-                if (instruction instanceof CallInstruction) {
-                    CallInstruction call = (CallInstruction) instruction;
-                    int argsCount = call.getArguments().size();
-                    // 保存参数需要的栈空间（每个参数8字节，考虑到ARMv8的调用约定）
-                    maxCalleeArgs = Math.max(maxCalleeArgs, argsCount);
-                }
-            }
-        }
-        
-        // 为调用其他函数的参数分配栈空间（超过8个参数的部分）
-        if (maxCalleeArgs > 8) {
-            size += (maxCalleeArgs - 8) * 8; // 8字节对齐
-        }
-        
-        // 考虑保存被调用者寄存器的空间
-        // ARMv8中通常需要保存x19-x29这些被调用者保存的寄存器
-        // 这部分已经在Armv8Function的generatePrologue和generateEpilogue中处理了
-        
-        // 确保栈大小是16字节对齐的（ARMv8 ABI要求）
-        size = (size + 15) & ~15;
-        
+        size += localVarCount * 8;
+        size = (size + 15) & ~15;        
         return size;
     }
 
@@ -297,26 +251,74 @@ public class Armv8CodeGen {
         Value leftOperand = ins.getLeft();
         Value rightOperand = ins.getRight();
         
-        // 默认使用32位操作（对应w寄存器）
-        boolean is32Bit = true;
+        // 检查是否是浮点操作
+        boolean isFloatOperation = leftOperand.getType() instanceof FloatType || 
+                                 rightOperand.getType() instanceof FloatType;
+        
+        // 默认使用64位操作（对应x寄存器）
+        boolean is32Bit = false;
         
         // 获取或分配寄存器
-        Armv8Reg destReg = Armv8Reg.allocateReg();
+        Armv8Reg destReg;
+        if (isFloatOperation) {
+            // 浮点操作需要浮点寄存器
+            destReg = Armv8FPUReg.getArmv8FloatReg(0); // 默认使用v0
+            for (int i = 0; i < 32; i++) {
+                // 尝试找一个未使用的浮点寄存器
+                if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                    destReg = Armv8FPUReg.getArmv8FloatReg(i);
+                    break;
+                }
+            }
+        } else {
+            destReg = Armv8Reg.allocateReg();
+        }
         value2Reg.put(ins, destReg);
         
         Armv8Operand leftOp, rightOp;
         
         // 处理左操作数
         if (leftOperand instanceof ConstantInt) {
-            // 对于常量，创建立即数操作数
+            // 对于整数常量，创建立即数操作数
             long value = ((ConstantInt) leftOperand).getValue();
             leftOp = new Armv8Imm((int) value);
+        } else if (leftOperand instanceof ConstantFloat) {
+            // 处理浮点常量
+            double floatValue = ((ConstantFloat) leftOperand).getValue();
+            
+            // 为浮点常量分配寄存器
+            Armv8FPUReg fpuReg = Armv8FPUReg.getArmv8FloatReg(0);
+            for (int i = 0; i < 32; i++) {
+                if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                    fpuReg = Armv8FPUReg.getArmv8FloatReg(i);
+                    break;
+                }
+            }
+            
+            // 加载浮点常量到寄存器
+            loadFloatConstant(fpuReg, floatValue, insList, predefine);
+            
+            leftOp = fpuReg;
         } else {
             // 对于变量，使用寄存器
             if (!value2Reg.containsKey(leftOperand)) {
-                Armv8Reg leftReg = Armv8Reg.allocateReg();
-                value2Reg.put(leftOperand, leftReg);
-                leftOp = leftReg;
+                if (leftOperand.getType() instanceof FloatType) {
+                    // 浮点类型使用浮点寄存器
+                    Armv8FPUReg leftReg = Armv8FPUReg.getArmv8FloatReg(0);
+                    for (int i = 0; i < 32; i++) {
+                        if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                            leftReg = Armv8FPUReg.getArmv8FloatReg(i);
+                            break;
+                        }
+                    }
+                    value2Reg.put(leftOperand, leftReg);
+                    leftOp = leftReg;
+                } else {
+                    // 整数类型使用通用寄存器
+                    Armv8Reg leftReg = Armv8Reg.allocateReg();
+                    value2Reg.put(leftOperand, leftReg);
+                    leftOp = leftReg;
+                }
             } else {
                 leftOp = value2Reg.get(leftOperand);
             }
@@ -324,15 +326,46 @@ public class Armv8CodeGen {
         
         // 处理右操作数
         if (rightOperand instanceof ConstantInt) {
-            // 对于常量，创建立即数操作数
+            // 对于整数常量，创建立即数操作数
             long value = ((ConstantInt) rightOperand).getValue();
             rightOp = new Armv8Imm((int) value);
+        } else if (rightOperand instanceof ConstantFloat) {
+            // 处理浮点常量
+            double floatValue = ((ConstantFloat) rightOperand).getValue();
+            
+            // 为浮点常量分配寄存器
+            Armv8FPUReg fpuReg = Armv8FPUReg.getArmv8FloatReg(0);
+            for (int i = 0; i < 32; i++) {
+                if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                    fpuReg = Armv8FPUReg.getArmv8FloatReg(i);
+                    break;
+                }
+            }
+            
+            // 加载浮点常量到寄存器
+            loadFloatConstant(fpuReg, floatValue, insList, predefine);
+            
+            rightOp = fpuReg;
         } else {
             // 对于变量，使用寄存器
             if (!value2Reg.containsKey(rightOperand)) {
-                Armv8Reg rightReg = Armv8Reg.allocateReg();
-                value2Reg.put(rightOperand, rightReg);
-                rightOp = rightReg;
+                if (rightOperand.getType() instanceof FloatType) {
+                    // 浮点类型使用浮点寄存器
+                    Armv8FPUReg rightReg = Armv8FPUReg.getArmv8FloatReg(0);
+                    for (int i = 0; i < 32; i++) {
+                        if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                            rightReg = Armv8FPUReg.getArmv8FloatReg(i);
+                            break;
+                        }
+                    }
+                    value2Reg.put(rightOperand, rightReg);
+                    rightOp = rightReg;
+                } else {
+                    // 整数类型使用通用寄存器
+                    Armv8Reg rightReg = Armv8Reg.allocateReg();
+                    value2Reg.put(rightOperand, rightReg);
+                    rightOp = rightReg;
+                }
             } else {
                 rightOp = value2Reg.get(rightOperand);
             }
@@ -343,75 +376,111 @@ public class Armv8CodeGen {
         operands.add(leftOp);
         operands.add(rightOp);
         
-        // 根据操作码生成对应的ARM指令
-        Armv8Binary.Armv8BinaryType binaryType = null;
-        switch (opCode) {
-            case ADD:
-                binaryType = Armv8Binary.Armv8BinaryType.add;
-                break;
-            case SUB:
-                binaryType = Armv8Binary.Armv8BinaryType.sub;
-                break;
-            case MUL:
-                binaryType = Armv8Binary.Armv8BinaryType.mul;
-                break;
-            case DIV:
-                binaryType = Armv8Binary.Armv8BinaryType.sdiv;
-                break;
-            case REM:
-                // 余数操作在ARM中需要特殊处理
-                // 1. 先做除法 dest = a / b
-                // 2. 然后计算余数 dest = a - dest * b
-                
-                // 创建除法操作
-                Armv8Binary divInst = new Armv8Binary(operands, destReg, Armv8Binary.Armv8BinaryType.sdiv, is32Bit);
-                addInstr(divInst, insList, predefine);
-                
-                // 创建临时寄存器存储乘法结果
-                Armv8Reg tempReg = Armv8Reg.allocateReg();
-                
-                // 创建乘法操作 temp = dest * b
-                ArrayList<Armv8Operand> mulOperands = new ArrayList<>();
-                mulOperands.add(destReg);
-                mulOperands.add(rightOp);
-                Armv8Binary mulInst = new Armv8Binary(mulOperands, tempReg, Armv8Binary.Armv8BinaryType.mul, is32Bit);
-                addInstr(mulInst, insList, predefine);
-                
-                // 创建减法操作 dest = a - temp
-                ArrayList<Armv8Operand> subOperands = new ArrayList<>();
-                subOperands.add(leftOp);
-                subOperands.add(tempReg);
-                Armv8Binary subInst = new Armv8Binary(subOperands, destReg, Armv8Binary.Armv8BinaryType.sub, is32Bit);
-                addInstr(subInst, insList, predefine);
-                
-                return; // 余数操作已完成，直接返回
-                
-            case AND:
-                binaryType = Armv8Binary.Armv8BinaryType.and;
-                break;
-            case OR:
-                binaryType = Armv8Binary.Armv8BinaryType.orr;
-                break;
-            case XOR:
-                binaryType = Armv8Binary.Armv8BinaryType.eor;
-                break;
-            case SHL:
-                binaryType = Armv8Binary.Armv8BinaryType.lsl;
-                break;
-            case LSHR:
-                binaryType = Armv8Binary.Armv8BinaryType.lsr;
-                break;
-            case ASHR:
-                binaryType = Armv8Binary.Armv8BinaryType.asr;
-                break;
-            default:
-                System.err.println("不支持的二元操作: " + opCode);
-                return;
+        // 根据操作码和操作数类型生成对应的ARM指令
+        if (isFloatOperation) {
+            // 处理浮点操作
+            switch (opCode) {
+                case FADD:
+                    // 浮点加法
+                    Armv8FBinary faddInst = new Armv8FBinary(operands, (Armv8FPUReg)destReg, Armv8FBinary.Armv8FBinaryType.fadd, is32Bit);
+                    addInstr(faddInst, insList, predefine);
+                    break;
+                case FSUB:
+                    // 浮点减法
+                    Armv8FBinary fsubInst = new Armv8FBinary(operands, (Armv8FPUReg)destReg, Armv8FBinary.Armv8FBinaryType.fsub, is32Bit);
+                    addInstr(fsubInst, insList, predefine);
+                    break;
+                case FMUL:
+                    // 浮点乘法
+                    Armv8FBinary fmulInst = new Armv8FBinary(operands, (Armv8FPUReg)destReg, Armv8FBinary.Armv8FBinaryType.fmul, is32Bit);
+                    addInstr(fmulInst, insList, predefine);
+                    break;
+                case FDIV:
+                    // 浮点除法
+                    Armv8FBinary fdivInst = new Armv8FBinary(operands, (Armv8FPUReg)destReg, Armv8FBinary.Armv8FBinaryType.fdiv, is32Bit);
+                    addInstr(fdivInst, insList, predefine);
+                    break;
+                default:
+                    System.err.println("不支持的浮点二元操作: " + opCode);
+                    break;
+            }
+        } else {
+            // 处理整数操作
+            Armv8Binary.Armv8BinaryType binaryType = null;
+            switch (opCode) {
+                case ADD:
+                    binaryType = Armv8Binary.Armv8BinaryType.add;
+                    break;
+                case SUB:
+                    binaryType = Armv8Binary.Armv8BinaryType.sub;
+                    break;
+                case MUL:
+                    binaryType = Armv8Binary.Armv8BinaryType.mul;
+                    break;
+                case DIV:
+                    binaryType = Armv8Binary.Armv8BinaryType.sdiv;
+                    break;
+                case REM:
+                    // 余数操作在ARM中需要特殊处理
+                    // 1. 先做除法 dest = a / b
+                    // 2. 然后计算余数 dest = a - dest * b
+                    
+                    // 创建除法操作
+                    Armv8Binary divInst = new Armv8Binary(operands, destReg, Armv8Binary.Armv8BinaryType.sdiv, is32Bit);
+                    addInstr(divInst, insList, predefine);
+                    
+                    // 创建临时寄存器存储乘法结果
+                    Armv8Reg tempReg = Armv8Reg.allocateReg();
+                    
+                    // 创建乘法操作 temp = dest * b
+                    ArrayList<Armv8Operand> mulOperands = new ArrayList<>();
+                    mulOperands.add(destReg);
+                    mulOperands.add(rightOp);
+                    Armv8Binary mulInst = new Armv8Binary(mulOperands, tempReg, Armv8Binary.Armv8BinaryType.mul, is32Bit);
+                    addInstr(mulInst, insList, predefine);
+                    
+                    // 创建减法操作 dest = a - temp
+                    ArrayList<Armv8Operand> subOperands = new ArrayList<>();
+                    subOperands.add(leftOp);
+                    subOperands.add(tempReg);
+                    Armv8Binary subInst = new Armv8Binary(subOperands, destReg, Armv8Binary.Armv8BinaryType.sub, is32Bit);
+                    addInstr(subInst, insList, predefine);
+                    
+                    if (predefine) {
+                        predefines.put(ins, insList);
+                    }
+                    return; // 余数操作已完成，直接返回
+                    
+                case AND:
+                    binaryType = Armv8Binary.Armv8BinaryType.and;
+                    break;
+                case OR:
+                    binaryType = Armv8Binary.Armv8BinaryType.orr;
+                    break;
+                case XOR:
+                    binaryType = Armv8Binary.Armv8BinaryType.eor;
+                    break;
+                case SHL:
+                    binaryType = Armv8Binary.Armv8BinaryType.lsl;
+                    break;
+                case LSHR:
+                    binaryType = Armv8Binary.Armv8BinaryType.lsr;
+                    break;
+                case ASHR:
+                    binaryType = Armv8Binary.Armv8BinaryType.asr;
+                    break;
+                default:
+                    System.err.println("不支持的二元操作: " + opCode);
+                    if (predefine) {
+                        predefines.put(ins, insList);
+                    }
+                    return;
+            }
+            
+            // 创建二元指令
+            Armv8Binary binaryInst = new Armv8Binary(operands, destReg, binaryType, is32Bit);
+            addInstr(binaryInst, insList, predefine);
         }
-        
-        // 创建二元指令
-        Armv8Binary binaryInst = new Armv8Binary(operands, destReg, binaryType, is32Bit);
-        addInstr(binaryInst, insList, predefine);
         
         if (predefine) {
             predefines.put(ins, insList);
@@ -479,7 +548,7 @@ public class Armv8CodeGen {
                 }
                 
                 // 创建比较指令
-                boolean is32Bit = true;  // 默认使用32位比较
+                boolean is32Bit = false;  // 使用64位比较
                 Armv8Compare.CmpType cmpType = Armv8Compare.CmpType.cmp;
                 Armv8Compare compareInst = new Armv8Compare(leftOp, rightOp, cmpType, is32Bit);
                 addInstr(compareInst, insList, predefine);
@@ -548,7 +617,7 @@ public class Armv8CodeGen {
                     }
                     
                     // 使用CBZ指令测试条件是否为0
-                    boolean is32Bit = true;  // 默认使用32位比较
+                    boolean is32Bit = false;  // 使用64位比较
                     
                     // 如果为0则跳转到false块
                     Armv8Cbz cbzInst = new Armv8Cbz((Armv8Reg) condOp, armFalseBlock, is32Bit);
@@ -593,7 +662,7 @@ public class Armv8CodeGen {
                     Armv8Imm imm = new Armv8Imm((int) value);
                     
                     // 生成加载立即数到寄存器指令
-                    Armv8Move moveInst = new Armv8Move(argReg, imm, true);
+                    Armv8Move moveInst = new Armv8Move(argReg, imm, false);
                     addInstr(moveInst, insList, predefine);
                 } else {
                     // 对于变量，先确保它有对应的寄存器
@@ -621,12 +690,12 @@ public class Armv8CodeGen {
                     Armv8Imm imm = new Armv8Imm((int) value);
                     
                     // 生成加载立即数到临时寄存器指令
-                    Armv8Move moveInst = new Armv8Move(tempReg, imm, true);
+                    Armv8Move moveInst = new Armv8Move(tempReg, imm, false);
                     addInstr(moveInst, insList, predefine);
                     
                     // 将临时寄存器值存储到栈上
                     Armv8CPUReg spReg = Armv8CPUReg.getArmv8SpReg();
-                    Armv8Store storeInst = new Armv8Store(tempReg, spReg, new Armv8Imm((int)stackOffset), true);
+                    Armv8Store storeInst = new Armv8Store(tempReg, spReg, new Armv8Imm((int)stackOffset), false);
                     addInstr(storeInst, insList, predefine);
                 } else {
                     // 对于变量，确保它有对应的寄存器
@@ -638,7 +707,7 @@ public class Armv8CodeGen {
                     // 将变量寄存器的值存储到栈上
                     Armv8Reg argValueReg = value2Reg.get(arg);
                     Armv8CPUReg spReg = Armv8CPUReg.getArmv8SpReg();
-                    Armv8Store storeInst = new Armv8Store(argValueReg, spReg, new Armv8Imm((int)stackOffset), true);
+                    Armv8Store storeInst = new Armv8Store(argValueReg, spReg, new Armv8Imm((int)stackOffset), false);
                     addInstr(storeInst, insList, predefine);
                 }
             }
@@ -758,7 +827,7 @@ public class Armv8CodeGen {
             Armv8Imm maskImm = new Armv8Imm((int) mask);
             andOps.add(maskImm);
             
-            Armv8Binary andInst = new Armv8Binary(andOps, destReg, Armv8Binary.Armv8BinaryType.and, true);
+            Armv8Binary andInst = new Armv8Binary(andOps, destReg, Armv8Binary.Armv8BinaryType.and, false);
             addInstr(andInst, insList, predefine);
             
             // 记录指令列表并返回
@@ -776,7 +845,7 @@ public class Armv8CodeGen {
             } else {
                 // 零扩展
                 // ARMv8可以通过UBFX或者位掩码实现，这里简单处理
-                Armv8Move zextInst = new Armv8Move(destReg, srcReg, true); // 使用32位模式
+                Armv8Move zextInst = new Armv8Move(destReg, srcReg, false); // 使用64位模式
                 addInstr(zextInst, insList, predefine);
             }
             
@@ -815,15 +884,24 @@ public class Armv8CodeGen {
         Value pointer = ins.getPointer();
         // 获取加载的类型
         Type loadedType = ins.getLoadedType();
+        // 判断是否是浮点数类型
+        boolean isFloat = loadedType instanceof FloatType;
         // 判断是否是32位加载（整型加载情况）
-        boolean is32Bit = true;
+        boolean is32Bit = false;
         
         // 为结果分配目标寄存器
-        Armv8Reg destReg = Armv8Reg.allocateReg();
+        Armv8Reg destReg;
+        if (isFloat) {
+            // 浮点数应该使用浮点寄存器
+            destReg = Armv8FPUReg.getArmv8FloatReg(0); // 可以改为分配一个可用的浮点寄存器
+        } else {
+            // 整数使用通用寄存器
+            destReg = Armv8Reg.allocateReg();
+        }
         value2Reg.put(ins, destReg);
         
         // 处理指针操作数
-        Armv8Reg baseReg;
+        Armv8Reg baseReg = null;
         Armv8Operand offsetOp = new Armv8Imm(0); // 默认偏移量为0
         
         // 处理各种类型的指针
@@ -864,11 +942,58 @@ public class Armv8CodeGen {
             // 使用栈指针加上偏移量
             baseReg = Armv8CPUReg.getArmv8SpReg();
             offsetOp = new Armv8Imm(ptr2Offset.get(pointer).intValue());
+        } else if (pointer instanceof Argument) {
+            // 处理函数参数，为其分配寄存器
+            Argument arg = (Argument) pointer;
+            int argIndex = arg.getIndex();
+            
+            // 如果是浮点类型参数或指向浮点类型的指针
+            boolean isFloatPointer = pointer.getType() instanceof PointerType && 
+                                  ((PointerType)pointer.getType()).getElementType() instanceof FloatType;
+            
+            // 根据ABI规则，前8个参数使用寄存器传递
+            if (argIndex < 8) {
+                // 检查是否是浮点类型或指向浮点类型的指针
+                if (isFloatPointer || pointer.getType() instanceof FloatType) {
+                    // 浮点参数使用v0-v7寄存器
+                    baseReg = Armv8FPUReg.getArmv8FloatReg(argIndex);
+                } else {
+                    // 整数参数使用x0-x7寄存器
+                    baseReg = Armv8CPUReg.getArmv8ArgReg(argIndex);
+                }
+            } else {
+                // 超过8个参数的部分使用栈传递，这里简化处理，分配一个通用寄存器
+                baseReg = Armv8Reg.allocateReg();
+                
+                // 计算参数在栈上的位置并加载
+                // 这里需要更复杂的实现...
+            }
+            
+            value2Reg.put(pointer, baseReg);
         } else {
             // 其他类型的指针，尝试获取关联的寄存器
             if (!value2Reg.containsKey(pointer)) {
                 if (pointer instanceof Instruction) {
                     parseInstruction((Instruction) pointer, true);
+                } else if (pointer.getType() instanceof PointerType) {
+                    // 处理指针类型
+                    Armv8Reg ptrReg = Armv8Reg.allocateReg();
+                    value2Reg.put(pointer, ptrReg);
+                } else if (pointer.getType() instanceof FloatType) {
+                    // 处理浮点类型
+                    Armv8FPUReg floatReg = Armv8FPUReg.getArmv8FloatReg(0);
+                    for (int i = 0; i < 32; i++) {
+                        // 尝试找一个未使用的浮点寄存器
+                        if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                            floatReg = Armv8FPUReg.getArmv8FloatReg(i);
+                            break;
+                        }
+                    }
+                    value2Reg.put(pointer, floatReg);
+                } else if (pointer.getType() instanceof IntegerType) {
+                    // 处理整数类型
+                    Armv8Reg cpuReg = Armv8Reg.allocateReg();
+                    value2Reg.put(pointer, cpuReg);
                 } else {
                     throw new RuntimeException("未处理的指针类型: " + pointer);
                 }
@@ -876,9 +1001,21 @@ public class Armv8CodeGen {
             baseReg = value2Reg.get(pointer);
         }
         
+        // 确保baseReg一定有值
+        if (baseReg == null) {
+            throw new RuntimeException("无法确定指针的基地址寄存器: " + pointer);
+        }
+        
         // 创建加载指令
-        Armv8Load loadInst = new Armv8Load(baseReg, offsetOp, destReg, is32Bit);
-        addInstr(loadInst, insList, predefine);
+        if (isFloat) {
+            // 对于浮点数，需要使用特殊的加载指令
+            Armv8FLoad loadInst = new Armv8FLoad(baseReg, offsetOp, (Armv8FPUReg)destReg, is32Bit);
+            addInstr(loadInst, insList, predefine);
+        } else {
+            // 对于整数，使用通用加载指令
+            Armv8Load loadInst = new Armv8Load(baseReg, offsetOp, destReg, is32Bit);
+            addInstr(loadInst, insList, predefine);
+        }
         
         // 如果是预定义阶段，存储指令列表
         if (predefine) {
@@ -899,8 +1036,8 @@ public class Armv8CodeGen {
         value2Reg.put(ins, destReg);
         
         // 处理基地址指针
-        Armv8Reg baseReg;
-        
+        Armv8Reg baseReg = null;
+
         if (pointer instanceof GlobalVariable) {
             // 如果基地址是全局变量
             String globalName = removeLeadingAt(((GlobalVariable) pointer).getName());
@@ -924,18 +1061,70 @@ public class Armv8CodeGen {
             operands.add(Armv8CPUReg.getArmv8SpReg());
             operands.add(new Armv8Imm(ptr2Offset.get(pointer).intValue()));
             
-            Armv8Binary addInst = new Armv8Binary(operands, baseReg, Armv8Binary.Armv8BinaryType.add, true);
+            Armv8Binary addInst = new Armv8Binary(operands, baseReg, Armv8Binary.Armv8BinaryType.add, false);
             addInstr(addInst, insList, predefine);
+        } else if (pointer instanceof Argument) {
+            // 处理函数参数，为其分配寄存器
+            Argument arg = (Argument) pointer;
+            int argIndex = arg.getIndex();
+            
+            // 如果是浮点类型参数或指向浮点类型的指针
+            boolean isFloatPointer = pointer.getType() instanceof PointerType && 
+                                  ((PointerType)pointer.getType()).getElementType() instanceof FloatType;
+            
+            // 根据ABI规则，前8个参数使用寄存器传递
+            if (argIndex < 8) {
+                // 检查是否是浮点类型或指向浮点类型的指针
+                if (isFloatPointer || pointer.getType() instanceof FloatType) {
+                    // 浮点参数使用v0-v7寄存器
+                    baseReg = Armv8FPUReg.getArmv8FloatReg(argIndex);
+                } else {
+                    // 整数参数使用x0-x7寄存器
+                    baseReg = Armv8CPUReg.getArmv8ArgReg(argIndex);
+                }
+            } else {
+                // 超过8个参数的部分使用栈传递，这里简化处理，分配一个通用寄存器
+                baseReg = Armv8Reg.allocateReg();
+                
+                // 计算参数在栈上的位置并加载
+                // 这里需要更复杂的实现...
+            }
+            
+            value2Reg.put(pointer, baseReg);
         } else {
-            // 其他类型的指针（如函数参数或其他指令的结果）
+            // 其他类型的指针（如其他指令的结果）
             if (!value2Reg.containsKey(pointer)) {
                 if (pointer instanceof Instruction) {
                     parseInstruction((Instruction) pointer, true);
+                } else if (pointer.getType() instanceof PointerType) {
+                    // 处理指针类型
+                    Armv8Reg ptrReg = Armv8Reg.allocateReg();
+                    value2Reg.put(pointer, ptrReg);
+                } else if (pointer.getType() instanceof FloatType) {
+                    // 处理浮点类型
+                    Armv8FPUReg floatReg = Armv8FPUReg.getArmv8FloatReg(0);
+                    for (int i = 0; i < 32; i++) {
+                        // 尝试找一个未使用的浮点寄存器
+                        if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                            floatReg = Armv8FPUReg.getArmv8FloatReg(i);
+                            break;
+                        }
+                    }
+                    value2Reg.put(pointer, floatReg);
+                } else if (pointer.getType() instanceof IntegerType) {
+                    // 处理整数类型
+                    Armv8Reg cpuReg = Armv8Reg.allocateReg();
+                    value2Reg.put(pointer, cpuReg);
                 } else {
                     throw new RuntimeException("未处理的指针类型: " + pointer);
                 }
             }
             baseReg = value2Reg.get(pointer);
+        }
+        
+        // 确保baseReg一定有值
+        if (baseReg == null) {
+            throw new RuntimeException("无法确定指针的基地址寄存器: " + pointer);
         }
         
         // 先将基地址复制到目标寄存器
@@ -984,7 +1173,7 @@ public class Armv8CodeGen {
                 Armv8Reg tempReg = Armv8Reg.allocateReg();
                 if (elementSize != 1) {
                     // 先将索引值乘以元素大小
-                    Armv8Move moveInst = new Armv8Move(tempReg, new Armv8Imm((int)elementSize), true);
+                    Armv8Move moveInst = new Armv8Move(tempReg, new Armv8Imm((int)elementSize), false);
                     addInstr(moveInst, insList, predefine);
                     
                     // 使用Armv8Binary创建乘法指令
@@ -1044,14 +1233,44 @@ public class Armv8CodeGen {
             // 如果返回值是常量
             if (returnValue instanceof ConstantInt) {
                 // 加载立即数到返回寄存器
-                Armv8Move moveInst = new Armv8Move(returnReg, new Armv8Imm((int)((ConstantInt)returnValue).getValue()), true);
+                Armv8Move moveInst = new Armv8Move(returnReg, new Armv8Imm((int)((ConstantInt)returnValue).getValue()), false);
                 addInstr(moveInst, insList, predefine);
             }
             else if (returnValue instanceof ConstantFloat) {
-                // 处理浮点常量的存储
-                // 注意：可能需要特殊处理浮点常量的加载
-                // 这部分可能需要根据具体实现调整
-                System.err.println("警告: 浮点常量返回值尚未完全实现");
+                // 处理浮点常量的返回
+                double floatValue = ((ConstantFloat) returnValue).getValue();
+                
+                // 处理浮点常量和浮点寄存器之间的转换
+                // 先将浮点数转换为原始二进制表示
+                long bits = Double.doubleToRawLongBits(floatValue);
+                
+                // 分配一个通用寄存器用于存放位模式 - 使用x9作为临时寄存器(调用者保存)
+                Armv8CPUReg tempReg = Armv8CPUReg.getArmv8CPUReg(9);
+                
+                // 使用MOVZ和MOVK指令加载64位浮点值的位模式到通用寄存器
+                // 加载低16位
+                Armv8Move movzInst = new Armv8Move(tempReg, new Armv8Imm((int)(bits & 0xFFFF)), false, false, Armv8Move.MoveType.MOVZ);
+                addInstr(movzInst, insList, predefine);
+                
+                // 加载第二个16位块
+                Armv8Move movk1Inst = new Armv8Move(tempReg, new Armv8Imm((int)((bits >> 16) & 0xFFFF)), false, false, Armv8Move.MoveType.MOVK);
+                movk1Inst.setShift(16);
+                addInstr(movk1Inst, insList, predefine);
+                
+                // 加载第三个16位块
+                Armv8Move movk2Inst = new Armv8Move(tempReg, new Armv8Imm((int)((bits >> 32) & 0xFFFF)), false, false, Armv8Move.MoveType.MOVK);
+                movk2Inst.setShift(32);
+                addInstr(movk2Inst, insList, predefine);
+                
+                // 加载最高16位
+                Armv8Move movk3Inst = new Armv8Move(tempReg, new Armv8Imm((int)((bits >> 48) & 0xFFFF)), false, false, Armv8Move.MoveType.MOVK);
+                movk3Inst.setShift(48);
+                addInstr(movk3Inst, insList, predefine);
+                
+                // 使用FMOV指令将通用寄存器的位模式移动到浮点寄存器
+                boolean is64Bit = returnValue.getType().getSize() == 8; // 判断是否为64位浮点
+                Armv8Fmov fmovInst = new Armv8Fmov((Armv8FPUReg)returnReg, tempReg, is64Bit);
+                addInstr(fmovInst, insList, predefine);
             }
             else {
                 // 如果是变量，需要确保已经有关联的寄存器
@@ -1065,14 +1284,49 @@ public class Armv8CodeGen {
                 
                 // 将值移动到返回寄存器
                 Armv8Reg sourceReg = value2Reg.get(returnValue);
-                Armv8Move moveInst = new Armv8Move(returnReg, sourceReg, returnValue.getType() instanceof IntegerType);
-                addInstr(moveInst, insList, predefine);
+                
+                if (returnValue.getType() instanceof FloatType) {
+                    // 浮点类型移动
+                    Armv8Move moveInst = new Armv8Move(returnReg, sourceReg, false);
+                    addInstr(moveInst, insList, predefine);
+                } else {
+                    // 整数类型移动
+                    Armv8Move moveInst = new Armv8Move(returnReg, sourceReg, false);
+                    addInstr(moveInst, insList, predefine);
+                }
             }
         }
+        
+        // 获取函数的栈大小，用于返回前的栈指针调整
+        Armv8CPUReg fpReg = Armv8CPUReg.getArmv8FPReg();  // x29寄存器(FP)
+        Armv8CPUReg lrReg = Armv8CPUReg.getArmv8CPUReg(Armv8Reg.REG_X30);  // x30寄存器(LR)
+        Armv8CPUReg spReg = Armv8CPUReg.getArmv8SpReg();  // sp寄存器
+        
+        // 获取函数的栈大小，不包括保存FP和LR的16字节
+        int localSize = curArmv8Function.getStackSize();
+        if (localSize > 0) {
+            // 如果有局部变量空间，先调整SP释放局部变量空间
+            ArrayList<Armv8Operand> operands = new ArrayList<>();
+            operands.add(spReg);
+            operands.add(new Armv8Imm(localSize));
+            Armv8Binary addSpInst = new Armv8Binary(operands, spReg, Armv8Binary.Armv8BinaryType.add, false);
+            addInstr(addSpInst, insList, predefine);
+        }
+        
+        // 恢复FP(x29)和LR(x30)寄存器，并调整SP
+        // 使用后索引寻址模式，等效于ldp x29, x30, [sp], #16
+        Armv8LoadPair ldpInst = new Armv8LoadPair(spReg, new Armv8Imm(16), fpReg, lrReg, 
+                                               false, false, true); // 不是32位，后索引模式
+        addInstr(ldpInst, insList, predefine);
         
         // 添加返回指令
         Armv8Ret retInst = new Armv8Ret();
         addInstr(retInst, insList, predefine);
+        
+        // 标记当前基本块包含返回指令
+        if (!predefine) {
+            curArmv8Block.setHasReturnInstruction(true);
+        }
         
         // 如果是预定义阶段，存储指令列表
         if (predefine) {
@@ -1089,7 +1343,7 @@ public class Armv8CodeGen {
         Value pointer = ins.getPointer();
         
         // 判断是否是32位存储（整型存储情况）
-        boolean is32Bit = !(valueToStore.getType() instanceof FloatType);
+        boolean is32Bit = false;
         
         // 处理待存储值，获取或创建包含值的寄存器
         Armv8Reg valueReg;
@@ -1097,20 +1351,71 @@ public class Armv8CodeGen {
         if (valueToStore instanceof ConstantInt) {
             // 对于整数常量，创建一个临时寄存器并加载值
             valueReg = Armv8Reg.allocateReg();
-            Armv8Move moveInst = new Armv8Move(valueReg, new Armv8Imm((int)((ConstantInt)valueToStore).getValue()), true);
+            Armv8Move moveInst = new Armv8Move(valueReg, new Armv8Imm((int)((ConstantInt)valueToStore).getValue()), false);
             addInstr(moveInst, insList, predefine);
         } 
         else if (valueToStore instanceof ConstantFloat) {
             // 处理浮点常量的存储
-            // 注意：可能需要特殊处理浮点常量的加载
-            valueReg = Armv8Reg.allocateReg();
-            System.err.println("警告: 浮点常量存储尚未完全实现");
+            double floatValue = ((ConstantFloat) valueToStore).getValue();
+            
+            // 为浮点常量分配寄存器
+            Armv8FPUReg fpuReg = Armv8FPUReg.getArmv8FloatReg(0); // 使用v0作为临时寄存器
+            
+            // 先将浮点数转换为原始二进制表示
+            long bits = Double.doubleToRawLongBits(floatValue);
+            
+            // 分配一个通用寄存器用于存放位模式 - 使用x9作为临时寄存器(调用者保存)
+            Armv8CPUReg tempReg = Armv8CPUReg.getArmv8CPUReg(9);
+            
+            // 使用MOVZ和MOVK指令加载64位浮点值的位模式到通用寄存器
+            // 加载低16位
+            Armv8Move movzInst = new Armv8Move(tempReg, new Armv8Imm((int)(bits & 0xFFFF)), false, false, Armv8Move.MoveType.MOVZ);
+            addInstr(movzInst, insList, predefine);
+            
+            // 加载第二个16位块
+            Armv8Move movk1Inst = new Armv8Move(tempReg, new Armv8Imm((int)((bits >> 16) & 0xFFFF)), false, false, Armv8Move.MoveType.MOVK);
+            movk1Inst.setShift(16);
+            addInstr(movk1Inst, insList, predefine);
+            
+            // 加载第三个16位块
+            Armv8Move movk2Inst = new Armv8Move(tempReg, new Armv8Imm((int)((bits >> 32) & 0xFFFF)), false, false, Armv8Move.MoveType.MOVK);
+            movk2Inst.setShift(32);
+            addInstr(movk2Inst, insList, predefine);
+            
+            // 加载最高16位
+            Armv8Move movk3Inst = new Armv8Move(tempReg, new Armv8Imm((int)((bits >> 48) & 0xFFFF)), false, false, Armv8Move.MoveType.MOVK);
+            movk3Inst.setShift(48);
+            addInstr(movk3Inst, insList, predefine);
+            
+            // 使用FMOV指令将通用寄存器的位模式移动到浮点寄存器
+            Armv8Fmov fmovInst = new Armv8Fmov(fpuReg, tempReg, !is32Bit); // 传递是64位操作的布尔值
+            addInstr(fmovInst, insList, predefine);
+            
+            // 将浮点寄存器设为当前值的存储位置
+            valueReg = fpuReg;
         }
         else {
             // 对于变量，确保已经有关联的寄存器
             if (!value2Reg.containsKey(valueToStore)) {
                 if (valueToStore instanceof Instruction) {
                     parseInstruction((Instruction)valueToStore, true);
+                } else if (valueToStore.getType() instanceof FloatType) {
+                    // 处理浮点变量
+                    // 分配一个浮点寄存器
+                    Armv8FPUReg floatReg = Armv8FPUReg.getArmv8FloatReg(0);
+                    for (int i = 0; i < 32; i++) {
+                        // 尝试找一个未使用的浮点寄存器
+                        if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                            floatReg = Armv8FPUReg.getArmv8FloatReg(i);
+                            break;
+                        }
+                    }
+                    value2Reg.put(valueToStore, floatReg);
+                } else if (valueToStore.getType() instanceof IntegerType) {
+                    // 处理整数变量
+                    // 分配一个通用寄存器
+                    Armv8Reg cpuReg = Armv8Reg.allocateReg();
+                    value2Reg.put(valueToStore, cpuReg);
                 } else {
                     throw new RuntimeException("未处理的存储值类型: " + valueToStore);
                 }
@@ -1119,7 +1424,7 @@ public class Armv8CodeGen {
         }
         
         // 处理指针操作数
-        Armv8Reg baseReg;
+        Armv8Reg baseReg = Armv8Reg.allocateReg();  // 默认分配一个寄存器
         Armv8Operand offsetOp = new Armv8Imm(0); // 默认偏移量为0
         
         // 处理各种类型的指针
@@ -1160,6 +1465,34 @@ public class Armv8CodeGen {
             // 使用栈指针加上偏移量
             baseReg = Armv8CPUReg.getArmv8SpReg();
             offsetOp = new Armv8Imm(ptr2Offset.get(pointer).intValue());
+        } else if (pointer instanceof Argument) {
+            // 处理函数参数，为其分配寄存器
+            Argument arg = (Argument) pointer;
+            int argIndex = arg.getIndex();
+            
+            // 如果是浮点类型参数或指向浮点类型的指针
+            boolean isFloatPointer = pointer.getType() instanceof PointerType && 
+                                  ((PointerType)pointer.getType()).getElementType() instanceof FloatType;
+            
+            // 根据ABI规则，前8个参数使用寄存器传递
+            if (argIndex < 8) {
+                // 检查是否是浮点类型或指向浮点类型的指针
+                if (isFloatPointer || pointer.getType() instanceof FloatType) {
+                    // 浮点参数使用v0-v7寄存器
+                    baseReg = Armv8FPUReg.getArmv8FloatReg(argIndex);
+                } else {
+                    // 整数参数使用x0-x7寄存器
+                    baseReg = Armv8CPUReg.getArmv8ArgReg(argIndex);
+                }
+            } else {
+                // 超过8个参数的部分使用栈传递，这里简化处理，分配一个通用寄存器
+                baseReg = Armv8Reg.allocateReg();
+                
+                // 计算参数在栈上的位置并加载
+                // 这里需要更复杂的实现...
+            }
+            
+            value2Reg.put(pointer, baseReg);
         } else {
             // 其他类型的指针，尝试获取关联的寄存器
             if (!value2Reg.containsKey(pointer)) {
@@ -1172,9 +1505,21 @@ public class Armv8CodeGen {
             baseReg = value2Reg.get(pointer);
         }
         
+        // 确保baseReg一定有值
+        if (baseReg == null) {
+            throw new RuntimeException("无法确定指针的基地址寄存器: " + pointer);
+        }
+        
         // 创建存储指令
-        Armv8Store storeInst = new Armv8Store(valueReg, baseReg, offsetOp, is32Bit);
-        addInstr(storeInst, insList, predefine);
+        if (valueReg instanceof Armv8FPUReg) {
+            // 对于浮点数，使用专门的浮点存储指令
+            Armv8FStore storeInst = new Armv8FStore((Armv8FPUReg)valueReg, baseReg, offsetOp, is32Bit);
+            addInstr(storeInst, insList, predefine);
+        } else {
+            // 对于整数，使用普通存储指令
+            Armv8Store storeInst = new Armv8Store(valueReg, baseReg, offsetOp, is32Bit);
+            addInstr(storeInst, insList, predefine);
+        }
         
         // 如果是预定义阶段，存储指令列表
         if (predefine) {
@@ -1198,15 +1543,46 @@ public class Armv8CodeGen {
         // 处理左操作数
         Armv8Operand leftOp;
         if (left instanceof ConstantInt) {
-            // 对于常量，创建立即数操作数
+            // 对于整数常量，创建立即数操作数
             long value = ((ConstantInt) left).getValue();
             leftOp = new Armv8Imm((int) value);
+        } else if (left instanceof ConstantFloat) {
+            // 处理浮点常量
+            double floatValue = ((ConstantFloat) left).getValue();
+            
+            // 为浮点常量分配寄存器
+            Armv8FPUReg fpuReg = Armv8FPUReg.getArmv8FloatReg(0);
+            for (int i = 0; i < 32; i++) {
+                if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                    fpuReg = Armv8FPUReg.getArmv8FloatReg(i);
+                    break;
+                }
+            }
+            
+            // 加载浮点常量到寄存器
+            loadFloatConstant(fpuReg, floatValue, insList, predefine);
+            
+            leftOp = fpuReg;
         } else {
             // 对于变量，使用寄存器
             if (!value2Reg.containsKey(left)) {
-                Armv8Reg leftReg = Armv8Reg.allocateReg();
-                value2Reg.put(left, leftReg);
-                leftOp = leftReg;
+                if (left.getType() instanceof FloatType) {
+                    // 浮点类型使用浮点寄存器
+                    Armv8FPUReg leftReg = Armv8FPUReg.getArmv8FloatReg(0);
+                    for (int i = 0; i < 32; i++) {
+                        if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                            leftReg = Armv8FPUReg.getArmv8FloatReg(i);
+                            break;
+                        }
+                    }
+                    value2Reg.put(left, leftReg);
+                    leftOp = leftReg;
+                } else {
+                    // 整数类型使用通用寄存器
+                    Armv8Reg leftReg = Armv8Reg.allocateReg();
+                    value2Reg.put(left, leftReg);
+                    leftOp = leftReg;
+                }
             } else {
                 leftOp = value2Reg.get(left);
             }
@@ -1215,22 +1591,53 @@ public class Armv8CodeGen {
         // 处理右操作数
         Armv8Operand rightOp;
         if (right instanceof ConstantInt) {
-            // 对于常量，创建立即数操作数
+            // 对于整数常量，创建立即数操作数
             long value = ((ConstantInt) right).getValue();
             rightOp = new Armv8Imm((int) value);
+        } else if (right instanceof ConstantFloat) {
+            // 处理浮点常量
+            double floatValue = ((ConstantFloat) right).getValue();
+            
+            // 为浮点常量分配寄存器
+            Armv8FPUReg fpuReg = Armv8FPUReg.getArmv8FloatReg(0);
+            for (int i = 0; i < 32; i++) {
+                if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                    fpuReg = Armv8FPUReg.getArmv8FloatReg(i);
+                    break;
+                }
+            }
+            
+            // 加载浮点常量到寄存器
+            loadFloatConstant(fpuReg, floatValue, insList, predefine);
+            
+            rightOp = fpuReg;
         } else {
             // 对于变量，使用寄存器
             if (!value2Reg.containsKey(right)) {
-                Armv8Reg rightReg = Armv8Reg.allocateReg();
-                value2Reg.put(right, rightReg);
-                rightOp = rightReg;
+                if (right.getType() instanceof FloatType) {
+                    // 浮点类型使用浮点寄存器
+                    Armv8FPUReg rightReg = Armv8FPUReg.getArmv8FloatReg(0);
+                    for (int i = 0; i < 32; i++) {
+                        if (!value2Reg.containsValue(Armv8FPUReg.getArmv8FloatReg(i))) {
+                            rightReg = Armv8FPUReg.getArmv8FloatReg(i);
+                            break;
+                        }
+                    }
+                    value2Reg.put(right, rightReg);
+                    rightOp = rightReg;
+                } else {
+                    // 整数类型使用通用寄存器
+                    Armv8Reg rightReg = Armv8Reg.allocateReg();
+                    value2Reg.put(right, rightReg);
+                    rightOp = rightReg;
+                }
             } else {
                 rightOp = value2Reg.get(right);
             }
         }
         
         // 创建比较指令
-        boolean is32Bit = true; // 默认使用32位比较
+        boolean is32Bit = false; // 使用64位比较
         Armv8Compare.CmpType cmpType = isFloat ? Armv8Compare.CmpType.fcmp : Armv8Compare.CmpType.cmp;
         Armv8Compare compareInst = new Armv8Compare(leftOp, rightOp, cmpType, is32Bit);
         addInstr(compareInst, insList, predefine);
@@ -1245,28 +1652,40 @@ public class Armv8CodeGen {
                 condType = Armv8Tools.CondType.ne;
                 break;
             case SGT:
-                condType = Armv8Tools.CondType.gt;
+                condType = isFloat ? Armv8Tools.CondType.gt : Armv8Tools.CondType.gt;
                 break;
             case SGE:
-                condType = Armv8Tools.CondType.ge;
+                condType = isFloat ? Armv8Tools.CondType.ge : Armv8Tools.CondType.ge;
                 break;
             case SLT:
-                condType = Armv8Tools.CondType.lt;
+                condType = isFloat ? Armv8Tools.CondType.lt : Armv8Tools.CondType.lt;
                 break;
             case SLE:
-                condType = Armv8Tools.CondType.le;
+                condType = isFloat ? Armv8Tools.CondType.le : Armv8Tools.CondType.le;
                 break;
             case UGT:
-                condType = Armv8Tools.CondType.hi; // 无符号大于
+                condType = isFloat ? Armv8Tools.CondType.hi : Armv8Tools.CondType.hi; // 浮点无序大于
                 break;
             case UGE:
-                condType = Armv8Tools.CondType.cs; // 无符号大于等于
+                condType = isFloat ? Armv8Tools.CondType.cs : Armv8Tools.CondType.cs; // 浮点无序大于等于
                 break;
             case ULT:
-                condType = Armv8Tools.CondType.cc; // 无符号小于
+                condType = isFloat ? Armv8Tools.CondType.cc : Armv8Tools.CondType.cc; // 浮点无序小于
                 break;
             case ULE:
-                condType = Armv8Tools.CondType.ls; // 无符号小于等于
+                condType = isFloat ? Armv8Tools.CondType.ls : Armv8Tools.CondType.ls; // 浮点无序小于等于
+                break;
+            case UNE:
+                // 浮点无序不等于 (ARM中的vs, overflow set)
+                condType = Armv8Tools.CondType.vs;
+                break;
+            case ORD:
+                // 浮点有序 (ARM中的vc, overflow clear)
+                condType = Armv8Tools.CondType.vc;
+                break;
+            case UNO:
+                // 浮点无序 (ARM中的vs, overflow set)
+                condType = Armv8Tools.CondType.vs;
                 break;
             default:
                 System.err.println("不支持的比较谓词: " + predicate);
@@ -1334,7 +1753,7 @@ public class Armv8CodeGen {
             
             // 创建移动指令，将输入值移动到目标寄存器
             // 注意：这些指令将被添加到前驱块的末尾，在跳转指令之前
-            boolean is32Bit = ins.getType() instanceof IntegerType;
+            boolean is32Bit = false;
             
             // 创建移动指令
             Armv8Move moveInst;
@@ -1397,7 +1816,7 @@ public class Armv8CodeGen {
         }
         
         // 根据操作码生成对应的ARM指令
-        boolean is32Bit = true; // 默认使用32位操作
+        boolean is32Bit = false; // 使用64位操作
         
         switch (opCode) {
             case NEG: // 取负操作
@@ -1432,9 +1851,9 @@ public class Armv8CodeGen {
         }
     }
 
-    public void dump() {
+    public void dump(String outputFilePath) {
         try {
-            BufferedWriter out = new BufferedWriter(new FileWriter("armv8_backend.s"));
+            BufferedWriter out = new BufferedWriter(new FileWriter(outputFilePath));
             out.write(armv8Module.toString());
             out.close();
         } catch (IOException e) {
@@ -1444,5 +1863,45 @@ public class Armv8CodeGen {
 
     public Armv8Module getArmv8Module() {
         return armv8Module;
+    }
+
+    /**
+     * 加载浮点常量到寄存器
+     * @param destReg 目标浮点寄存器
+     * @param value 要加载的浮点值
+     * @param insList 指令列表
+     * @param predefine 是否是预定义阶段
+     */
+    private void loadFloatConstant(Armv8FPUReg destReg, double value, ArrayList<Armv8Instruction> insList, boolean predefine) {
+        // 先将浮点数转换为原始二进制表示
+        long bits = Double.doubleToRawLongBits(value);
+        
+        // 分配一个通用寄存器用于存放位模式
+        Armv8CPUReg tempReg = Armv8CPUReg.getArmv8CPUReg(9);
+        
+        // 使用MOVZ和MOVK指令加载64位浮点值的位模式到通用寄存器
+        // 加载低16位
+        Armv8Move movzInst = new Armv8Move(tempReg, new Armv8Imm((int)(bits & 0xFFFF)), false, false, Armv8Move.MoveType.MOVZ);
+        addInstr(movzInst, insList, predefine);
+        
+        // 加载第二个16位块
+        Armv8Move movk1Inst = new Armv8Move(tempReg, new Armv8Imm((int)((bits >> 16) & 0xFFFF)), false, false, Armv8Move.MoveType.MOVK);
+        movk1Inst.setShift(16);
+        addInstr(movk1Inst, insList, predefine);
+        
+        // 加载第三个16位块
+        Armv8Move movk2Inst = new Armv8Move(tempReg, new Armv8Imm((int)((bits >> 32) & 0xFFFF)), false, false, Armv8Move.MoveType.MOVK);
+        movk2Inst.setShift(32);
+        addInstr(movk2Inst, insList, predefine);
+        
+        // 加载最高16位
+        Armv8Move movk3Inst = new Armv8Move(tempReg, new Armv8Imm((int)((bits >> 48) & 0xFFFF)), false, false, Armv8Move.MoveType.MOVK);
+        movk3Inst.setShift(48);
+        addInstr(movk3Inst, insList, predefine);
+        
+        // 使用FMOV指令将通用寄存器的位模式移动到浮点寄存器
+        boolean is64Bit = true; // 传递是64位操作的布尔值
+        Armv8Fmov fmovInst = new Armv8Fmov(destReg, tempReg, is64Bit);
+        addInstr(fmovInst, insList, predefine);
     }
 } 

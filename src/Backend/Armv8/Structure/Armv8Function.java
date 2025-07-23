@@ -83,13 +83,18 @@ public class Armv8Function {
             sb.append(block.toString());
         }
         
-        // 只有当最后一个块没有返回指令时才生成结语
-        if (!blocks.isEmpty()) {
-            Armv8Block lastBlock = blocks.get(blocks.size() - 1);
-            if (lastBlock.getInstructions().isEmpty() || 
-                !(lastBlock.getInstructions().getLast() instanceof Armv8Instruction.Armv8Ret)) {
-                sb.append(generateEpilogue());
+        // 检查所有块是否有返回指令
+        boolean hasRetInstruction = false;
+        for (Armv8Block block : blocks) {
+            if (block.hasReturnInstruction()) {
+                hasRetInstruction = true;
+                break;
             }
+        }
+        
+        // 如果没有找到返回指令，生成结语
+        if (!hasRetInstruction) {
+            sb.append(generateEpilogue());
         }
         
         return sb.toString();

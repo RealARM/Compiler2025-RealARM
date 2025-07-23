@@ -9,3 +9,10 @@
 /target
 /armv8_backend.s
 /testcode.txt
+/run_arm_compiler.ps1
+/ARM_output
+/ARM_h_functional
+/ARM_functional
+/ARM_performance
+/IR_output
+/bin

@@ -1,7 +1,10 @@
 package Backend.Armv8.Structure;
 
 import Backend.Armv8.Instruction.Armv8Instruction;
+import Backend.Armv8.Instruction.Armv8Jump;
+import Backend.Armv8.Instruction.Armv8Branch;
 import Backend.Armv8.Operand.Armv8Label;
+import Backend.Armv8.tools.Armv8Tools;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
@@ -11,6 +14,7 @@ public class Armv8Block extends Armv8Label {
     private LinkedList<Armv8Instruction> instructions = new LinkedList<>();
     private LinkedHashSet<Armv8Block> preds = new LinkedHashSet<>();
     private LinkedHashSet<Armv8Block> succs = new LinkedHashSet<>();
+    private boolean hasReturnInstruction = false; // 标记块是否包含返回指令
 
     public Armv8Block(String name) {
         super(name);
@@ -18,6 +22,18 @@ public class Armv8Block extends Armv8Label {
 
     public void addArmv8Instruction(Armv8Instruction instruction) {
         instructions.add(instruction);
+        // 如果添加的是返回指令，设置标记
+        if (instruction instanceof Armv8Instruction.Armv8Ret) {
+            hasReturnInstruction = true;
+        }
+    }
+
+    public void setHasReturnInstruction(boolean hasRet) {
+        this.hasReturnInstruction = hasRet;
+    }
+
+    public boolean hasReturnInstruction() {
+        return hasReturnInstruction;
     }
 
     public void addPreds(Armv8Block block) {
@@ -78,7 +94,31 @@ public class Armv8Block extends Armv8Label {
         StringBuilder sb = new StringBuilder();
         sb.append(getLabelName()).append(":\n");
         for (Armv8Instruction instruction : instructions) {
-            sb.append("\t").append(instruction).append("\n");
+            sb.append("\t");
+            // 避免循环调用，对于跳转指令特殊处理
+            if (instruction instanceof Armv8Jump || 
+                instruction instanceof Armv8Branch) {
+                // 只显示指令名称和目标标签名，不调用指令的toString
+                if (instruction instanceof Armv8Jump) {
+                    sb.append("b\t");
+                } else if (instruction instanceof Armv8Branch) {
+                    Armv8Branch branch = (Armv8Branch) instruction;
+                    sb.append("b").append(Armv8Tools.getCondString(branch.getType())).append("\t");
+                }
+                
+                // 获取目标块名称
+                if (instruction.getOperands().size() > 0 && 
+                    instruction.getOperands().get(0) instanceof Armv8Block) {
+                    Armv8Block targetBlock = (Armv8Block) instruction.getOperands().get(0);
+                    sb.append(targetBlock.getLabelName());
+                } else {
+                    sb.append(instruction);
+                }
+            } else {
+                // 其他指令正常调用toString
+                sb.append(instruction);
+            }
+            sb.append("\n");
         }
         return sb.toString();
     }

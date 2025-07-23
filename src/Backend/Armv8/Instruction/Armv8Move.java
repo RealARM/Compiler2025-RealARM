@@ -18,6 +18,7 @@ public class Armv8Move extends Armv8Instruction {
     private final boolean is32Bit; // 是否是32位(w寄存器)而非64位(x寄存器)
     private final boolean isImmediate; // 是否是立即数操作数
     private final MoveType moveType; // 移动类型
+    private int shift = 0; // 移位值，用于MOVZ/MOVK指令
 
     /**
      * 构造一个Move指令
@@ -59,6 +60,21 @@ public class Armv8Move extends Armv8Instruction {
         this.isImmediate = isImmediate;
         this.is32Bit = is32Bit;
         this.moveType = moveType;
+    }
+
+    /**
+     * 设置指令的移位值（用于MOVZ/MOVK指令）
+     * @param shift 移位值（0、16、32或48）
+     */
+    public void setShift(int shift) {
+        this.shift = shift;
+    }
+
+    /**
+     * 获取移位值
+     */
+    public int getShift() {
+        return shift;
     }
 
     /**
@@ -121,6 +137,11 @@ public class Armv8Move extends Armv8Instruction {
         } else {
             // 立即数或其他操作数直接添加
             sb.append(srcOp.toString());
+        }
+
+        // 添加移位信息（如果有）
+        if (shift > 0) {
+            sb.append(", lsl #").append(shift);
         }
         
         return sb.toString();

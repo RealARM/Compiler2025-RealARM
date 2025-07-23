@@ -14,6 +14,11 @@ public class Armv8Jump extends Armv8Instruction {
 
     @Override
     public String toString() {
-        return "b\t" + getOperands().get(0);
+        if (getOperands().size() > 0 && getOperands().get(0) instanceof Armv8Block) {
+            Armv8Block targetBlock = (Armv8Block) getOperands().get(0);
+            return "b\t" + targetBlock.getLabelName();
+        } else {
+            return "b\t" + getOperands().get(0);
+        }
     }
 } 
