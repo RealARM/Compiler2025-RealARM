@@ -44,6 +44,10 @@ public class PassManager {
      * 初始化默认的优化Pass
      */
     private void initializePasses() {
+        // 常量优化
+        addIRPass(new ConstantDeduplication());
+        addIRPass(new ConstantArraySimplifier());
+        
         // 基本块处理
         addIRPass(new EmptyBlockHandler());
         
