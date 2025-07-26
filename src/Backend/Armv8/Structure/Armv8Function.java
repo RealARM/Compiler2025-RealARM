@@ -1,18 +1,42 @@
 package Backend.Armv8.Structure;
 
-import Backend.Armv8.Instruction.Armv8Instruction;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.LinkedHashMap;
+import Backend.Armv8.Operand.Armv8Imm;
+import Backend.Armv8.Operand.Armv8Reg;
+import IR.Value.Value;
+import IR.Value.Argument;
 
 public class Armv8Function {
     private String name;
     private ArrayList<Armv8Block> blocks = new ArrayList<>();
     private LinkedList<Armv8Block> blockList = new LinkedList<>();
-    private int stackSize = 0;
+    private Long stackSize = 0L;
+    private LinkedHashMap<Value, Long> stack = new LinkedHashMap<>();
+
+    private HashMap<Value, Armv8Reg> RegArgList = new HashMap<>();
+    private HashMap<Value, Long> stackArgList = new HashMap<>();
+
 
     public Armv8Function(String name) {
         this.name = name;
     }
+
+    public void addStack(Value value, Long offset) {
+        this.stack.put(value, offset);
+        this.stackSize += offset;
+    }
+
+    public void addRegArg(Value arg, Armv8Reg value) {
+        this.RegArgList.put(arg, value);
+    }
+
+    public void addStackArg(Value arg, Long offset) {
+        this.stackArgList.put(arg, offset);
+    }
+    
 
     public void addBlock(Armv8Block block) {
         this.blocks.add(block);
@@ -35,14 +59,22 @@ public class Armv8Function {
         return this.blockList;
     }
 
-    public void setStackSize(int stackSize) {
-        this.stackSize = stackSize;
-    }
-
-    public int getStackSize() {
+    public Long getStackSize() {
         return this.stackSize;
     }
-    
+
+    public LinkedHashMap<Value, Long> getStack() {
+        return this.stack;
+    }
+
+    public Armv8Reg getRegArg(Value arg) {
+        return this.RegArgList.get(arg);
+    }
+
+    public Long getStackArg(Value arg) {
+        return this.stackArgList.get(arg);
+    }
+
     // 在ARMv8中，被调用者保存的寄存器是x19-x29和SP
     // 需要在函数开始时保存这些寄存器，并在返回前恢复
     private String generatePrologue() {

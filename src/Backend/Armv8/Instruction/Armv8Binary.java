@@ -2,6 +2,7 @@ package Backend.Armv8.Instruction;
 
 import Backend.Armv8.Operand.Armv8Operand;
 import Backend.Armv8.Operand.Armv8Reg;
+import Backend.Armv8.Operand.Armv8Imm;
 
 import java.util.ArrayList;
 
@@ -9,31 +10,38 @@ public class Armv8Binary extends Armv8Instruction {
     private final Armv8BinaryType instType;
     private final int shiftBit;
     private final Armv8ShiftType shiftType;
-    private final boolean is32Bit; // 是否使用32位操作(w寄存器)而非64位(x寄存器)
+    private final Armv8Imm imm;
 
-    public Armv8Binary(ArrayList<Armv8Operand> uses, Armv8Reg defReg, Armv8BinaryType type, boolean is32Bit) {
+    public Armv8Binary(ArrayList<Armv8Operand> uses, Armv8Reg defReg, Armv8BinaryType type) {
         super(defReg, uses);
         this.instType = type;
         this.shiftBit = 0;
         this.shiftType = Armv8ShiftType.LSL;
-        this.is32Bit = is32Bit;
+        this.imm = null;
     }
 
     public Armv8Binary(ArrayList<Armv8Operand> uses, Armv8Reg defReg, int shiftBit,
-                     Armv8ShiftType shiftType, Armv8BinaryType type, boolean is32Bit) {
+                     Armv8ShiftType shiftType, Armv8BinaryType type) {
         super(defReg, uses);
         this.instType = type;
         this.shiftBit = shiftBit;
         this.shiftType = shiftType;
-        this.is32Bit = is32Bit;
+        this.imm = null;
+    }
+
+    public Armv8Binary(Armv8Reg defReg, Armv8Reg srcReg, Armv8Imm imm, Armv8BinaryType type) {
+        super(defReg, new ArrayList<Armv8Operand>() {{
+            add(srcReg);
+            add(imm);
+        }});
+        this.instType = type;
+        this.shiftBit = 0;
+        this.shiftType = Armv8ShiftType.LSL;
+        this.imm = imm;
     }
 
     public Armv8BinaryType getInstType() {
         return instType;
-    }
-
-    public boolean is32Bit() {
-        return is32Bit;
     }
 
     public enum Armv8ShiftType {
@@ -45,20 +53,17 @@ public class Armv8Binary extends Armv8Instruction {
 
     public String shiftTypeToString() {
         switch (shiftType) {
-            case LSL -> {
+            case LSL:
                 return "LSL";
-            }
-            case LSR -> {
+            case LSR:
                 return "LSR";
-            }
-            case ASR -> {
+            case ASR:
                 return "ASR";
-            }
-            case ROR -> {
+            case ROR:
                 return "ROR";
-            }
+            default:
+                return null;
         }
-        return null;
     }
 
     public enum Armv8BinaryType {
@@ -95,79 +100,60 @@ public class Armv8Binary extends Armv8Instruction {
 
     public String binaryTypeToString() {
         switch(instType) {
-            case add -> {
-                return is32Bit ? "add" : "add";
-            }
-            case adds -> {
-                return is32Bit ? "adds" : "adds";
-            }
-            case sub -> {
-                return is32Bit ? "sub" : "sub";
-            }
-            case subs -> {
-                return is32Bit ? "subs" : "subs";
-            }
-            case mul -> {
-                return is32Bit ? "mul" : "mul";
-            }
-            case sdiv -> {
-                return is32Bit ? "sdiv" : "sdiv";
-            }
-            case udiv -> {
-                return is32Bit ? "udiv" : "udiv";
-            }
-            case msub -> {
-                return is32Bit ? "msub" : "msub";
-            }
-            case madd -> {
-                return is32Bit ? "madd" : "madd";
-            }
-            case and -> {
-                return is32Bit ? "and" : "and";
-            }
-            case ands -> {
-                return is32Bit ? "ands" : "ands";
-            }
-            case orr -> {
-                return is32Bit ? "orr" : "orr";
-            }
-            case eor -> {
-                return is32Bit ? "eor" : "eor";
-            }
-            case bic -> {
-                return is32Bit ? "bic" : "bic";
-            }
-            case lsl -> {
-                return is32Bit ? "lsl" : "lsl";
-            }
-            case lsr -> {
-                return is32Bit ? "lsr" : "lsr";
-            }
-            case asr -> {
-                return is32Bit ? "asr" : "asr";
-            }
-            case ror -> {
-                return is32Bit ? "ror" : "ror";
-            }
-            case fadd -> {
+            case add:
+                return "add";
+            case adds:
+                return "adds";
+            case sub:
+                return "sub";
+            case subs:
+                return "subs";
+            case mul:
+                return "mul";
+            case sdiv:
+                return "sdiv";
+            case udiv:
+                return "udiv";
+            case msub:
+                return "msub";
+            case madd:
+                return "madd";
+            case and:
+                return "and";
+            case ands:
+                return "ands";
+            case orr:
+                return "orr";
+            case eor:
+                return "eor";
+            case bic:
+                return "bic";
+            case lsl:
+                return "lsl";
+            case lsr:
+                return "lsr";
+            case asr:
+                return "asr";
+            case ror:
+                return "ror";
+            case fadd:
                 return "fadd";
-            }
-            case fsub -> {
+            case fsub:
                 return "fsub";
-            }
-            case fmul -> {
+            case fmul:
                 return "fmul";
-            }
-            case fdiv -> {
+            case fdiv:
                 return "fdiv";
-            }
+            default:
+                return null;
         }
-        return null;
     }
 
     @Override
     public String toString() {
-        if (shiftBit == 0) {
+        if (imm != null) {
+            return binaryTypeToString() + "\t" + getDefReg() + ", " + getOperands().get(0) + ", " + getOperands().get(1);
+        } else if (shiftBit == 0) {
             return binaryTypeToString() + "\t" + getDefReg() + ", " +
                     getOperands().get(0) + ", " + getOperands().get(1);
         } else {

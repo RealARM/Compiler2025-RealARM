@@ -55,7 +55,7 @@ public class Armv8CPUReg extends Armv8PhyReg {
     private final String name;
 
     public Armv8CPUReg(int index, String name) {
-        super(index);
+        super();
         this.index = index;
         this.name = name;
     }
@@ -115,6 +115,7 @@ public class Armv8CPUReg extends Armv8PhyReg {
         return this.name;
     }
 
+    // 默认使用64位寄存器
     @Override
     public String toString() {
         return this.name;

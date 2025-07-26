@@ -1,13 +1,13 @@
 package Backend.Armv8.Operand;
 
 public class Armv8Imm extends Armv8Operand {
-    private final int value;  // 改为int类型，ARM指令的立即数通常是32位的
+    private final long value;  // 改为long类型
 
-    public Armv8Imm(int value) {  // 构造函数参数改为int
+    public Armv8Imm(long value) {  // 构造函数参数改为long
         this.value = value;
     }
 
-    public int getValue() {  // 返回类型改为int
+    public long getValue() {  // 返回类型改为long
         return this.value;
     }
 

@@ -9,7 +9,7 @@ import IR.IRPrinter;
 import IR.Module;
 import IR.Pass.PassManager;
 import IR.Visitor.IRVisitor;
-import Backend.Armv8.Armv8CodeGen;
+import Backend.Armv8.Armv8Visitor;
 
 import java.io.FileReader;
 import java.io.FileOutputStream;
@@ -133,7 +133,7 @@ public class Compiler {
             System.out.println("\n开始生成ARM汇编代码...");
             
             // 创建ARM代码生成器
-            Armv8CodeGen armv8CodeGen = new Armv8CodeGen(irModule);
+            Armv8Visitor armv8CodeGen = new Armv8Visitor(irModule);
             
             // 运行代码生成
             armv8CodeGen.run();

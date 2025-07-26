@@ -11,11 +11,9 @@ import java.util.Arrays;
  * 如果寄存器值为零则跳转
  */
 public class Armv8Cbz extends Armv8Instruction {
-    private final boolean is32Bit; // 是否是32位(w)比较而非64位(x)
     
-    public Armv8Cbz(Armv8Reg reg, Armv8Block targetBlock, boolean is32Bit) {
+    public Armv8Cbz(Armv8Reg reg, Armv8Block targetBlock) {
         super(null, new ArrayList<>(Arrays.asList(reg, targetBlock)));
-        this.is32Bit = is32Bit;
         
         // 设置前驱后继关系
         targetBlock.addPreds(targetBlock);
@@ -30,12 +28,6 @@ public class Armv8Cbz extends Armv8Instruction {
     
     @Override
     public String toString() {
-        String regPrefix = is32Bit ? "w" : "x";
-        String regStr = getOperands().get(0).toString();
-        if (!regStr.startsWith(regPrefix)) {
-            regStr = regPrefix + regStr.substring(1);
-        }
-        
-        return "cbz\t" + regStr + ", " + getOperands().get(1);
+        return "cbz\t" + getOperands().get(0) + ", " + getOperands().get(1);
     }
 } 

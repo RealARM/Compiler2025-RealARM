@@ -29,7 +29,7 @@ public class Armv8GlobalVariable extends Armv8Label {
         if (isZeroInit) {
             sb.append("\t.zero\t").append(byteSize).append("\n");
         } else if (isFloat) {
-            sb.append("\t.float\t");
+            sb.append("\t.double\t");
             for (int i = 0; i < initialValues.size(); i++) {
                 sb.append(initialValues.get(i).floatValue());
                 if (i != initialValues.size() - 1) {
@@ -38,7 +38,7 @@ public class Armv8GlobalVariable extends Armv8Label {
             }
             sb.append("\n");
         } else {
-            sb.append("\t.word\t");
+            sb.append("\t.quad\t");
             for (int i = 0; i < initialValues.size(); i++) {
                 sb.append(initialValues.get(i).intValue());
                 if (i != initialValues.size() - 1) {
