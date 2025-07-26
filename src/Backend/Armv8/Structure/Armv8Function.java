@@ -25,7 +25,7 @@ public class Armv8Function {
     }
 
     public void addStack(Value value, Long offset) {
-        this.stack.put(value, offset);
+        this.stack.put(value, stackSize);
         this.stackSize += offset;
     }
 

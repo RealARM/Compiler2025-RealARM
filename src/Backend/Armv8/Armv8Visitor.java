@@ -202,10 +202,9 @@ public class Armv8Visitor {
             // 单一变量
             size = 8;
         }
-        // 计算在栈中的偏移量
-        long offset = stackPos + size;
-        curArmv8Function.addStack(ins, offset);
-        ptrList.put(ins, offset);
+        curArmv8Function.addStack(ins, size);
+        ptrList.put(ins, stackPos);
+        stackPos += size;
     }
 
     private void parseBinaryInst(BinaryInstruction ins, boolean predefine) {
