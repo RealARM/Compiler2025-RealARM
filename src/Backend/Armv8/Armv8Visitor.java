@@ -1483,7 +1483,12 @@ public class Armv8Visitor {
         ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
         
         // 为Phi结果分配目标寄存器
-        Armv8Reg destReg = new Armv8VirReg(false); 
+        Armv8Reg destReg;
+        if (ins.getType() instanceof FloatType) {
+            destReg = new Armv8VirReg(false);
+        } else {
+            destReg = new Armv8VirReg(false);
+        }
         RegList.put(ins, destReg);
         
         // 获取Phi指令的所有输入块和对应值
@@ -1507,7 +1512,13 @@ public class Armv8Visitor {
                 // 常量值，创建立即数
                 long value = ((ConstantInt) incomingValue).getValue();
                 srcOp = new Armv8Imm(value);
-            } else {
+            } else if (incomingValues instanceof ConstantFloat) {
+                double floatValue = ((ConstantFloat) incomingValues).getValue();
+                Armv8Reg fpuReg = new Armv8VirReg(true);
+                loadFloatConstant(fpuReg, floatValue, insList, predefine);
+                srcOp = fpuReg;
+            }
+            else {
                 // 非常量值，使用寄存器
                 if (!RegList.containsKey(incomingValue)) {
                     if (incomingValue instanceof Instruction) {
@@ -1531,9 +1542,9 @@ public class Armv8Visitor {
             // 创建移动指令
             Armv8Move moveInst;
             if (srcOp instanceof Armv8Imm) {
-                moveInst = new Armv8Move(destReg, srcOp, false);
+                moveInst = new Armv8Move(destReg, srcOp, true);
             } else {
-                moveInst = new Armv8Move(destReg, (Armv8Reg) srcOp, true);
+                moveInst = new Armv8Move(destReg, (Armv8Reg) srcOp, false);
             }
             
             // 为前驱块添加phi解析指令
@@ -1566,7 +1577,14 @@ public class Armv8Visitor {
         Value operand = ins.getOperand();
         
         // 为结果分配目标寄存器
-        Armv8Reg destReg = new Armv8VirReg(false);
+        Armv8Reg destReg;
+        if (operand instanceof ConstantInt) {
+            destReg = new Armv8VirReg(false);
+        } else if (operand instanceof ConstantFloat) {
+            destReg = new Armv8VirReg(true);
+        } else {
+            destReg = new Armv8VirReg(false);
+        }
         RegList.put(ins, destReg);
         
         // 处理操作数
@@ -1574,7 +1592,12 @@ public class Armv8Visitor {
         if (operand instanceof ConstantInt) {
             // 对于常量，创建立即数操作数
             long value = ((ConstantInt) operand).getValue();
-            srcOp = new Armv8Imm((int) value);  // 显式转换为int
+            srcOp = new Armv8Imm(value);  // 显式转换为int
+        } else if (operand instanceof ConstantFloat) {
+            double floatValue = ((ConstantFloat) operand).getValue();
+            Armv8Reg fpuReg = new Armv8VirReg(true);
+            loadFloatConstant(fpuReg, floatValue, insList, predefine);
+            srcOp = fpuReg;
         } else {
             // 对于变量，使用寄存器
             if (!RegList.containsKey(operand)) {
