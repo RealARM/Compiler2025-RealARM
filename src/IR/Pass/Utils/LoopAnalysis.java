@@ -12,39 +12,206 @@ import java.util.*;
  */
 public class LoopAnalysis {
     
+    // 存储所有循环
+    private static final Map<Function, List<Loop>> functionLoops = new HashMap<>();
+    
+    // 存储基本块到循环的映射
+    private static final Map<BasicBlock, Loop> blockToLoop = new HashMap<>();
+    
     /**
-     * 为函数中的所有基本块计算循环深度信息
+     * 分析函数中的循环并构建循环树
      * @param function 待分析的函数
+     * @return 顶层循环列表
      */
-    public static void runLoopInfo(Function function) {
-        // 重置所有块的循环深度
-        resetLoopDepth(function);
+    public static List<Loop> analyzeLoops(Function function) {
+        // 清空之前的分析结果
+        functionLoops.remove(function);
         
-        // 识别自然循环
-        identifyNaturalLoops(function);
+        // 计算支配关系
+        DominatorAnalysis.computeDominatorTree(function);
+        
+        // 识别所有循环
+        List<Loop> allLoops = identifyLoops(function);
+        
+        // 构建循环树
+        List<Loop> topLevelLoops = buildLoopTree(allLoops);
+        
+        // 保存结果
+        functionLoops.put(function, topLevelLoops);
+        
+        // 更新基本块的循环深度
+        updateLoopDepths(allLoops);
+        
+        return topLevelLoops;
     }
     
     /**
-     * 重置所有基本块的循环深度为0
+     * 为函数中的所有基本块计算循环深度信息（兼容旧接口）
+     * @param function 待分析的函数
      */
-    private static void resetLoopDepth(Function function) {
-        for (BasicBlock bb : function.getBasicBlocks()) {
-            bb.setLoopDepth(0);
+    public static void runLoopInfo(Function function) {
+        analyzeLoops(function);
+    }
+    
+    /**
+     * 获取函数的顶层循环
+     */
+    public static List<Loop> getTopLevelLoops(Function function) {
+        if (!functionLoops.containsKey(function)) {
+            return analyzeLoops(function);
+        }
+        return functionLoops.get(function);
+    }
+    
+    /**
+     * 获取包含指定基本块的最内层循环
+     */
+    public static Loop getLoopFor(BasicBlock block) {
+        return blockToLoop.get(block);
+    }
+    
+    /**
+     * 识别函数中的所有循环
+     */
+    private static List<Loop> identifyLoops(Function function) {
+        List<Loop> loops = new ArrayList<>();
+        blockToLoop.clear();
+        
+        // 寻找所有回边
+        for (BasicBlock header : function.getBasicBlocks()) {
+            for (BasicBlock latch : header.getPredecessors()) {
+                // 如果latch被header支配，则存在回边
+                if (isDominated(latch, header)) {
+                    // 创建或获取循环
+                    Loop loop = findOrCreateLoop(header, loops);
+                    
+                    // 添加回边
+                    loop.addLatchBlock(latch);
+                    
+                    // 收集循环体
+                    collectLoopBlocks(loop, header, latch);
+                }
+            }
+        }
+        
+        // 计算每个循环的出口块
+        for (Loop loop : loops) {
+            loop.computeExitBlocks();
+        }
+        
+        return loops;
+    }
+    
+    /**
+     * 查找或创建循环
+     */
+    private static Loop findOrCreateLoop(BasicBlock header, List<Loop> loops) {
+        // 查找是否已存在以该header为头的循环
+        for (Loop loop : loops) {
+            if (loop.getHeader() == header) {
+                return loop;
+            }
+        }
+        
+        // 创建新循环
+        Loop newLoop = new Loop(header);
+        loops.add(newLoop);
+        return newLoop;
+    }
+    
+    /**
+     * 收集循环体内的所有基本块
+     */
+    private static void collectLoopBlocks(Loop loop, BasicBlock header, BasicBlock latch) {
+        Set<BasicBlock> loopBlocks = new HashSet<>();
+        Stack<BasicBlock> workList = new Stack<>();
+        
+        // 添加header
+        loopBlocks.add(header);
+        loop.addBlock(header);
+        
+        // 从latch开始反向搜索
+        if (latch != header) {
+            workList.push(latch);
+            loopBlocks.add(latch);
+        }
+        
+        // 反向遍历，收集所有能到达header的块
+        while (!workList.isEmpty()) {
+            BasicBlock current = workList.pop();
+            loop.addBlock(current);
+            
+            for (BasicBlock pred : current.getPredecessors()) {
+                if (!loopBlocks.contains(pred)) {
+                    loopBlocks.add(pred);
+                    workList.push(pred);
+                }
+            }
         }
     }
     
     /**
-     * 识别函数中的自然循环并计算循环深度
+     * 构建循环树（处理嵌套循环）
      */
-    private static void identifyNaturalLoops(Function function) {
-        // 寻找回边
-        for (BasicBlock header : function.getBasicBlocks()) {
-            for (BasicBlock pred : header.getPredecessors()) {
-                // 如果前驱支配当前块，则形成回边
-                if (isDominated(pred, header)) {
-                    // 找到了回边 pred -> header，识别循环
-                    identifyLoop(header, pred);
+    private static List<Loop> buildLoopTree(List<Loop> allLoops) {
+        List<Loop> topLevelLoops = new ArrayList<>();
+        
+        // 首先将所有循环加入顶层
+        topLevelLoops.addAll(allLoops);
+        
+        // 检查循环之间的包含关系
+        for (Loop outerLoop : allLoops) {
+            for (Loop innerLoop : allLoops) {
+                if (outerLoop != innerLoop && isNestedLoop(innerLoop, outerLoop)) {
+                    // innerLoop是outerLoop的子循环
+                    outerLoop.addSubLoop(innerLoop);
+                    topLevelLoops.remove(innerLoop);
                 }
+            }
+        }
+        
+        // 更新blockToLoop映射，优先记录最内层循环
+        for (Loop loop : allLoops) {
+            for (BasicBlock block : loop.getBlocks()) {
+                Loop existingLoop = blockToLoop.get(block);
+                if (existingLoop == null || loop.getDepth() > existingLoop.getDepth()) {
+                    blockToLoop.put(block, loop);
+                }
+            }
+        }
+        
+        return topLevelLoops;
+    }
+    
+    /**
+     * 检查inner是否是outer的嵌套循环
+     */
+    private static boolean isNestedLoop(Loop inner, Loop outer) {
+        // 如果inner的所有块都在outer中，则inner是outer的子循环
+        for (BasicBlock block : inner.getBlocks()) {
+            if (!outer.contains(block)) {
+                return false;
+            }
+        }
+        // 还要确保不是同一个循环
+        return !inner.getHeader().equals(outer.getHeader());
+    }
+    
+    /**
+     * 更新基本块的循环深度
+     */
+    private static void updateLoopDepths(List<Loop> loops) {
+        // 先重置所有块的循环深度
+        for (Loop loop : loops) {
+            for (BasicBlock block : loop.getBlocks()) {
+                block.setLoopDepth(0);
+            }
+        }
+        
+        // 根据循环嵌套更新深度
+        for (Loop loop : loops) {
+            for (BasicBlock block : loop.getBlocks()) {
+                block.setLoopDepth(Math.max(block.getLoopDepth(), loop.getDepth() + 1));
             }
         }
     }
@@ -54,9 +221,6 @@ public class LoopAnalysis {
      */
     private static boolean isDominated(BasicBlock block, BasicBlock header) {
         // 当前简化实现：检查header是否是block的支配者
-        // 需要支配关系的计算，这里使用简化的方法
-        // 在实际应用中，应使用完整的支配关系计算
-        
         // 如果block是header本身，则被支配
         if (block == header) {
             return true;
@@ -77,36 +241,37 @@ public class LoopAnalysis {
     }
     
     /**
-     * 识别并标记循环
-     * @param header 循环头
-     * @param latch 循环尾（回边源）
+     * 获取循环的深度优先遍历顺序
      */
-    private static void identifyLoop(BasicBlock header, BasicBlock latch) {
-        // 收集循环体内的所有基本块
-        Set<BasicBlock> loopBlocks = new HashSet<>();
-        collectLoopBlocks(header, latch, loopBlocks);
-        
-        // 增加循环体内所有块的循环深度
-        for (BasicBlock bb : loopBlocks) {
-            bb.setLoopDepth(bb.getLoopDepth() + 1);
-        }
+    public static List<Loop> getLoopsInDFSOrder(Loop loop) {
+        List<Loop> result = new ArrayList<>();
+        dfsTraverseLoops(loop, result);
+        return result;
     }
     
     /**
-     * 收集循环体内的所有基本块
-     * 从latch块开始反向遍历，直到到达header（但不包括header本身）
+     * 深度优先遍历循环树
      */
-    private static void collectLoopBlocks(BasicBlock header, BasicBlock latch, 
-            Set<BasicBlock> loopBlocks) {
-        if (loopBlocks.contains(latch) || latch == header) {
-            return;
+    private static void dfsTraverseLoops(Loop loop, List<Loop> result) {
+        // 先访问子循环
+        for (Loop subLoop : loop.getSubLoops()) {
+            dfsTraverseLoops(subLoop, result);
+        }
+        // 再访问当前循环
+        result.add(loop);
+    }
+    
+    /**
+     * 获取函数中所有循环的DFS顺序
+     */
+    public static List<Loop> getAllLoopsInDFSOrder(Function function) {
+        List<Loop> topLoops = getTopLevelLoops(function);
+        List<Loop> allLoops = new ArrayList<>();
+        
+        for (Loop topLoop : topLoops) {
+            allLoops.addAll(getLoopsInDFSOrder(topLoop));
         }
         
-        loopBlocks.add(latch);
-        
-        // 递归处理latch的所有前驱
-        for (BasicBlock pred : latch.getPredecessors()) {
-            collectLoopBlocks(header, pred, loopBlocks);
-        }
+        return allLoops;
     }
 } 

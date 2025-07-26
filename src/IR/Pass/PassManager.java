@@ -44,6 +44,10 @@ public class PassManager {
      * 初始化默认的优化Pass
      */
     private void initializePasses() {
+        // 常量优化
+        addIRPass(new ConstantDeduplication());
+        addIRPass(new ConstantArraySimplifier());
+        
         // 基本块处理
         addIRPass(new EmptyBlockHandler());
         
@@ -62,6 +66,9 @@ public class PassManager {
         
         // 控制流优化
         addIRPass(new BranchSimplifier());
+        
+        // 循环优化（在GCM之前，专门处理循环不变代码）
+        addIRPass(new LoopInvariantCodeMotion());
         
         // 全局代码移动优化
         addIRPass(new GCM());
