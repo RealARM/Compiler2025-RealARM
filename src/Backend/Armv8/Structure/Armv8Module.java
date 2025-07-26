@@ -58,15 +58,15 @@ public class Armv8Module {
         }
         
         sb.append(".text\n");
+        // for(Armv8Function function:functions.values()){
+        //     if(function.getName().equals("main")){
+        //         sb.append(function.dump());
+        //         break;
+        //     }
+        // }
         for(Armv8Function function:functions.values()){
-            if(function.getName().equals("main")){
-                sb.append(function.dump());
-                break;
-            }
-        }
-        for(Armv8Function function:functions.values()){
-            if(!(function.getName().equals("main")))
-                sb.append(function.dump());
+            // if(!(function.getName().equals("main")))
+            sb.append(function.dump());
         }
         return sb.toString();
     }

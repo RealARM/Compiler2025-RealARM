@@ -1,13 +1,13 @@
 package Backend.Armv8.Structure;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedList;
-import java.util.LinkedHashMap;
-import Backend.Armv8.Operand.Armv8Imm;
-import Backend.Armv8.Operand.Armv8Reg;
-import IR.Value.Value;
-import IR.Value.Argument;
+import java.util.*;
+
+import Backend.Armv8.Armv8Visitor;
+import Backend.Armv8.Instruction.Armv8Fmov;
+import Backend.Armv8.Instruction.Armv8Move;
+import Backend.Armv8.Operand.*;
+import IR.Type.FloatType;
+import IR.Value.*;
 
 public class Armv8Function {
     private String name;
@@ -18,10 +18,53 @@ public class Armv8Function {
 
     private HashMap<Value, Armv8Reg> RegArgList = new HashMap<>();
     private HashMap<Value, Long> stackArgList = new HashMap<>();
+    private HashMap<Value, Long> FPArgList = new HashMap<>();
+    private Function irFunction;
 
 
-    public Armv8Function(String name) {
+    public Armv8Function(String name, Function irFunction) {
         this.name = name;
+        this.irFunction = irFunction;
+        
+        //处理函数序言的传参问题
+        List<Argument> arguments = irFunction.getArguments();
+        int argCount = irFunction.getArgumentCount();
+        
+        int intArgCount = 0;     // 整型参数计数器
+        int floatArgCount = 0;   // 浮点参数计数器
+        long stackOffset = 0;     // 栈参数偏移
+        for (int i = 0; i < argCount; i++) {
+            Value arg = arguments.get(i);
+            boolean isFloat = arg.getType() instanceof FloatType;
+            
+            // 检查是否需要使用栈传递
+            boolean useStack = false;
+            if (isFloat) {
+                useStack = floatArgCount >= 8; // 超过8个浮点参数使用栈
+                floatArgCount++;
+            } else {
+                useStack = intArgCount >= 8;   // 超过8个整型参数使用栈
+                intArgCount++;
+            }
+            
+            if (!useStack) {
+                Armv8Reg argReg;
+                if (isFloat) {
+                    // 浮点参数使用v0-v7寄存器，使用floatArgCount-1是因为已经自增了
+                    argReg = Armv8FPUReg.getArmv8FArgReg(floatArgCount-1);
+                } else {
+                    // 整数参数使用x0-x7寄存器，使用intArgCount-1是因为已经自增了
+                    argReg = Armv8CPUReg.getArmv8ArgReg(intArgCount-1);
+                }
+                addRegArg(arg,argReg);
+                Armv8Visitor.getRegList().put(arg, argReg);
+            } else {
+                // 使用栈传递参
+                stackArgList.put(arg, stackOffset);
+                Armv8Visitor.getPtrList().put(arg, stackOffset);
+                stackOffset += 8;
+            }
+        }
     }
 
     public void addStack(Value value, Long offset) {
@@ -74,7 +117,7 @@ public class Armv8Function {
     public Long getStackArg(Value arg) {
         return this.stackArgList.get(arg);
     }
-
+    public Long getFPArg(Value arg) { return this.FPArgList.get(arg); }
     // 在ARMv8中，被调用者保存的寄存器是x19-x29和SP
     // 需要在函数开始时保存这些寄存器，并在返回前恢复
     private String generatePrologue() {

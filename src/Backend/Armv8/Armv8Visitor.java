@@ -25,9 +25,9 @@ public class Armv8Visitor {
     public Module irModule;
     public Armv8Module armv8Module = new Armv8Module();
     // 使用多态性，这样可以存储Armv8Label及其子类
-    private final LinkedHashMap<Value, Armv8Label> LabelList = new LinkedHashMap<>();
-    private final LinkedHashMap<Value, Armv8Reg> RegList = new LinkedHashMap<>();
-    private final LinkedHashMap<Value, Long> ptrList = new LinkedHashMap<>();
+    private static final LinkedHashMap<Value, Armv8Label> LabelList = new LinkedHashMap<>();
+    private static final LinkedHashMap<Value, Armv8Reg> RegList = new LinkedHashMap<>();
+    private static final LinkedHashMap<Value, Long> ptrList = new LinkedHashMap<>();
     private Long stackPos = 0L;
     private Armv8Block curArmv8Block = null;
     private Armv8Function curArmv8Function = null;
@@ -44,6 +44,14 @@ public class Armv8Visitor {
         return name;
     }
 
+    public static LinkedHashMap<Value, Armv8Reg> getRegList() {
+        return RegList;
+    }
+    
+    public static LinkedHashMap<Value, Long> getPtrList() {
+        return ptrList;
+    }
+    
     public void run() {
         // 生成全局变量
         for (GlobalVariable globalVariable : irModule.globalVars()) {
@@ -119,7 +127,7 @@ public class Armv8Visitor {
         }
 
         String functionName = removeLeadingAt(function.getName());
-        curArmv8Function = new Armv8Function(functionName);
+        curArmv8Function = new Armv8Function(functionName, function);
         stackPos = 0L;
         armv8Module.addFunction(functionName, curArmv8Function);
         Armv8VirReg.resetCounter();
@@ -544,8 +552,7 @@ public class Armv8Visitor {
                     // 整数参数使用x0-x7寄存器，使用intArgCount-1是因为已经自增了
                     argReg = Armv8CPUReg.getArmv8ArgReg(intArgCount-1);
                 }
-                
-                // 处理参数值
+                 // 处理参数值
                 if (arg instanceof ConstantInt) {
                     // 对于常量整数，直接加载到对应的参数寄存器
                     long value = ((ConstantInt) arg).getValue();
@@ -573,6 +580,7 @@ public class Armv8Visitor {
                     addInstr(moveInst, insList, predefine);
                 }
                 curArmv8Function.addRegArg(arg, argReg);
+                RegList.put(arg, argReg);
             } else {
                 // 使用栈传递参数
                 stackOffset += 8;
@@ -1220,6 +1228,36 @@ public class Armv8Visitor {
             // 处理浮点常量的存储
             double floatValue = ((ConstantFloat) valueToStore).getValue();
             loadFloatConstant(valueReg, floatValue, insList, predefine);
+        }
+        else if (valueToStore instanceof Argument) {
+            // 处理函数参数作为存储值的情况
+            Argument arg = (Argument) valueToStore;
+            
+            // 检查参数是否已分配寄存器
+            if (!RegList.containsKey(valueToStore)) {
+                valueReg = valueToStore.getType() instanceof FloatType ? 
+                           new Armv8VirReg(true) : new Armv8VirReg(false);
+                
+                // 检查参数是否在寄存器中
+                if (curArmv8Function.getRegArg(arg) != null) {
+                    // 参数在寄存器中，直接使用该寄存器
+                    Armv8Reg argReg = curArmv8Function.getRegArg(arg);
+                    Armv8Move moveInst = new Armv8Move(valueReg, argReg, valueReg instanceof Armv8FPUReg);
+                    addInstr(moveInst, insList, predefine);
+                } else if (curArmv8Function.getStackArg(arg) != null) {
+                    // 参数在栈上，使用FP+偏移量加载
+                    long stackParamOffset = curArmv8Function.getStackArg(arg);
+                    
+                    // 从FP+偏移量加载到临时寄存器
+                    Armv8Load loadParamInst = new Armv8Load(Armv8CPUReg.getArmv8FPReg(), 
+                        new Armv8Imm(stackParamOffset), valueReg);
+                    addInstr(loadParamInst, insList, predefine);
+                }
+                // 将寄存器与参数关联
+                RegList.put(valueToStore, valueReg);
+            } else {
+                valueReg = RegList.get(valueToStore);
+            }
         }
         else {
             // 对于变量，确保已经有关联的寄存器
