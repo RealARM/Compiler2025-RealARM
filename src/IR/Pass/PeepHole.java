@@ -32,13 +32,13 @@ public class PeepHole implements Pass.IRPass {
                 continue;
             }
             
-            // 应用各种窥孔优化
+            // 启用安全的窥孔优化
             changed |= optimizePointerAddZero(function);
             changed |= optimizeBranchSameTarget(function);
             changed |= optimizeCascadingBranches(function);
             changed |= optimizeConsecutiveStores(function);
             changed |= optimizeStoreLoad(function);
-            changed |= optimizeConstantCompare(function);
+            // changed |= optimizeConstantCompare(function);
         }
         
         return changed;
@@ -228,7 +228,7 @@ public class PeepHole implements Pass.IRPass {
                 if (next instanceof LoadInstruction loadInst && 
                         loadInst.getPointer() == storePointer) {
                     // 直接用store的值替换load的所有使用
-                    loadInst.replaceAllUsesWith(loadInst, storedValue);
+                    replaceAllUses(loadInst, storedValue);
                     loadInst.removeFromParent();
                     changed = true;
                 }
@@ -274,19 +274,19 @@ public class PeepHole implements Pass.IRPass {
                 continue;
             }
             
-            // 检查左操作数是否为一元指令（可能是zext）
+            // 检查左操作数是否为转换指令（可能是zext）
             Value zextResult = secondCmp.getLeft();
-            if (!(zextResult instanceof UnaryInstruction unaryInst)) {
+            if (!(zextResult instanceof ConversionInstruction convInst)) {
                 continue;
             }
             
             // 检查是否为zext指令
-            if (unaryInst.getOpCode() != OpCode.ZEXT) {
+            if (convInst.getConversionType() != OpCode.ZEXT) {
                 continue;
             }
             
             // 检查zext的操作数是否为比较指令
-            Value firstCmpResult = unaryInst.getOperand();
+            Value firstCmpResult = convInst.getSource();
             if (!(firstCmpResult instanceof CompareInstruction firstCmp)) {
                 continue;
             }
@@ -333,10 +333,51 @@ public class PeepHole implements Pass.IRPass {
             // 替换原分支指令
             block.removeInstruction(terminator);
             block.addInstruction(newBranch);
+            
+            // 清理现在无用的指令：secondCmp, convInst, firstCmp
+            cleanupUnusedInstructions(secondCmp, convInst, firstCmp);
+            
             changed = true;
         }
         
         return changed;
+    }
+    
+    /**
+     * 清理无用的指令
+     * 按照依赖关系的逆序删除指令（先删除使用者，再删除被使用者）
+     */
+    private void cleanupUnusedInstructions(CompareInstruction secondCmp, 
+                                         ConversionInstruction convInst, 
+                                         CompareInstruction firstCmp) {
+        // 现在这些指令已经不被分支指令使用了，应该可以安全删除
+        // 按逆序删除：secondCmp -> convInst -> firstCmp
+        
+        // 1. 删除 secondCmp（icmp ne）
+        secondCmp.removeFromParent();
+        
+        // 2. 删除 convInst（zext）
+        convInst.removeFromParent();
+        
+        // 3. 删除 firstCmp（icmp eq）
+        firstCmp.removeFromParent();
+    }
+    
+    /**
+     * 替换指令的所有使用为新值
+     */
+    private void replaceAllUses(Value oldValue, Value newValue) {
+        // 获取所有使用oldValue的用户
+        List<User> users = new ArrayList<>(oldValue.getUsers());
+        
+        // 遍历所有用户，替换使用
+        for (User user : users) {
+            for (int i = 0; i < user.getOperandCount(); i++) {
+                if (user.getOperand(i) == oldValue) {
+                    user.setOperand(i, newValue);
+                }
+            }
+        }
     }
     
     /**
