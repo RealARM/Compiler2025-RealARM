@@ -64,6 +64,7 @@ public class Armv8Module {
         //         break;
         //     }
         // }
+        sb.append(Armv8Function.generateMemsetFunction());
         for(Armv8Function function:functions.values()){
             // if(!(function.getName().equals("main")))
             sb.append(function.dump());
