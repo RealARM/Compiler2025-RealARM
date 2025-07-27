@@ -74,7 +74,7 @@ public class PassManager {
         addIRPass(new BranchSimplifier());
         
         // 循环SSA形式转换（在循环优化之前）
-        // addIRPass(new LoopSSATransform());
+        addIRPass(new LoopSSATransform());
         
         // 循环优化（在GCM之前，专门处理循环不变代码）
         addIRPass(new LoopInvariantCodeMotion());

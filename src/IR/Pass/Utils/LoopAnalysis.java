@@ -19,38 +19,47 @@ public class LoopAnalysis {
     private static final Map<BasicBlock, Loop> blockToLoop = new HashMap<>();
     
     /**
+     * 为函数中的所有基本块计算循环深度信息（兼容旧接口）
+     * @param function 待分析的函数
+     */
+    public static void runLoopInfo(Function function) {
+        try {
+            analyzeLoops(function);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    
+    /**
      * 分析函数中的循环并构建循环树
      * @param function 待分析的函数
      * @return 顶层循环列表
      */
     public static List<Loop> analyzeLoops(Function function) {
-        // 清空之前的分析结果
-        functionLoops.remove(function);
-        
-        // 计算支配关系
-        DominatorAnalysis.computeDominatorTree(function);
-        
-        // 识别所有循环
-        List<Loop> allLoops = identifyLoops(function);
-        
-        // 构建循环树
-        List<Loop> topLevelLoops = buildLoopTree(allLoops);
-        
-        // 保存结果
-        functionLoops.put(function, topLevelLoops);
-        
-        // 更新基本块的循环深度
-        updateLoopDepths(allLoops);
-        
-        return topLevelLoops;
-    }
-    
-    /**
-     * 为函数中的所有基本块计算循环深度信息（兼容旧接口）
-     * @param function 待分析的函数
-     */
-    public static void runLoopInfo(Function function) {
-        analyzeLoops(function);
+        try {
+            // 清空之前的分析结果
+            functionLoops.remove(function);
+            
+            // 计算支配关系
+            DominatorAnalysis.computeDominatorTree(function);
+            
+            // 识别所有循环
+            List<Loop> allLoops = identifyLoops(function);
+            
+            // 构建循环树
+            List<Loop> topLevelLoops = buildLoopTree(allLoops);
+            
+            // 保存结果
+            functionLoops.put(function, topLevelLoops);
+            
+            // 更新基本块的循环深度
+            updateLoopDepths(allLoops);
+            
+            return topLevelLoops;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return new ArrayList<>();
+        }
     }
     
     /**
@@ -79,24 +88,45 @@ public class LoopAnalysis {
         
         // 寻找所有回边
         for (BasicBlock header : function.getBasicBlocks()) {
-            for (BasicBlock latch : header.getPredecessors()) {
+            if (header == null) {
+                continue;
+            }
+            
+            List<BasicBlock> predecessors = header.getPredecessors();
+            if (predecessors == null) {
+                continue;
+            }
+            
+            for (BasicBlock latch : predecessors) {
+                if (latch == null) {
+                    continue;
+                }
+                
                 // 如果latch被header支配，则存在回边
-                if (isDominated(latch, header)) {
-                    // 创建或获取循环
-                    Loop loop = findOrCreateLoop(header, loops);
-                    
-                    // 添加回边
-                    loop.addLatchBlock(latch);
-                    
-                    // 收集循环体
-                    collectLoopBlocks(loop, header, latch);
+                try {
+                    if (isDominated(latch, header)) {
+                        // 创建或获取循环
+                        Loop loop = findOrCreateLoop(header, loops);
+                        
+                        // 添加回边
+                        loop.addLatchBlock(latch);
+                        
+                        // 收集循环体
+                        collectLoopBlocks(loop, header, latch);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
             }
         }
         
         // 计算每个循环的出口块
         for (Loop loop : loops) {
-            loop.computeExitBlocks();
+            try {
+                loop.computeExitBlocks();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
         
         return loops;
@@ -220,6 +250,19 @@ public class LoopAnalysis {
      * 判断block是否被header支配
      */
     private static boolean isDominated(BasicBlock block, BasicBlock header) {
+        // 递归深度检测，避免无限递归
+        return isDominatedWithDepth(block, header, 0);
+    }
+    
+    /**
+     * 带深度检查的支配关系判断
+     */
+    private static boolean isDominatedWithDepth(BasicBlock block, BasicBlock header, int depth) {
+        // 防止堆栈溢出
+        if (depth > 1000) {
+            return false;
+        }
+        
         // 当前简化实现：检查header是否是block的支配者
         // 如果block是header本身，则被支配
         if (block == header) {
@@ -227,14 +270,19 @@ public class LoopAnalysis {
         }
         
         // 如果block的直接支配者是header，则被支配
-        if (block.getIdominator() == header) {
+        BasicBlock idom = block.getIdominator();
+        if (idom == header) {
             return true;
         }
         
+        // 检查支配者链是否形成循环
+        if (idom == block) {
+            return false;
+        }
+        
         // 递归检查block的直接支配者是否被header支配
-        BasicBlock idom = block.getIdominator();
-        if (idom != null && idom != block) {
-            return isDominated(idom, header);
+        if (idom != null) {
+            return isDominatedWithDepth(idom, header, depth + 1);
         }
         
         return false;
