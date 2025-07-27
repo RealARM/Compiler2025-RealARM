@@ -38,7 +38,8 @@ public class Armv8Cset extends Armv8Instruction {
         StringBuilder sb = new StringBuilder();
         sb.append("cset ");
         
-        sb.append(destReg.toString());
+        // 使用父类的getDefReg()方法，确保获取到寄存器分配后的物理寄存器
+        sb.append(getDefReg().toString());
         
         // Append condition
         sb.append(", ");

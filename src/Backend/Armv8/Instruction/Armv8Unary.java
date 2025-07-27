@@ -63,8 +63,8 @@ public class Armv8Unary extends Armv8Instruction {
                 break;
         }
         
-        // 直接使用寄存器的toString方法
-        sb.append(destReg).append(", ").append(srcReg);
+        // 使用父类方法获取寄存器，确保获取到寄存器分配后的物理寄存器
+        sb.append(getDefReg()).append(", ").append(getOperands().get(0));
         
         return sb.toString();
     }

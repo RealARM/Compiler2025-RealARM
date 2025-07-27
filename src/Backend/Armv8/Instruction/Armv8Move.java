@@ -87,11 +87,11 @@ public class Armv8Move extends Armv8Instruction {
         StringBuilder sb = new StringBuilder();
         sb.append(getMoveTypeString());
         sb.append("\t");
-        sb.append(defReg.toString());
+        sb.append(getDefReg().toString());
         sb.append(",\t");
         
-        // 直接输出源操作数
-        sb.append(operands.get(0).toString());
+        // 使用父类方法获取操作数，确保获取到寄存器分配后的物理寄存器
+        sb.append(getOperands().get(0).toString());
 
         // 添加移位信息（如果有）
         if (shift > 0) {

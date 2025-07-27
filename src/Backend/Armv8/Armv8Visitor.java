@@ -3,23 +3,18 @@ package Backend.Armv8;
 import Backend.Armv8.Instruction.*;
 import Backend.Armv8.Operand.*;
 import Backend.Armv8.Structure.*;
-import Backend.Armv8.tools.Armv8Tools;
+import Backend.Armv8.tools.*;
 import IR.Module;
-import IR.Type.IntegerType;
-import IR.Type.FloatType;
-import IR.Type.PointerType;
-import IR.Type.Type;
+import IR.OpCode;
+import IR.Type.*;
 import IR.Value.*;
 import IR.Value.Instructions.*;
-import IR.OpCode;
-import java.util.*;
+
 import java.io.BufferedWriter;
 import java.io.FileWriter;
 import java.io.IOException;
-
-import Backend.Armv8.Instruction.Armv8Move;
-import Backend.Armv8.Instruction.Armv8Branch;
-import Backend.Armv8.Instruction.Armv8Jump;
+import java.util.*;
+import java.util.stream.Collectors;
 
 public class Armv8Visitor {
     public Module irModule;
@@ -144,7 +139,17 @@ public class Armv8Visitor {
             curArmv8Block = (Armv8Block) LabelList.get(basicBlock);
             generateBasicBlock(basicBlock);
         }
-
+        
+        // 进行寄存器分配
+        System.out.println("\n===== 开始对函数 " + functionName + " 进行寄存器分配 =====");
+        RegisterAllocator allocator = new RegisterAllocator(curArmv8Function);
+        allocator.allocateRegisters();
+        
+        // 应用寄存器分配后的优化
+        PostRegisterOptimizer optimizer = new PostRegisterOptimizer(curArmv8Function);
+        optimizer.optimize();
+        
+        System.out.println("===== 函数 " + functionName + " 寄存器分配完成 =====\n");
     }
 
     // private int calculateStackSize(Function function) {
