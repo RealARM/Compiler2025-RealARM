@@ -246,7 +246,15 @@ public class Armv8Visitor {
         // 处理左操作数
         if (leftOperand instanceof ConstantInt) {
             long value = ((ConstantInt) leftOperand).getValue();
-            leftOp = new Armv8Imm(value);
+            // 对于MUL、DIV操作，立即数必须先加载到寄存器
+            if (opCode == OpCode.MUL || opCode == OpCode.DIV || opCode == OpCode.FDIV || opCode == OpCode.FMUL) {
+                Armv8Reg tempReg = new Armv8VirReg(false);
+                Armv8Move moveInst = new Armv8Move(tempReg, new Armv8Imm(value), true);
+                addInstr(moveInst, insList, predefine);
+                leftOp = tempReg;
+            } else {
+                leftOp = new Armv8Imm(value);
+            }
         } else if (leftOperand instanceof ConstantFloat) {
             double floatValue = ((ConstantFloat) leftOperand).getValue();
             Armv8VirReg fReg = new Armv8VirReg(true);
@@ -261,7 +269,15 @@ public class Armv8Visitor {
         // 处理右操作数
         if (rightOperand instanceof ConstantInt) {
             long value = ((ConstantInt) rightOperand).getValue();
-            rightOp = new Armv8Imm(value);
+            // 对于MUL、DIV操作，立即数必须先加载到寄存器
+            if (opCode == OpCode.MUL || opCode == OpCode.DIV || opCode == OpCode.FDIV || opCode == OpCode.FMUL) {
+                Armv8Reg tempReg = new Armv8VirReg(false);
+                Armv8Move moveInst = new Armv8Move(tempReg, new Armv8Imm(value), true);
+                addInstr(moveInst, insList, predefine);
+                rightOp = tempReg;
+            } else {
+                rightOp = new Armv8Imm(value);
+            }
         } else if (rightOperand instanceof ConstantFloat) {
             // 处理浮点常量
             double floatValue = ((ConstantFloat) rightOperand).getValue();
@@ -311,11 +327,57 @@ public class Armv8Visitor {
             switch (opCode) {
                 case ADD:
                     binaryType = Armv8Binary.Armv8BinaryType.add;
+                    
+                    // 如果加法的操作数涉及两个以上寄存器，考虑使用MADD指令
+                    if (leftOp instanceof Armv8Reg && rightOp instanceof Armv8Reg) {
+                        Armv8Reg leftReg = (Armv8Reg) leftOp;
+                        Armv8Reg rightReg = (Armv8Reg) rightOp;
+                        
+                        // 检查是否有一个寄存器的值可能是常数2的乘积
+                        // 这是一个启发式判断，在某些情况下可以使用MADD优化
+                        if (rightOperand instanceof ConstantInt && ((ConstantInt) rightOperand).getValue() == 2) {
+                            // 创建MADD指令: destReg = leftReg + leftReg (左寄存器乘以1再加上自身)
+                            ArrayList<Armv8Operand> maddOperands = new ArrayList<>();
+                            maddOperands.add(leftReg);  // 加数
+                            maddOperands.add(leftReg);  // 被乘数1
+                            maddOperands.add(Armv8CPUReg.getZeroReg()); // 被乘数2 (值为1)
+                            
+                            Armv8Binary maddInst = new Armv8Binary(maddOperands, destReg, Armv8Binary.Armv8BinaryType.madd);
+                            addInstr(maddInst, insList, predefine);
+                            
+                            if (predefine) {
+                                predefines.put(ins, insList);
+                            }
+                            return; // 提前返回
+                        }
+                    }
                     break;
                 case SUB:
                     binaryType = Armv8Binary.Armv8BinaryType.sub;
                     break;
                 case MUL:
+                    // 检查是否可以使用位移指令优化乘法
+                    if (rightOp instanceof Armv8Imm) {
+                        long value = ((Armv8Imm) rightOp).getValue();
+                        if (value > 0 && isPowerOfTwo(value)) {
+                            // 如果是2的幂，使用LSL指令
+                            int shiftBits = (int) (Math.log(value) / Math.log(2));
+                            binaryType = Armv8Binary.Armv8BinaryType.lsl;
+                            
+                            // 将右操作数替换为移位值
+                            operands.remove(1); // 删除原始的立即数
+                            operands.add(new Armv8Imm(shiftBits)); // 添加移位值
+                            
+                            Armv8Binary lslInst = new Armv8Binary(operands, destReg, binaryType);
+                            addInstr(lslInst, insList, predefine);
+                            
+                            if (predefine) {
+                                predefines.put(ins, insList);
+                            }
+                            return; // 提前返回，不执行后面的通用指令创建
+                        }
+                    }
+                    // 如果不能优化，使用普通MUL指令
                     binaryType = Armv8Binary.Armv8BinaryType.mul;
                     break;
                 case DIV:
@@ -1112,9 +1174,12 @@ public class Armv8Visitor {
         }
     }
 
-    // 判断一个数是否为2的幂
-    private boolean isPowerOfTwo(int n) {
-        return (n & (n - 1)) == 0 && n > 0;
+    /**
+     * 判断一个整数是否是2的幂
+     */
+    private boolean isPowerOfTwo(long n) {
+        if (n <= 0) return false;
+        return (n & (n - 1)) == 0;
     }
 
     private void parseRetInst(ReturnInstruction ins, boolean predefine) {
@@ -1387,9 +1452,13 @@ public class Armv8Visitor {
         // 处理左操作数
         Armv8Operand leftOp;
         if (left instanceof ConstantInt) {
-            // 对于整数常量，创建立即数操作数
+            // 对于整数常量，创建临时寄存器并加载立即数
+            // ARM要求CMP的第一个操作数必须是寄存器
             long value = ((ConstantInt) left).getValue();
-            leftOp = new Armv8Imm(value);
+            Armv8Reg leftReg = new Armv8VirReg(false);
+            Armv8Move moveInst = new Armv8Move(leftReg, new Armv8Imm(value), true);
+            addInstr(moveInst, insList, predefine);
+            leftOp = leftReg;
         } else if (left instanceof ConstantFloat) {
             // 处理浮点常量
             double floatValue = ((ConstantFloat) left).getValue();
@@ -1457,7 +1526,25 @@ public class Armv8Visitor {
         }
         
         // 创建比较指令
-        Armv8Compare.CmpType cmpType = isFloat ? Armv8Compare.CmpType.fcmp : Armv8Compare.CmpType.cmp;
+        Armv8Compare.CmpType cmpType;
+        
+        // 检查是否可以使用CMN指令优化（当比较一个负数常量时）
+        if (!isFloat && rightOp instanceof Armv8Imm) {
+            long value = ((Armv8Imm) rightOp).getValue();
+            if (value < 0) {
+                // 使用CMN指令，比较负值（相当于CMP reg, -imm）
+                cmpType = Armv8Compare.CmpType.cmn;
+                // 将立即数改为正值
+                rightOp = new Armv8Imm(-value);
+            } else {
+                cmpType = Armv8Compare.CmpType.cmp;
+            }
+        } else if (isFloat) {
+            cmpType = Armv8Compare.CmpType.fcmp;
+        } else {
+            cmpType = Armv8Compare.CmpType.cmp;
+        }
+        
         Armv8Compare compareInst = new Armv8Compare(leftOp, rightOp, cmpType);
         addInstr(compareInst, insList, predefine);
         
@@ -1738,5 +1825,25 @@ public class Armv8Visitor {
         // 使用FMOV指令将通用寄存器的位模式移动到浮点寄存器
         Armv8Fmov fmovInst = new Armv8Fmov(destReg, tempReg);
         addInstr(fmovInst, insList, predefine);
+    }
+
+    /**
+     * 创建一个MADD指令（乘加运算 d = a + b*c）
+     * @param destReg 目标寄存器
+     * @param addReg 加数寄存器
+     * @param mulReg1 被乘数1
+     * @param mulReg2 被乘数2
+     * @param insList 指令列表
+     * @param predefine 是否是预定义阶段
+     */
+    private void createMaddInstruction(Armv8Reg destReg, Armv8Reg addReg, Armv8Reg mulReg1, Armv8Reg mulReg2, 
+                                     ArrayList<Armv8Instruction> insList, boolean predefine) {
+        ArrayList<Armv8Operand> operands = new ArrayList<>();
+        operands.add(addReg);   // 第一个操作数是加数
+        operands.add(mulReg1);  // 第二个操作数是被乘数1
+        operands.add(mulReg2);  // 第三个操作数是被乘数2
+        
+        Armv8Binary maddInst = new Armv8Binary(operands, destReg, Armv8Binary.Armv8BinaryType.madd);
+        addInstr(maddInst, insList, predefine);
     }
 } 

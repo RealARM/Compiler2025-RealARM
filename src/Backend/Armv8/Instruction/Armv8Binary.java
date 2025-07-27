@@ -153,6 +153,15 @@ public class Armv8Binary extends Armv8Instruction {
     public String toString() {
         if (imm != null) {
             return binaryTypeToString() + "\t" + getDefReg() + ", " + getOperands().get(0) + ", " + getOperands().get(1);
+        } else if (instType == Armv8BinaryType.madd || instType == Armv8BinaryType.msub) {
+            // MADD/MSUB指令有特殊格式：madd d, a, b, c （d = a*b + c）
+            if (getOperands().size() >= 3) {
+                return binaryTypeToString() + "\t" + getDefReg() + ", " +
+                       getOperands().get(1) + ", " + getOperands().get(2) + ", " + getOperands().get(0);
+            } else {
+                return binaryTypeToString() + "\t" + getDefReg() + ", " + 
+                       getOperands().get(0) + ", " + getOperands().get(1);
+            }
         } else if (shiftBit == 0) {
             return binaryTypeToString() + "\t" + getDefReg() + ", " +
                     getOperands().get(0) + ", " + getOperands().get(1);
