@@ -67,6 +67,9 @@ public class PassManager {
         // 指令组合优化
         addIRPass(new InstCombine());
         
+        // 窥孔优化
+        addIRPass(new PeepHole());
+        
         // 移除无用的不等于比较指令优化
         addIRPass(new RemoveUselessNE());
         
@@ -76,8 +79,14 @@ public class PassManager {
         // 循环SSA形式转换（在循环优化之前）
         addIRPass(new LoopSSATransform());
         
-        // 循环优化（在GCM之前，专门处理循环不变代码）
+        // 循环优化
         addIRPass(new LoopInvariantCodeMotion());
+        
+        // 循环指针访问优化
+        addIRPass(new LoopPtrExtract());
+        
+        // 循环交换优化
+        addIRPass(new LoopInterchange());
         
         // 全局代码移动优化
         addIRPass(new GCM());
