@@ -96,6 +96,75 @@ public class RegisterAllocator {
     }
     
     /**
+     * 检查是否是参数寄存器
+     */
+    private boolean isArgRegister(Armv8Reg reg) {
+        if (reg instanceof Armv8CPUReg) {
+            // 检查是否是x0-x7参数寄存器
+            for (int i = 0; i < 8; i++) {
+                if (reg.equals(Armv8CPUReg.getArmv8ArgReg(i))) {
+                    return true;
+                }
+            }
+        } else if (reg instanceof Armv8FPUReg) {
+            // 检查是否是v0-v7浮点参数寄存器
+            for (int i = 0; i < 8; i++) {
+                if (reg.equals(Armv8FPUReg.getArmv8FArgReg(i))) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 准备预着色寄存器，保护参数寄存器和特殊寄存器
+     */
+    private void preparePrecoloredRegisters() {
+        // 标记参数寄存器为预着色（已分配），避免被重新分配
+        for (int i = 0; i < 8; i++) {  // x0-x7是参数寄存器
+            Armv8CPUReg argReg = Armv8CPUReg.getArmv8ArgReg(i);
+            if (!initialNodes.contains(argReg)) {
+                initialNodes.add(argReg);
+                regColor.put(argReg, i);  // 直接分配颜色
+                coloredNodes.add(argReg);  // 标记为已着色
+            }
+        }
+        
+        // 将浮点参数寄存器标记为预着色
+        for (int i = 0; i < 8; i++) {  // v0-v7是浮点参数寄存器
+            Armv8FPUReg fArgReg = Armv8FPUReg.getArmv8FArgReg(i);
+            if (!initialNodes.contains(fArgReg)) {
+                initialNodes.add(fArgReg);
+                regColor.put(fArgReg, i);  // 直接分配颜色
+                coloredNodes.add(fArgReg);  // 标记为已着色
+            }
+        }
+        
+        // 特殊寄存器也需要保护
+        Armv8CPUReg spReg = Armv8CPUReg.getArmv8SpReg();
+        if (!initialNodes.contains(spReg)) {
+            initialNodes.add(spReg);
+            regColor.put(spReg, 31);  // SP使用特殊颜色
+            coloredNodes.add(spReg);
+        }
+        
+        Armv8CPUReg fpReg = Armv8CPUReg.getArmv8FPReg();
+        if (!initialNodes.contains(fpReg)) {
+            initialNodes.add(fpReg);
+            regColor.put(fpReg, 29);  // FP使用特殊颜色
+            coloredNodes.add(fpReg);
+        }
+        
+        Armv8CPUReg lrReg = Armv8CPUReg.getArmv8RetReg();
+        if (!initialNodes.contains(lrReg)) {
+            initialNodes.add(lrReg);
+            regColor.put(lrReg, 30);  // LR使用特殊颜色
+            coloredNodes.add(lrReg);
+        }
+    }
+
+    /**
      * 初始化算法的数据结构
      */
     private void initialize() {
@@ -169,6 +238,9 @@ public class RegisterAllocator {
         
         System.out.println("最大整型寄存器ID: " + maxIntId + ", 最大浮点寄存器ID: " + maxFloatId);
         System.out.println("当前整型计数: " + Armv8VirReg.getCurrentIntCounter() + ", 当前浮点计数: " + Armv8VirReg.getCurrentFloatCounter());
+        
+        // 准备预着色寄存器（包括参数寄存器）
+        preparePrecoloredRegisters();
         
         // 初始化每个节点的邻接列表和度数
         for (Armv8Reg reg : initialNodes) {
@@ -367,7 +439,7 @@ public class RegisterAllocator {
             constrainedMoves.add(moveInst);
             addWorkList(u);
             addWorkList(v);
-        } else if ((u instanceof Armv8PhyReg && canSafelyCoalesce(u, v)) ||
+        } else if ((u instanceof Armv8PhyReg && !isArgRegister(u) && canSafelyCoalesce(u, v)) ||
                    (!(u instanceof Armv8PhyReg) && isConservative(u, v))) {
             coalescedMoves.add(moveInst);
             combine(u, v);
@@ -409,6 +481,20 @@ public class RegisterAllocator {
         Map<Boolean, Set<Integer>> usedColors = new HashMap<>();
         usedColors.put(true, new HashSet<>()); // 浮点寄存器颜色
         usedColors.put(false, new HashSet<>()); // 整型寄存器颜色
+        
+        // 将函数参数寄存器的颜色标记为已使用
+        for (int i = 0; i < 8; i++) {
+            // 检查当前函数是否真的使用了这些参数寄存器
+            Armv8CPUReg argReg = Armv8CPUReg.getArmv8ArgReg(i);
+            if (coloredNodes.contains(argReg)) {
+                usedColors.get(false).add(i); // 标记颜色i为已使用
+            }
+            
+            Armv8FPUReg fArgReg = Armv8FPUReg.getArmv8FArgReg(i);
+            if (coloredNodes.contains(fArgReg)) {
+                usedColors.get(true).add(i); // 标记颜色i为已使用
+            }
+        }
         
         // 初始化物理寄存器的预设颜色
         for (int i = 0; i < CPU_REG_COUNT; i++) {
@@ -878,14 +964,14 @@ public class RegisterAllocator {
                 System.err.println("错误: 浮点颜色索引 " + colorIndex + " 超出范围 (最大 " + (FPU_REG_COUNT-1) + ")");
                 colorIndex = colorIndex % FPU_REG_COUNT; // 应急处理
             }
-            return Armv8FPUReg.getArmv8FloatReg(colorIndex + 8);
+            return Armv8FPUReg.getArmv8FloatReg(colorIndex + 8); // 从v8开始分配，保留v0-v7
         } else {
-            // 整型寄存器映射: x0-x15
-            if (colorIndex >= CPU_REG_COUNT) {
-                System.err.println("错误: 整型颜色索引 " + colorIndex + " 超出范围 (最大 " + (CPU_REG_COUNT-1) + ")");
-                colorIndex = colorIndex % CPU_REG_COUNT; // 应急处理
+            // 整型寄存器映射: 使用x8-x18作为分配范围，保留x0-x7作为参数寄存器
+            if (colorIndex >= CPU_REG_COUNT - 8) { // 减去8个参数寄存器
+                System.err.println("错误: 整型颜色索引 " + colorIndex + " 超出范围 (最大 " + (CPU_REG_COUNT-8-1) + ")");
+                colorIndex = colorIndex % (CPU_REG_COUNT - 8); // 应急处理
             }
-            return Armv8CPUReg.getArmv8CPUReg(colorIndex);
+            return Armv8CPUReg.getArmv8CPUReg(colorIndex + 8); // 从x8开始分配，保留x0-x7
         }
     }
     
