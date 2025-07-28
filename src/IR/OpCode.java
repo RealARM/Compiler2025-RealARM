@@ -63,6 +63,7 @@ public enum OpCode {
     PHI("phi"),            // phi节点
     CALL("call"),          // 函数调用
     SELECT("select"),      // 选择
+    MOV("mov"),            // 移动指令（用于PHI消除）
     
     // 转换指令
     TRUNC("trunc"),        // 截断转换

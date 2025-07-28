@@ -287,6 +287,8 @@ public class IRPrinter {
             printConversionInstruction((ConversionInstruction) inst);
         } else if (inst instanceof CompareInstruction) {
             printCompareInstruction((CompareInstruction) inst);
+        } else if (inst instanceof MoveInstruction) {
+            printMoveInstruction((MoveInstruction) inst);
         } else {
             out.print("unknown instruction");
         }
@@ -499,5 +501,15 @@ public class IRPrinter {
         out.print(printValueName(inst.getLeft()));
         out.print(", ");
         out.print(printValueName(inst.getRight()));
+    }
+
+    /**
+     * 打印Move指令
+     */
+    private void printMoveInstruction(MoveInstruction inst) {
+        out.print("mov ");
+        out.print(inst.getType());
+        out.print(" ");
+        out.print(printValueName(inst.getSource()));
     }
 } 

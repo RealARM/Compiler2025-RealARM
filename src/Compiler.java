@@ -39,7 +39,7 @@ public class Compiler {
         boolean generateIR = true;      // 是否生成IR
         boolean printIR = true;         // 是否打印IR
         boolean generateARM = true;     // 是否生成ARM汇编代码
-        int optimizationLevel = 2;      // 优化级别 (0-3)
+        int optimizationLevel = 1;      // 优化级别 (0-3)
         boolean debug = true;          // 是否打印调试信息
         
         try {

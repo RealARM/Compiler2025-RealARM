@@ -163,6 +163,45 @@ public class Armv8Binary extends Armv8Instruction {
                        getOperands().get(0) + ", " + getOperands().get(1);
             }
         } else if (shiftBit == 0) {
+            // 检查SUB指令的特殊情况：如果第一个操作数是立即数，第二个是寄存器，需要调整为NEG指令
+            // 检查是否是0减某个数的情况
+            if (instType == Armv8BinaryType.sub && 
+                getOperands().size() == 2 && 
+                getOperands().get(0) instanceof Armv8Imm && 
+                ((Armv8Imm)getOperands().get(0)).getValue() == 0) {
+                // sub dest, #0, src -> neg dest, src (相当于 dest = 0 - src = -src)
+                // 直接使用标准的取负值指令
+                return "sub\t" + getDefReg() + ", xzr, " + getOperands().get(1);
+            }
+            
+            // 检查是否两个操作数都是立即数（这是错误的ARM语法）
+            if (getOperands().size() == 2 && 
+                getOperands().get(0) instanceof Armv8Imm && 
+                getOperands().get(1) instanceof Armv8Imm) {
+                
+                // 对于两个立即数的情况，先用mov指令加载第一个立即数到零寄存器xzr的别名
+                // 实际上这种情况不应该发生，因为编译器应该在前面就处理了
+                // 这里作为保护措施，使用mov + add的组合
+                Armv8Imm firstImm = (Armv8Imm) getOperands().get(0);
+                Armv8Imm secondImm = (Armv8Imm) getOperands().get(1);
+                
+                // 如果是简单的常量计算，直接计算结果
+                if (instType == Armv8BinaryType.add) {
+                    long result = firstImm.getValue() + secondImm.getValue();
+                    return "mov\t" + getDefReg() + ", #" + result;
+                } else if (instType == Armv8BinaryType.sub) {
+                    long result = firstImm.getValue() - secondImm.getValue();
+                    return "mov\t" + getDefReg() + ", #" + result;
+                } else if (instType == Armv8BinaryType.mul) {
+                    long result = firstImm.getValue() * secondImm.getValue();
+                    return "mov\t" + getDefReg() + ", #" + result;
+                } else {
+                    // 对于其他操作，使用mov指令加载第一个操作数，然后执行运算
+                    return "mov\t" + getDefReg() + ", " + getOperands().get(0) + "\n\t" +
+                           binaryTypeToString() + "\t" + getDefReg() + ", " + getDefReg() + ", " + getOperands().get(1);
+                }
+            }
+            
             return binaryTypeToString() + "\t" + getDefReg() + ", " +
                     getOperands().get(0) + ", " + getOperands().get(1);
         } else {
