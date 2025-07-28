@@ -3,6 +3,13 @@ package IR.Pass.Utils;
 import IR.Value.BasicBlock;
 import IR.Value.Function;
 import IR.Value.Instructions.Instruction;
+import IR.Value.Instructions.PhiInstruction;
+import IR.Value.Instructions.BinaryInstruction;
+import IR.Value.Instructions.CompareInstruction;
+import IR.Value.Instructions.BranchInstruction;
+import IR.Value.Value;
+import IR.Value.ConstantInt;
+import IR.OpCode;
 
 import java.util.*;
 
@@ -60,6 +67,185 @@ public class LoopAnalysis {
             e.printStackTrace();
             return new ArrayList<>();
         }
+    }
+    
+    /**
+     * 分析循环归纳变量
+     * 这个方法会识别循环中的基本归纳变量及相关信息
+     */
+    public static void analyzeInductionVariables(Function function) {
+        // 获取函数的所有循环
+        List<Loop> topLoops = getTopLevelLoops(function);
+        if (topLoops.isEmpty()) {
+            topLoops = analyzeLoops(function);
+        }
+        
+        // 获取所有循环（按DFS顺序）
+        List<Loop> allLoops = getAllLoopsInDFSOrder(function);
+        
+        // 对每个循环分析归纳变量
+        for (Loop loop : allLoops) {
+            identifyInductionVariable(loop);
+        }
+    }
+    
+    /**
+     * 识别循环的归纳变量
+     * 主要识别形如 i = phi(init, i+step) 的循环变量模式
+     */
+    private static void identifyInductionVariable(Loop loop) {
+        BasicBlock header = loop.getHeader();
+        
+        // 获取可能的归纳变量PHI节点（在循环头中定义）
+        for (Instruction inst : header.getInstructions()) {
+            if (inst instanceof PhiInstruction phi) {
+                // 检查PHI节点是否符合归纳变量模式
+                if (isPotentialInductionVariablePhi(phi, loop)) {
+                    Value indVar = phi; // PHI本身就是归纳变量
+                    Value init = findPhiInitValue(phi, loop);
+                    Instruction update = findInductionUpdate(phi, loop);
+                    
+                    if (update instanceof BinaryInstruction binInst) {
+                        Value step = getStepValue(binInst, indVar);
+                        Value end = findEndCondition(loop, indVar);
+                        
+                        if (init != null && step != null) {
+                            // 设置循环归纳变量信息
+                            loop.setInductionVariableInfo(indVar, init, end, step, update);
+                            return; // 找到一个归纳变量就足够了
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * 检查PHI节点是否可能是归纳变量
+     */
+    private static boolean isPotentialInductionVariablePhi(PhiInstruction phi, Loop loop) {
+        // PHI节点必须有两个输入
+        if (phi.getOperandCount() != 2) {
+            return false;
+        }
+        
+        // 一个输入应来自循环外（初始值），一个来自循环内（更新值）
+        boolean hasOutsideInput = false;
+        boolean hasInsideInput = false;
+        
+        for (BasicBlock incomingBlock : phi.getIncomingBlocks()) {
+            if (loop.contains(incomingBlock)) {
+                hasInsideInput = true;
+            } else {
+                hasOutsideInput = true;
+            }
+        }
+        
+        return hasOutsideInput && hasInsideInput;
+    }
+    
+    /**
+     * 查找PHI节点的初始值（来自循环外的值）
+     */
+    private static Value findPhiInitValue(PhiInstruction phi, Loop loop) {
+        for (int i = 0; i < phi.getOperandCount(); i++) {
+            BasicBlock incomingBlock = phi.getIncomingBlocks().get(i);
+            if (!loop.contains(incomingBlock)) {
+                return phi.getOperand(i);
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 查找归纳变量的更新指令
+     */
+    private static Instruction findInductionUpdate(PhiInstruction phi, Loop loop) {
+        for (int i = 0; i < phi.getOperandCount(); i++) {
+            BasicBlock incomingBlock = phi.getIncomingBlocks().get(i);
+            if (loop.contains(incomingBlock)) {
+                Value updateValue = phi.getOperand(i);
+                if (updateValue instanceof Instruction inst) {
+                    if (inst instanceof BinaryInstruction binInst) {
+                        // 检查是否是i+step或i-step形式
+                        if (binInst.getOpCode() == OpCode.ADD || binInst.getOpCode() == OpCode.SUB) {
+                            if (binInst.getLeft() == phi || binInst.getRight() == phi) {
+                                return binInst;
+                            }
+                        }
+                    }
+                    // 递归向上查找
+                    return inst;
+                }
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 获取归纳变量的步长值
+     */
+    private static Value getStepValue(BinaryInstruction binInst, Value indVar) {
+        if (binInst.getOpCode() == OpCode.ADD) {
+            // i + step
+            if (binInst.getLeft() == indVar) {
+                return binInst.getRight();
+            }
+            // step + i
+            else if (binInst.getRight() == indVar) {
+                return binInst.getLeft();
+            }
+        } else if (binInst.getOpCode() == OpCode.SUB) {
+            // i - step
+            if (binInst.getLeft() == indVar) {
+                // 如果是常量，返回负值
+                if (binInst.getRight() instanceof ConstantInt constInt) {
+                    return new ConstantInt(-constInt.getValue());
+                }
+                return binInst.getRight();
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 查找循环的结束条件
+     */
+    private static Value findEndCondition(Loop loop, Value indVar) {
+        // 检查循环头的终结指令
+        BasicBlock header = loop.getHeader();
+        Instruction terminator = header.getTerminator();
+        
+        if (terminator instanceof BranchInstruction brInst && !brInst.isUnconditional()) {
+            Value condition = brInst.getCondition();
+            if (condition instanceof CompareInstruction cmpInst) {
+                // 检查是否对归纳变量进行比较
+                if (cmpInst.getLeft() == indVar) {
+                    return cmpInst.getRight();
+                } else if (cmpInst.getRight() == indVar) {
+                    return cmpInst.getLeft();
+                }
+            }
+        }
+        
+        // 如果在头块没找到，尝试查找循环内的其他分支
+        for (BasicBlock block : loop.getBlocks()) {
+            if (block != header) {
+                Instruction blockTerminator = block.getTerminator();
+                if (blockTerminator instanceof BranchInstruction brInst && !brInst.isUnconditional()) {
+                    Value condition = brInst.getCondition();
+                    if (condition instanceof CompareInstruction cmpInst) {
+                        if (cmpInst.getLeft() == indVar) {
+                            return cmpInst.getRight();
+                        } else if (cmpInst.getRight() == indVar) {
+                            return cmpInst.getLeft();
+                        }
+                    }
+                }
+            }
+        }
+        
+        return null;
     }
     
     /**
@@ -321,5 +507,13 @@ public class LoopAnalysis {
         }
         
         return allLoops;
+    }
+    
+    /**
+     * 为函数执行完整的循环分析，包括归纳变量分析
+     */
+    public static void runLoopIndVarInfo(Function function) {
+        analyzeLoops(function);
+        analyzeInductionVariables(function);
     }
 } 
