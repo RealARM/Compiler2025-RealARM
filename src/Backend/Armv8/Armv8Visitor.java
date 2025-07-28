@@ -105,7 +105,7 @@ public class Armv8Visitor {
         }
         
         // 创建ARM全局变量并添加到模块
-        Armv8GlobalVariable armv8GlobalVar = new Armv8GlobalVariable(varName, initialValues, byteSize, isFloat);
+        Armv8GlobalVariable armv8GlobalVar = new Armv8GlobalVariable(varName, initialValues, byteSize, isFloat, elementType);
         
         // 根据是否有初始值决定放在data段还是bss段
         if (initialValues == null || initialValues.isEmpty()) {
