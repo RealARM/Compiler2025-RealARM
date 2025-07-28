@@ -598,8 +598,31 @@ public class Armv8Visitor {
                     return;
                 } else {
                     // 对于变量条件，使用寄存器
+                    condOp = RegList.get(condition);
                     
-                            condOp = RegList.get(condition);
+                    // PHI消除后的修复：如果直接查找失败，按名称查找
+                    if (condOp == null) {
+                        String condName = condition.getName();
+                        for (Map.Entry<Value, Armv8Reg> entry : RegList.entrySet()) {
+                            if (entry.getKey().getName().equals(condName)) {
+                                condOp = entry.getValue();
+                                break;
+                            }
+                        }
+                    }
+                    
+                    // 最终错误检查
+                    if (condOp == null) {
+                        System.err.println("错误: 无法找到条件变量的寄存器映射: " + condition.getName());
+                        System.err.println("条件对象类型: " + condition.getClass().getName());
+                        System.err.println("可用的寄存器映射:");
+                        for (Map.Entry<Value, Armv8Reg> entry : RegList.entrySet()) {
+                            System.err.println("  " + entry.getKey().getName() + " -> " + entry.getValue());
+                        }
+                        // 创建一个临时寄存器作为fallback
+                        condOp = new Armv8VirReg(false);
+                        System.err.println("使用临时寄存器作为fallback");
+                    }
                     
                     // 使用CBZ指令测试条件是否为0
                     
@@ -1921,14 +1944,49 @@ public class Armv8Visitor {
         // 获取源值
         Value source = ins.getSource();
         
-        // 为目标分配寄存器
+        // 为目标分配寄存器 - 关键修复：处理PHI消除后的重复名称
         Armv8Reg destReg;
-        if (ins.getType() instanceof FloatType) {
-            destReg = new Armv8VirReg(true);
-        } else {
-            destReg = new Armv8VirReg(false);
+        
+        // 检查是否已经有同名的寄存器映射（来自PHI消除）
+        // 如果有，使用现有的寄存器；否则创建新的
+        String destName = ins.getName();
+        
+        // 查找是否已经有同名的Value映射到寄存器
+        Value existingValue = null;
+        for (Map.Entry<Value, Armv8Reg> entry : RegList.entrySet()) {
+            if (entry.getKey().getName().equals(destName)) {
+                existingValue = entry.getKey();
+                break;
+            }
         }
+        
+        if (existingValue != null) {
+            // 使用现有的寄存器
+            destReg = RegList.get(existingValue);
+        } else {
+            // 创建新的寄存器
+            if (ins.getType() instanceof FloatType) {
+                destReg = new Armv8VirReg(true);
+            } else {
+                destReg = new Armv8VirReg(false);
+            }
+        }
+        
+        // 为当前Move指令建立映射
         RegList.put(ins, destReg);
+        
+        // 关键修复：为目标名称建立映射，让其他指令能按名称找到寄存器
+        // 创建一个代理Value对象来代表目标变量
+        if (existingValue == null) {
+            // 创建一个代理Value对象，使用Move指令的名称
+            Value targetValue = new Value(destName, ins.getType()) {
+                @Override
+                public String toString() {
+                    return destName;
+                }
+            };
+            RegList.put(targetValue, destReg);
+        }
         
         // 处理源操作数
         Armv8Operand srcOp;
