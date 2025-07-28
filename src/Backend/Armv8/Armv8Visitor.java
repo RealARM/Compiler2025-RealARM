@@ -9,6 +9,7 @@ import IR.OpCode;
 import IR.Type.*;
 import IR.Value.*;
 import IR.Value.Instructions.*;
+import IR.Visitor.IRVisitor;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
@@ -198,10 +199,12 @@ public class Armv8Visitor {
             parseStore((StoreInstruction) ins, predefine);
         } else if (ins instanceof CompareInstruction) {
             parseCompareInst((CompareInstruction) ins, predefine);
-        } else if (ins instanceof PhiInstruction) {
-            parsePhiInst((PhiInstruction) ins, predefine);
         } else if (ins instanceof UnaryInstruction) {
             parseUnaryInst((UnaryInstruction) ins, predefine);
+        } else if (ins instanceof MoveInstruction) {
+            parseMoveInst((MoveInstruction) ins, predefine);
+        } else if (ins instanceof PhiInstruction) {
+            parsePhiInst((PhiInstruction) ins, predefine);
         } else {
             System.err.println("错误: 不支持的指令: " + ins.getClass().getName());
         }
@@ -333,10 +336,10 @@ public class Armv8Visitor {
                     break;
                 // 其他操作类型
                 case AND:
-                    binaryType = Armv8Binary.Armv8BinaryType.and;
+                        binaryType = Armv8Binary.Armv8BinaryType.and;
                     break;
                 case OR:
-                    binaryType = Armv8Binary.Armv8BinaryType.orr;
+                        binaryType = Armv8Binary.Armv8BinaryType.orr;
                     break;
                 case XOR:
                     binaryType = Armv8Binary.Armv8BinaryType.eor;
@@ -508,7 +511,11 @@ public class Armv8Visitor {
                 // 处理左操作数
                 if (left instanceof ConstantInt) {
                     long value = ((ConstantInt) left).getValue();
-                    leftOp = new Armv8Imm((int) value);
+                    // ARM要求CMP的第一个操作数必须是寄存器
+                    Armv8Reg leftReg = new Armv8VirReg(false);
+                    Armv8Move moveInst = new Armv8Move(leftReg, new Armv8Imm(value), true);
+                    addInstr(moveInst, insList, predefine);
+                    leftOp = leftReg;
                 } else {
                     leftOp = RegList.get(left);
                 }
@@ -516,13 +523,23 @@ public class Armv8Visitor {
                 // 处理右操作数
                 if (right instanceof ConstantInt) {
                     long value = ((ConstantInt) right).getValue();
-                    rightOp = new Armv8Imm((int) value);
+                    rightOp = new Armv8Imm(value);
                 } else {
                     rightOp = RegList.get(right);
                 }
                 
                 // 创建比较指令
                 Armv8Compare.CmpType cmpType = Armv8Compare.CmpType.cmp;
+                if (!cmpIns.isFloatCompare() && rightOp instanceof Armv8Imm) {
+                    long value = ((Armv8Imm) rightOp).getValue();
+                    if (value < 0) {
+                        // 使用CMN指令，比较负值（相当于CMP reg, -imm）
+                        cmpType = Armv8Compare.CmpType.cmn;
+                        // 将立即数改为正值
+                        rightOp = new Armv8Imm(-value);
+                    }
+                }
+                
                 Armv8Compare compareInst = new Armv8Compare(leftOp, rightOp, cmpType);
                 addInstr(compareInst, insList, predefine);
                 
@@ -582,7 +599,7 @@ public class Armv8Visitor {
                 } else {
                     // 对于变量条件，使用寄存器
                     
-                    condOp = RegList.get(condition);
+                            condOp = RegList.get(condition);
                     
                     // 使用CBZ指令测试条件是否为0
                     
@@ -591,9 +608,9 @@ public class Armv8Visitor {
                     cbzInst.setPredSucc(curArmv8Block);
                     addInstr(cbzInst, insList, predefine);
                     
-                    // 否则跳转到true块
-                    Armv8Jump jumpTrueInst = new Armv8Jump(armTrueBlock, curArmv8Block);
-                    addInstr(jumpTrueInst, insList, predefine);
+                    // 否则跳转到false块
+                    Armv8Jump jumpFalseInst = new Armv8Jump(armFalseBlock, curArmv8Block);
+                    addInstr(jumpFalseInst, insList, predefine);
                 }
             }
         }
@@ -1730,7 +1747,8 @@ public class Armv8Visitor {
                 break;
         }
         
-        // 创建条件设置指令（CSET）将比较结果存储到目标寄存器
+        // 直接使用一条指令设置结果
+        // 使用指定的条件码将结果设置为1或0
         Armv8Cset csetInst = new Armv8Cset(destReg, condType);
         addInstr(csetInst, insList, predefine);
         
@@ -1891,6 +1909,63 @@ public class Armv8Visitor {
                 System.err.println("不支持的一元操作: " + opCode);
                 break;
         }
+        
+        if (predefine) {
+            predefines.put(ins, insList);
+        }
+    }
+
+    private void parseMoveInst(MoveInstruction ins, boolean predefine) {
+        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        
+        // 获取源值
+        Value source = ins.getSource();
+        
+        // 为目标分配寄存器
+        Armv8Reg destReg;
+        if (ins.getType() instanceof FloatType) {
+            destReg = new Armv8VirReg(true);
+        } else {
+            destReg = new Armv8VirReg(false);
+        }
+        RegList.put(ins, destReg);
+        
+        // 处理源操作数
+        Armv8Operand srcOp;
+        if (source instanceof ConstantInt) {
+            long value = ((ConstantInt) source).getValue();
+            srcOp = new Armv8Imm(value);
+        } else if (source instanceof ConstantFloat) {
+            double floatValue = ((ConstantFloat) source).getValue();
+            Armv8Reg fpuReg = new Armv8VirReg(true);
+            loadFloatConstant(fpuReg, floatValue, insList, predefine);
+            srcOp = fpuReg;
+        } else {
+            // 从RegList获取源寄存器
+            if (!RegList.containsKey(source)) {
+                if (source.getType() instanceof FloatType) {
+                    Armv8Reg srcReg = new Armv8VirReg(true);
+                    RegList.put(source, srcReg);
+                    srcOp = srcReg;
+                } else {
+                    Armv8Reg srcReg = new Armv8VirReg(false);
+                    RegList.put(source, srcReg);
+                    srcOp = srcReg;
+                }
+            } else {
+                srcOp = RegList.get(source);
+            }
+        }
+        
+        // 创建移动指令
+        Armv8Move moveInst;
+        if (srcOp instanceof Armv8Imm) {
+            moveInst = new Armv8Move(destReg, srcOp, true);
+        } else {
+            moveInst = new Armv8Move(destReg, (Armv8Reg) srcOp, false);
+        }
+        
+        addInstr(moveInst, insList, predefine);
         
         if (predefine) {
             predefines.put(ins, insList);

@@ -163,6 +163,17 @@ public class Armv8Binary extends Armv8Instruction {
                        getOperands().get(0) + ", " + getOperands().get(1);
             }
         } else if (shiftBit == 0) {
+            // 检查SUB指令的特殊情况：如果第一个操作数是立即数，第二个是寄存器，需要调整为NEG指令
+            // 检查是否是0减某个数的情况
+            if (instType == Armv8BinaryType.sub && 
+                getOperands().size() == 2 && 
+                getOperands().get(0) instanceof Armv8Imm && 
+                ((Armv8Imm)getOperands().get(0)).getValue() == 0) {
+                // sub dest, #0, src -> neg dest, src (相当于 dest = 0 - src = -src)
+                // 直接使用标准的取负值指令
+                return "sub\t" + getDefReg() + ", xzr, " + getOperands().get(1);
+            }
+            
             return binaryTypeToString() + "\t" + getDefReg() + ", " +
                     getOperands().get(0) + ", " + getOperands().get(1);
         } else {
