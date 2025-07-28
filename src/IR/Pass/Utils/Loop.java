@@ -4,6 +4,9 @@ import IR.Value.BasicBlock;
 import IR.Value.Instructions.Instruction;
 import IR.Value.Value;
 import IR.Value.Constant;
+import IR.Value.Instructions.BinaryInstruction;
+import IR.Value.Instructions.PhiInstruction;
+import IR.OpCode;
 
 import java.util.*;
 
@@ -32,6 +35,24 @@ public class Loop {
     // 循环深度
     private int depth;
     
+    // 循环的归纳变量
+    private Value inductionVariable;
+    
+    // 归纳变量的初始值
+    private Value initValue;
+    
+    // 归纳变量的结束条件
+    private Value endValue;
+    
+    // 归纳变量的步长
+    private Value stepValue;
+    
+    // 归纳变量的运算指令
+    private Instruction updateInstruction;
+    
+    // 是否已设置归纳变量
+    private boolean hasIndVar;
+    
     /**
      * 构造函数
      * @param header 循环头基本块
@@ -44,6 +65,7 @@ public class Loop {
         this.exitBlocks = new HashSet<>();
         this.parentLoop = null;
         this.depth = 0;
+        this.hasIndVar = false;
     }
     
     /**
@@ -151,6 +173,60 @@ public class Loop {
         }
         
         return true;
+    }
+    
+    /**
+     * 设置循环归纳变量及相关信息
+     */
+    public void setInductionVariableInfo(Value indVar, Value init, Value end, Value step, Instruction update) {
+        this.inductionVariable = indVar;
+        this.initValue = init;
+        this.endValue = end;
+        this.stepValue = step;
+        this.updateInstruction = update;
+        this.hasIndVar = true;
+    }
+    
+    /**
+     * 判断是否已设置归纳变量
+     */
+    public boolean hasInductionVariable() {
+        return hasIndVar;
+    }
+    
+    /**
+     * 获取循环归纳变量
+     */
+    public Value getInductionVariable() {
+        return inductionVariable;
+    }
+    
+    /**
+     * 获取归纳变量初始值
+     */
+    public Value getInitValue() {
+        return initValue;
+    }
+    
+    /**
+     * 获取归纳变量结束条件
+     */
+    public Value getEndValue() {
+        return endValue;
+    }
+    
+    /**
+     * 获取归纳变量步长
+     */
+    public Value getStepValue() {
+        return stepValue;
+    }
+    
+    /**
+     * 获取归纳变量更新指令
+     */
+    public Instruction getUpdateInstruction() {
+        return updateInstruction;
     }
     
     // Getter方法

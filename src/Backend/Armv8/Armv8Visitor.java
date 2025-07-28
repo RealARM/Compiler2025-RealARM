@@ -365,6 +365,13 @@ public class Armv8Visitor {
                     break;
                 case SUB:
                     binaryType = Armv8Binary.Armv8BinaryType.sub;
+                    // 检查是否是从立即数0减去寄存器的情况
+                    if (leftOp instanceof Armv8Imm && ((Armv8Imm) leftOp).getValue() == 0) {
+                        // 如果是 0 - reg 的情况，使用零寄存器，重新创建操作数列表
+                        operands.clear();
+                        operands.add(Armv8CPUReg.getZeroReg());
+                        operands.add(rightOp);
+                    }
                     break;
                 case MUL:
                     // 检查是否可以使用位移指令优化乘法
@@ -390,8 +397,29 @@ public class Armv8Visitor {
                     }
                     // 如果不能优化，使用普通MUL指令
                     binaryType = Armv8Binary.Armv8BinaryType.mul;
+                    
+                    // 对于乘法操作，右操作数必须是寄存器而非立即数
+                    if (rightOp instanceof Armv8Imm) {
+                        Armv8VirReg immReg = new Armv8VirReg(false);
+                        Armv8Move loadImmInst = new Armv8Move(immReg, rightOp, false);
+                        addInstr(loadImmInst, insList, predefine);
+                        rightOp = immReg;
+                        // 更新操作数列表
+                        operands.remove(1);
+                        operands.add(immReg);
+                    }
                     break;
                 case DIV:
+                    // 对于除法操作，右操作数必须是寄存器而非立即数
+                    if (rightOp instanceof Armv8Imm) {
+                        Armv8VirReg immReg = new Armv8VirReg(false);
+                        Armv8Move loadImmInst = new Armv8Move(immReg, rightOp, false);
+                        addInstr(loadImmInst, insList, predefine);
+                        rightOp = immReg;
+                        // 更新操作数列表
+                        operands.remove(1);
+                        operands.add(immReg);
+                    }
                     binaryType = Armv8Binary.Armv8BinaryType.sdiv;
                     break;
                 case REM:
@@ -399,8 +427,20 @@ public class Armv8Visitor {
                     // 1. 先做除法 dest = a / b
                     // 2. 然后计算余数 dest = a - dest * b
                     
+                    // 对于立即数右操作数，需要先加载到寄存器中
+                    if (rightOp instanceof Armv8Imm) {
+                        Armv8VirReg immReg = new Armv8VirReg(false);
+                        Armv8Move loadImmInst = new Armv8Move(immReg, rightOp, false);
+                        addInstr(loadImmInst, insList, predefine);
+                        rightOp = immReg;
+                        // 更新操作数列表
+                        operands.remove(1);
+                        operands.add(immReg);
+                    }
+                    // System.out.println(rightOp);
                     // 创建除法操作
                     Armv8Binary divInst = new Armv8Binary(operands, destReg, Armv8Binary.Armv8BinaryType.sdiv);
+                    // System.out.println(operands);
                     addInstr(divInst, insList, predefine);
                     
                     // 创建临时寄存器存储乘法结果
@@ -1284,7 +1324,6 @@ public class Armv8Visitor {
                 loadFloatConstant(returnReg, floatValue, insList, predefine);
             }
             else {
-
                 // 如果是变量，需要确保已经有关联的寄存器
                 if (!RegList.containsKey(returnValue)) {
                     
@@ -1326,9 +1365,7 @@ public class Armv8Visitor {
                             addInstr(copyInst, insList, predefine);
                         }
                     } else {
-                        // 处理其他未分配寄存器的值
-                        System.err.println("警告: 返回值未在寄存器列表中找到: " + returnValue);
-                        // 为其他值分配临时寄存器并初始化为0
+                                                // 为其他值分配临时寄存器并初始化为0
                         if (returnValue.getType() instanceof FloatType) {
                              Armv8VirReg tempReg = new Armv8VirReg(true);
                             RegList.put(returnValue, tempReg);

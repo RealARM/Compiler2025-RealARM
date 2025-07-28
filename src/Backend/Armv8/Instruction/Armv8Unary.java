@@ -50,16 +50,18 @@ public class Armv8Unary extends Armv8Instruction {
         // Append the instruction mnemonic based on type
         switch (unaryType) {
             case neg:
-                sb.append("neg ");
+                // ARM64中，NEG指令实际上是SUB指令的特殊形式: sub dest, xzr, src
+                // 但我们直接使用NEG助记符，汇编器会处理
+                sb.append("neg\t");
                 break;
             case mvn:
-                sb.append("mvn ");
+                sb.append("mvn\t");
                 break;
             case fneg:
-                sb.append("fneg ");
+                sb.append("fneg\t");
                 break;
             default:
-                sb.append("UNKNOWN_UNARY ");
+                sb.append("UNKNOWN_UNARY\t");
                 break;
         }
         

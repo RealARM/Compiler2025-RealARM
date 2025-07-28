@@ -3,6 +3,13 @@ package IR.Pass.Utils;
 import IR.Value.BasicBlock;
 import IR.Value.Function;
 import IR.Value.Instructions.Instruction;
+import IR.Value.Instructions.PhiInstruction;
+import IR.Value.Instructions.BinaryInstruction;
+import IR.Value.Instructions.CompareInstruction;
+import IR.Value.Instructions.BranchInstruction;
+import IR.Value.Value;
+import IR.Value.ConstantInt;
+import IR.OpCode;
 
 import java.util.*;
 
@@ -19,38 +26,226 @@ public class LoopAnalysis {
     private static final Map<BasicBlock, Loop> blockToLoop = new HashMap<>();
     
     /**
+     * 为函数中的所有基本块计算循环深度信息（兼容旧接口）
+     * @param function 待分析的函数
+     */
+    public static void runLoopInfo(Function function) {
+        try {
+            analyzeLoops(function);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    
+    /**
      * 分析函数中的循环并构建循环树
      * @param function 待分析的函数
      * @return 顶层循环列表
      */
     public static List<Loop> analyzeLoops(Function function) {
-        // 清空之前的分析结果
-        functionLoops.remove(function);
-        
-        // 计算支配关系
-        DominatorAnalysis.computeDominatorTree(function);
-        
-        // 识别所有循环
-        List<Loop> allLoops = identifyLoops(function);
-        
-        // 构建循环树
-        List<Loop> topLevelLoops = buildLoopTree(allLoops);
-        
-        // 保存结果
-        functionLoops.put(function, topLevelLoops);
-        
-        // 更新基本块的循环深度
-        updateLoopDepths(allLoops);
-        
-        return topLevelLoops;
+        try {
+            // 清空之前的分析结果
+            functionLoops.remove(function);
+            
+            // 计算支配关系
+            DominatorAnalysis.computeDominatorTree(function);
+            
+            // 识别所有循环
+            List<Loop> allLoops = identifyLoops(function);
+            
+            // 构建循环树
+            List<Loop> topLevelLoops = buildLoopTree(allLoops);
+            
+            // 保存结果
+            functionLoops.put(function, topLevelLoops);
+            
+            // 更新基本块的循环深度
+            updateLoopDepths(allLoops);
+            
+            return topLevelLoops;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return new ArrayList<>();
+        }
     }
     
     /**
-     * 为函数中的所有基本块计算循环深度信息（兼容旧接口）
-     * @param function 待分析的函数
+     * 分析循环归纳变量
+     * 这个方法会识别循环中的基本归纳变量及相关信息
      */
-    public static void runLoopInfo(Function function) {
-        analyzeLoops(function);
+    public static void analyzeInductionVariables(Function function) {
+        // 获取函数的所有循环
+        List<Loop> topLoops = getTopLevelLoops(function);
+        if (topLoops.isEmpty()) {
+            topLoops = analyzeLoops(function);
+        }
+        
+        // 获取所有循环（按DFS顺序）
+        List<Loop> allLoops = getAllLoopsInDFSOrder(function);
+        
+        // 对每个循环分析归纳变量
+        for (Loop loop : allLoops) {
+            identifyInductionVariable(loop);
+        }
+    }
+    
+    /**
+     * 识别循环的归纳变量
+     * 主要识别形如 i = phi(init, i+step) 的循环变量模式
+     */
+    private static void identifyInductionVariable(Loop loop) {
+        BasicBlock header = loop.getHeader();
+        
+        // 获取可能的归纳变量PHI节点（在循环头中定义）
+        for (Instruction inst : header.getInstructions()) {
+            if (inst instanceof PhiInstruction phi) {
+                // 检查PHI节点是否符合归纳变量模式
+                if (isPotentialInductionVariablePhi(phi, loop)) {
+                    Value indVar = phi; // PHI本身就是归纳变量
+                    Value init = findPhiInitValue(phi, loop);
+                    Instruction update = findInductionUpdate(phi, loop);
+                    
+                    if (update instanceof BinaryInstruction binInst) {
+                        Value step = getStepValue(binInst, indVar);
+                        Value end = findEndCondition(loop, indVar);
+                        
+                        if (init != null && step != null) {
+                            // 设置循环归纳变量信息
+                            loop.setInductionVariableInfo(indVar, init, end, step, update);
+                            return; // 找到一个归纳变量就足够了
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * 检查PHI节点是否可能是归纳变量
+     */
+    private static boolean isPotentialInductionVariablePhi(PhiInstruction phi, Loop loop) {
+        // PHI节点必须有两个输入
+        if (phi.getOperandCount() != 2) {
+            return false;
+        }
+        
+        // 一个输入应来自循环外（初始值），一个来自循环内（更新值）
+        boolean hasOutsideInput = false;
+        boolean hasInsideInput = false;
+        
+        for (BasicBlock incomingBlock : phi.getIncomingBlocks()) {
+            if (loop.contains(incomingBlock)) {
+                hasInsideInput = true;
+            } else {
+                hasOutsideInput = true;
+            }
+        }
+        
+        return hasOutsideInput && hasInsideInput;
+    }
+    
+    /**
+     * 查找PHI节点的初始值（来自循环外的值）
+     */
+    private static Value findPhiInitValue(PhiInstruction phi, Loop loop) {
+        for (int i = 0; i < phi.getOperandCount(); i++) {
+            BasicBlock incomingBlock = phi.getIncomingBlocks().get(i);
+            if (!loop.contains(incomingBlock)) {
+                return phi.getOperand(i);
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 查找归纳变量的更新指令
+     */
+    private static Instruction findInductionUpdate(PhiInstruction phi, Loop loop) {
+        for (int i = 0; i < phi.getOperandCount(); i++) {
+            BasicBlock incomingBlock = phi.getIncomingBlocks().get(i);
+            if (loop.contains(incomingBlock)) {
+                Value updateValue = phi.getOperand(i);
+                if (updateValue instanceof Instruction inst) {
+                    if (inst instanceof BinaryInstruction binInst) {
+                        // 检查是否是i+step或i-step形式
+                        if (binInst.getOpCode() == OpCode.ADD || binInst.getOpCode() == OpCode.SUB) {
+                            if (binInst.getLeft() == phi || binInst.getRight() == phi) {
+                                return binInst;
+                            }
+                        }
+                    }
+                    // 递归向上查找
+                    return inst;
+                }
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 获取归纳变量的步长值
+     */
+    private static Value getStepValue(BinaryInstruction binInst, Value indVar) {
+        if (binInst.getOpCode() == OpCode.ADD) {
+            // i + step
+            if (binInst.getLeft() == indVar) {
+                return binInst.getRight();
+            }
+            // step + i
+            else if (binInst.getRight() == indVar) {
+                return binInst.getLeft();
+            }
+        } else if (binInst.getOpCode() == OpCode.SUB) {
+            // i - step
+            if (binInst.getLeft() == indVar) {
+                // 如果是常量，返回负值
+                if (binInst.getRight() instanceof ConstantInt constInt) {
+                    return new ConstantInt(-constInt.getValue());
+                }
+                return binInst.getRight();
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 查找循环的结束条件
+     */
+    private static Value findEndCondition(Loop loop, Value indVar) {
+        // 检查循环头的终结指令
+        BasicBlock header = loop.getHeader();
+        Instruction terminator = header.getTerminator();
+        
+        if (terminator instanceof BranchInstruction brInst && !brInst.isUnconditional()) {
+            Value condition = brInst.getCondition();
+            if (condition instanceof CompareInstruction cmpInst) {
+                // 检查是否对归纳变量进行比较
+                if (cmpInst.getLeft() == indVar) {
+                    return cmpInst.getRight();
+                } else if (cmpInst.getRight() == indVar) {
+                    return cmpInst.getLeft();
+                }
+            }
+        }
+        
+        // 如果在头块没找到，尝试查找循环内的其他分支
+        for (BasicBlock block : loop.getBlocks()) {
+            if (block != header) {
+                Instruction blockTerminator = block.getTerminator();
+                if (blockTerminator instanceof BranchInstruction brInst && !brInst.isUnconditional()) {
+                    Value condition = brInst.getCondition();
+                    if (condition instanceof CompareInstruction cmpInst) {
+                        if (cmpInst.getLeft() == indVar) {
+                            return cmpInst.getRight();
+                        } else if (cmpInst.getRight() == indVar) {
+                            return cmpInst.getLeft();
+                        }
+                    }
+                }
+            }
+        }
+        
+        return null;
     }
     
     /**
@@ -79,24 +274,45 @@ public class LoopAnalysis {
         
         // 寻找所有回边
         for (BasicBlock header : function.getBasicBlocks()) {
-            for (BasicBlock latch : header.getPredecessors()) {
+            if (header == null) {
+                continue;
+            }
+            
+            List<BasicBlock> predecessors = header.getPredecessors();
+            if (predecessors == null) {
+                continue;
+            }
+            
+            for (BasicBlock latch : predecessors) {
+                if (latch == null) {
+                    continue;
+                }
+                
                 // 如果latch被header支配，则存在回边
-                if (isDominated(latch, header)) {
-                    // 创建或获取循环
-                    Loop loop = findOrCreateLoop(header, loops);
-                    
-                    // 添加回边
-                    loop.addLatchBlock(latch);
-                    
-                    // 收集循环体
-                    collectLoopBlocks(loop, header, latch);
+                try {
+                    if (isDominated(latch, header)) {
+                        // 创建或获取循环
+                        Loop loop = findOrCreateLoop(header, loops);
+                        
+                        // 添加回边
+                        loop.addLatchBlock(latch);
+                        
+                        // 收集循环体
+                        collectLoopBlocks(loop, header, latch);
+                    }
+                } catch (Exception e) {
+                    e.printStackTrace();
                 }
             }
         }
         
         // 计算每个循环的出口块
         for (Loop loop : loops) {
-            loop.computeExitBlocks();
+            try {
+                loop.computeExitBlocks();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
         }
         
         return loops;
@@ -220,6 +436,19 @@ public class LoopAnalysis {
      * 判断block是否被header支配
      */
     private static boolean isDominated(BasicBlock block, BasicBlock header) {
+        // 递归深度检测，避免无限递归
+        return isDominatedWithDepth(block, header, 0);
+    }
+    
+    /**
+     * 带深度检查的支配关系判断
+     */
+    private static boolean isDominatedWithDepth(BasicBlock block, BasicBlock header, int depth) {
+        // 防止堆栈溢出
+        if (depth > 1000) {
+            return false;
+        }
+        
         // 当前简化实现：检查header是否是block的支配者
         // 如果block是header本身，则被支配
         if (block == header) {
@@ -227,14 +456,19 @@ public class LoopAnalysis {
         }
         
         // 如果block的直接支配者是header，则被支配
-        if (block.getIdominator() == header) {
+        BasicBlock idom = block.getIdominator();
+        if (idom == header) {
             return true;
         }
         
+        // 检查支配者链是否形成循环
+        if (idom == block) {
+            return false;
+        }
+        
         // 递归检查block的直接支配者是否被header支配
-        BasicBlock idom = block.getIdominator();
-        if (idom != null && idom != block) {
-            return isDominated(idom, header);
+        if (idom != null) {
+            return isDominatedWithDepth(idom, header, depth + 1);
         }
         
         return false;
@@ -273,5 +507,13 @@ public class LoopAnalysis {
         }
         
         return allLoops;
+    }
+    
+    /**
+     * 为函数执行完整的循环分析，包括归纳变量分析
+     */
+    public static void runLoopIndVarInfo(Function function) {
+        analyzeLoops(function);
+        analyzeInductionVariables(function);
     }
 } 

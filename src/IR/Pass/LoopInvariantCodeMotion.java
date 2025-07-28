@@ -19,7 +19,7 @@ import java.util.*;
 public class LoopInvariantCodeMotion implements Pass.IRPass {
 
     // 调试模式
-    private final boolean debug = true;
+    private final boolean debug = false;
     
     // 基本块数量阈值
     private final int MAX_BLOCKS_THRESHOLD = 1000;

@@ -28,6 +28,9 @@ public class Armv8Cbz extends Armv8Instruction {
     
     @Override
     public String toString() {
-        return "cbz\t" + getOperands().get(0) + ", " + getOperands().get(1);
+        Armv8Block targetBlock = (Armv8Block) getOperands().get(1);
+        // Use getLabelName() to get just the label name without colon
+        String blockName = targetBlock.getLabelName();
+        return "cbz\t" + getOperands().get(0) + ", " + blockName;
     }
 } 
