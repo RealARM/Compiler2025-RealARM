@@ -174,6 +174,34 @@ public class Armv8Binary extends Armv8Instruction {
                 return "sub\t" + getDefReg() + ", xzr, " + getOperands().get(1);
             }
             
+            // 检查是否两个操作数都是立即数（这是错误的ARM语法）
+            if (getOperands().size() == 2 && 
+                getOperands().get(0) instanceof Armv8Imm && 
+                getOperands().get(1) instanceof Armv8Imm) {
+                
+                // 对于两个立即数的情况，先用mov指令加载第一个立即数到零寄存器xzr的别名
+                // 实际上这种情况不应该发生，因为编译器应该在前面就处理了
+                // 这里作为保护措施，使用mov + add的组合
+                Armv8Imm firstImm = (Armv8Imm) getOperands().get(0);
+                Armv8Imm secondImm = (Armv8Imm) getOperands().get(1);
+                
+                // 如果是简单的常量计算，直接计算结果
+                if (instType == Armv8BinaryType.add) {
+                    long result = firstImm.getValue() + secondImm.getValue();
+                    return "mov\t" + getDefReg() + ", #" + result;
+                } else if (instType == Armv8BinaryType.sub) {
+                    long result = firstImm.getValue() - secondImm.getValue();
+                    return "mov\t" + getDefReg() + ", #" + result;
+                } else if (instType == Armv8BinaryType.mul) {
+                    long result = firstImm.getValue() * secondImm.getValue();
+                    return "mov\t" + getDefReg() + ", #" + result;
+                } else {
+                    // 对于其他操作，使用mov指令加载第一个操作数，然后执行运算
+                    return "mov\t" + getDefReg() + ", " + getOperands().get(0) + "\n\t" +
+                           binaryTypeToString() + "\t" + getDefReg() + ", " + getDefReg() + ", " + getOperands().get(1);
+                }
+            }
+            
             return binaryTypeToString() + "\t" + getDefReg() + ", " +
                     getOperands().get(0) + ", " + getOperands().get(1);
         } else {
