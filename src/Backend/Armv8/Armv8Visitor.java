@@ -277,11 +277,18 @@ public class Armv8Visitor {
         }
         RegList.put(ins, destReg);
         
-        // 处理左操作数
-        Armv8Operand leftOp = processOperand(leftOperand, insList, predefine, isFloatOperation, opCode == OpCode.MUL || opCode == OpCode.DIV);
+        // 处理左操作数 - 对于大多数二元运算，左操作数必须是寄存器
+        boolean leftRequiresReg = opCode == OpCode.MUL || opCode == OpCode.DIV || 
+                                 opCode == OpCode.ADD || opCode == OpCode.SUB ||
+                                 opCode == OpCode.AND || opCode == OpCode.OR || opCode == OpCode.XOR ||
+                                 opCode == OpCode.SHL || opCode == OpCode.LSHR || opCode == OpCode.ASHR ||
+                                 opCode == OpCode.REM;
         
-        // 处理右操作数
-        Armv8Operand rightOp = processOperand(rightOperand, insList, predefine, isFloatOperation, opCode == OpCode.MUL || opCode == OpCode.DIV);
+        Armv8Operand leftOp = processOperand(leftOperand, insList, predefine, isFloatOperation, leftRequiresReg);
+        
+        // 处理右操作数 - 右操作数可以是立即数（除了乘除法）
+        boolean rightRequiresReg = opCode == OpCode.MUL || opCode == OpCode.DIV || opCode == OpCode.REM;
+        Armv8Operand rightOp = processOperand(rightOperand, insList, predefine, isFloatOperation, rightRequiresReg);
         
         // 创建操作数列表
         ArrayList<Armv8Operand> operands = new ArrayList<>();
