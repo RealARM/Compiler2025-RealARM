@@ -729,6 +729,17 @@ public class IRBuilder {
     }
 
     /**
+     * 创建一个Move指令（用于PHI消除）
+     * @param targetName 目标变量名称
+     * @param targetType 目标变量类型  
+     * @param source 源变量
+     * @return Move指令（不自动插入到基本块，由调用者决定插入位置）
+     */
+    public static MoveInstruction createMove(String targetName, Type targetType, Value source) {
+        return new MoveInstruction(targetName, targetType, source);
+    }
+
+    /**
      * 重置基本块计数器
      */
     public static void resetBlockCounter() {

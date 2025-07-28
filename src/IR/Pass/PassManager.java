@@ -96,6 +96,9 @@ public class PassManager {
         
         // 无用代码消除
         addIRPass(new DCE());
+        
+        // PHI指令消除（在进入后端前将PHI转换为Move指令）
+        addIRPass(new RemovePhiPass());
     }
     
     /**
