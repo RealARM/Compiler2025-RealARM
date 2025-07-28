@@ -5,13 +5,7 @@ import Backend.Armv8.Operand.Armv8Reg;
 import java.util.ArrayList;
 import java.util.Collections;
 
-/**
- * ARMv8 Move instruction
- * Used for moving values between registers or loading immediate values into registers
- * Implemented as either:
- * - mov rd, operand (register or immediate)
- * - movk rd, #imm (for upper 16-bit immediate loads)
- */
+
 public class Armv8Move extends Armv8Instruction {
     private final boolean isImmediate; // 是否是立即数操作数
     private final MoveType moveType; // 移动类型
@@ -25,6 +19,10 @@ public class Armv8Move extends Armv8Instruction {
      */
     public Armv8Move(Armv8Reg destReg, Armv8Operand operand, boolean isImmediate) {
         super(destReg, new ArrayList<>(Collections.singletonList(operand)));
+        if (operand == null) {
+            System.err.println("警告: 创建Move指令时操作数为null，destReg=" + destReg);
+            new Exception().printStackTrace(); // 打印调用栈
+        }
         this.isImmediate = isImmediate;
         this.moveType = MoveType.MOV;
     }
@@ -38,6 +36,10 @@ public class Armv8Move extends Armv8Instruction {
      */
     public Armv8Move(Armv8Reg destReg, Armv8Operand operand, boolean isImmediate, MoveType moveType) {
         super(destReg, new ArrayList<>(Collections.singletonList(operand)));
+        if (operand == null) {
+            System.err.println("警告: 创建Move指令时操作数为null，destReg=" + destReg + ", moveType=" + moveType);
+            new Exception().printStackTrace(); // 打印调用栈
+        }
         this.isImmediate = isImmediate;
         this.moveType = moveType;
     }
@@ -90,8 +92,17 @@ public class Armv8Move extends Armv8Instruction {
         sb.append(getDefReg().toString());
         sb.append(",\t");
         
-        // 使用父类方法获取操作数，确保获取到寄存器分配后的物理寄存器
-        sb.append(getOperands().get(0).toString());
+        // 安全地获取操作数，防止空指针异常
+        if (getOperands().isEmpty()) {
+            throw new RuntimeException("Move instruction has no operands");
+        } else {
+            Armv8Operand operand = getOperands().get(0);
+            if (operand == null) {
+                throw new RuntimeException("Move instruction operand is null");
+            } else {
+                sb.append(operand.toString());
+            }
+        }
 
         // 添加移位信息（如果有）
         if (shift > 0) {

@@ -44,15 +44,15 @@ public class PassManager {
      * 初始化默认的优化Pass
      */
     private void initializePasses() {
+        // 尾递归消除优化
+        addIRPass(new TailRecursionElimination());
+        
         // 常量优化
         addIRPass(new ConstantDeduplication());
         addIRPass(new ConstantArraySimplifier());
         
         // 基本块处理
         addIRPass(new EmptyBlockHandler());
-        
-        // 删除单跳转基本块优化
-        addIRPass(new RemoveSingleJumpBB());
         
         // 常量处理
         addIRPass(new ConstantPropagation());
@@ -64,11 +64,29 @@ public class PassManager {
         // 指令组合优化
         addIRPass(new InstCombine());
         
+        // 窥孔优化
+        addIRPass(new PeepHole());
+        
+        // 删除单跳转基本块优化 - 暂时禁用，因为它与PeepHole有冲突
+        addIRPass(new RemoveSingleJumpBB());
+        
+        // 移除无用的不等于比较指令优化
+        addIRPass(new RemoveUselessNE());
+        
         // 控制流优化
         addIRPass(new BranchSimplifier());
         
-        // 循环优化（在GCM之前，专门处理循环不变代码）
+        // 循环SSA形式转换（在循环优化之前）
+        addIRPass(new LoopSSATransform());
+        
+        // 循环优化
         addIRPass(new LoopInvariantCodeMotion());
+        
+        // 循环指针访问优化
+        addIRPass(new LoopPtrExtract());
+        
+        // 循环交换优化
+        addIRPass(new LoopInterchange());
         
         // 全局代码移动优化
         addIRPass(new GCM());

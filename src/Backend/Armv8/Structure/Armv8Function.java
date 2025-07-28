@@ -145,6 +145,57 @@ public class Armv8Function {
         return sb.toString();
     }
 
+    
+
+    public static String generateMemsetFunction() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(".global memset\n");
+        sb.append("memset:\n");
+    
+        // 函数序言
+        sb.append("\tstp x29, x30, [sp, #-16]!\n");
+        sb.append("\tmov x29, sp\n");
+    
+        // 保存原始指针 s 到 x3，用于最后返回
+        sb.append("\tmov x3, x0\n");
+    
+        // 将参数 c 保留在 x4，注意这里只使用低 8 位（strb 只用最低字节）
+        sb.append("\tmov x4, x1\n");
+    
+        // 字节数 n 存入 x5
+        sb.append("\tmov x5, x2\n");
+    
+        // 判断 n 是否为 0
+        sb.append("\tcmp x5, #0\n");
+        sb.append("\tbeq .Lmemset_done\n");
+    
+        // 循环计数器 i
+        sb.append("\tmov x6, #0\n");
+    
+        sb.append(".Lmemset_loop:\n");
+        sb.append("\tcmp x6, x5\n");
+        sb.append("\tbge .Lmemset_done\n");
+    
+        sb.append("\tadd x7, x0, x6\n");     // 当前地址：s + i
+        sb.append("\tstrb w4, [x7]\n");      // 存储低 8 位（自动截断 x4）
+    
+        sb.append("\tadd x6, x6, #1\n");     // i++
+        sb.append("\tb .Lmemset_loop\n");
+    
+        sb.append(".Lmemset_done:\n");
+        sb.append("\tmov x0, x3\n");         // 返回原始指针 s
+    
+        // 函数结尾
+        sb.append("\tldp x29, x30, [sp], #16\n");
+        sb.append("\tret\n");
+    
+        return sb.toString();
+    }
+    
+
+
+    
+
     public String dump() {
         StringBuilder sb = new StringBuilder();
         sb.append(".global ").append(name).append("\n");
