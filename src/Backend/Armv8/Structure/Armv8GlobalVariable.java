@@ -41,23 +41,11 @@ public class Armv8GlobalVariable extends Armv8Label {
             }
             sb.append("\n");
         } else {
-            // 根据元素类型的大小选择正确的汇编指令
-            int elementSize = elementType != null ? elementType.getSize() : 4;
-            if (elementSize == 1) {
-                sb.append("\t.byte\t");
-            } else if (elementSize == 2) {
-                sb.append("\t.hword\t");
-            } else if (elementSize == 4) {
-                sb.append("\t.word\t");
-            } else if (elementSize == 8) {
-                sb.append("\t.quad\t");
-            } else {
-                // 默认使用word
-                sb.append("\t.word\t");
-            }
+            // 强制所有整型全局变量都使用64位 (.quad)
+            sb.append("\t.quad\t");
             
             for (int i = 0; i < initialValues.size(); i++) {
-                sb.append(initialValues.get(i).intValue());
+                sb.append(initialValues.get(i).longValue());
                 if (i != initialValues.size() - 1) {
                     sb.append(", ");
                 }

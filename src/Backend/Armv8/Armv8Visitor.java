@@ -67,11 +67,24 @@ public class Armv8Visitor {
         
         // 获取类型的元素类型
         Type elementType = globalVariable.getElementType();
-        int byteSize = elementType.getSize();
+        // 强制所有整型全局变量都使用8字节（64位）
+        int byteSize;
         boolean isFloat = elementType instanceof FloatType;
         
+        if (isFloat) {
+            byteSize = elementType.getSize();
+        } else {
+            // 整型强制使用8字节
+            byteSize = 8;
+        }
+        
         if (globalVariable.isArray()) {
-            byteSize = globalVariable.getArraySize() * elementType.getSize();
+            if (isFloat) {
+                byteSize = globalVariable.getArraySize() * elementType.getSize();
+            } else {
+                // 整型数组强制每个元素8字节
+                byteSize = globalVariable.getArraySize() * 8;
+            }
             // 处理数组初始化
             if (globalVariable.isZeroInitialized()) {
                 // 零初始化的数组
@@ -1275,8 +1288,13 @@ public class Armv8Visitor {
                     elementSize = 8;
                     arrayType = ((PointerType) arrayType).getElementType();
                 } else {
-                    // 基本类型元素
-                    elementSize = arrayType.getSize();
+                    // 对于全局变量的整型数组，强制使用8字节元素大小
+                    if (pointer instanceof GlobalVariable && !(arrayType instanceof FloatType)) {
+                        elementSize = 8;  // 全局变量整型强制使用64位
+                    } else {
+                        // 基本类型元素使用原始大小
+                        elementSize = arrayType.getSize();
+                    }
                 }
                 
                 // 处理索引值

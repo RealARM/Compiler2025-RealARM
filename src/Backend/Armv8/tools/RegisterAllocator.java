@@ -4,424 +4,320 @@ import Backend.Armv8.Instruction.*;
 import Backend.Armv8.Operand.*;
 import Backend.Armv8.Structure.*;
 import java.util.*;
-import java.util.stream.Collectors;
 
 /**
- * 寄存器分配器
- * 使用图着色算法将虚拟寄存器分配到物理寄存器
+ * ARMv8寄存器分配器
+ * 参考经典图着色算法，使用简化但有效的实现策略
  */
 public class RegisterAllocator {
     
-    // 算法相关的数据结构
-    private final LinkedHashMap<Armv8Block, LivenessAnalyzer.LivenessInfo> livenessInfoMap;
-    private final LinkedHashSet<Armv8Reg> initialNodes = new LinkedHashSet<>();
-    private final LinkedHashSet<Armv8Reg> simplifyWorkList = new LinkedHashSet<>();  // 低度数且与move无关的节点
-    private final LinkedHashSet<Armv8Reg> freezeWorkList = new LinkedHashSet<>();    // 低度数且与move有关的节点
-    private final LinkedHashSet<Armv8Reg> spillWorkList = new LinkedHashSet<>();     // 高度数的节点
-    private final LinkedHashSet<Armv8Reg> spilledNodes = new LinkedHashSet<>();     // 需要溢出的节点
-    private final LinkedHashSet<Armv8Reg> coalescedNodes = new LinkedHashSet<>();   // 已合并的节点
-    private final LinkedHashSet<Armv8Reg> coloredNodes = new LinkedHashSet<>();     // 已着色的节点
-    private final Stack<Armv8Reg> selectStack = new Stack<>();                      // 选择栈
+    private final Armv8Function currentFunction;
+    private LinkedHashMap<Armv8Block, LivenessAnalyzer.LivenessInfo> livenessMap;
     
-    // move指令相关的工作列表
-    private final LinkedHashSet<Armv8Move> coalescedMoves = new LinkedHashSet<>();
-    private final LinkedHashSet<Armv8Move> constrainedMoves = new LinkedHashSet<>();
-    private final LinkedHashSet<Armv8Move> frozenMoves = new LinkedHashSet<>();
-    private final LinkedHashSet<Armv8Move> worklistMoves = new LinkedHashSet<>();
-    private final LinkedHashSet<Armv8Move> activeMoves = new LinkedHashSet<>();
+    // 工作列表
+    private LinkedHashSet<Armv8Operand> simplifyList; // 低度数且非move相关的节点
+    private LinkedHashSet<Armv8Operand> freezeList;   // 低度数且move相关的节点
+    private LinkedHashSet<Armv8Operand> spillList;    // 高度数的节点
+    private LinkedHashSet<Armv8Operand> spilledRegs;  // 需要溢出的节点
+    private LinkedHashSet<Armv8Operand> coalescedRegs; // 已合并的节点
+    private LinkedHashSet<Armv8Reg> coloredRegs;      // 已着色的节点
+    private Stack<Armv8Operand> eliminationStack;     // 消除栈
+    
+    // move指令相关
+    private LinkedHashSet<Armv8Instruction> coalescedMoves;   // 已合并的move
+    private LinkedHashSet<Armv8Instruction> constrainedMoves; // 受约束的move
+    private LinkedHashSet<Armv8Instruction> frozenMoves;     // 冻结的move
+    private LinkedHashSet<Armv8Instruction> workingMoves;    // 工作中的move
+    private LinkedHashSet<Armv8Instruction> activeMoves;     // 活跃的move
     
     // 图结构
-    private final LinkedHashSet<Pair<Armv8Reg, Armv8Reg>> interferenceEdges = new LinkedHashSet<>();
-    private final LinkedHashMap<Armv8Reg, LinkedHashSet<Armv8Reg>> adjacencyList = new LinkedHashMap<>();
-    private final LinkedHashMap<Armv8Reg, Integer> nodeDegree = new LinkedHashMap<>();
-    private final LinkedHashMap<Armv8Reg, LinkedHashSet<Armv8Move>> moveList = new LinkedHashMap<>();
-    private final LinkedHashMap<Armv8Reg, Armv8Reg> alias = new LinkedHashMap<>();
-    private final LinkedHashMap<Armv8Reg, Integer> regColor = new LinkedHashMap<>();
+    private LinkedHashSet<Pair<Armv8Reg, Armv8Reg>> conflictSet;         // 冲突边集合
+    private LinkedHashMap<Armv8Operand, LinkedHashSet<Armv8Operand>> neighborList; // 邻接表
+    private LinkedHashMap<Armv8Operand, Integer> degreeMap;              // 度数映射
+    private LinkedHashMap<Armv8Operand, LinkedHashSet<Armv8Move>> moveMap; // move映射
+    private LinkedHashMap<Armv8Operand, Armv8Operand> aliasMap;          // 别名映射
+    private LinkedHashMap<Armv8Reg, Integer> colorMap;                   // 颜色映射
+    private LinkedHashSet<Armv8VirReg> allVirtualRegs;                   // 所有虚拟寄存器
     
-    // 常量
-    private static final int CPU_REG_COUNT = 16;  // 可用的CPU寄存器数量 (x0-x15)
-    private static final int FPU_REG_COUNT = 24;  // 可用的FPU寄存器数量 (v8-v31)
-    
-    private final Armv8Function currentFunction;
+    // 常量定义
+    private final int CPU_COLOR_COUNT = 8;   // 整型寄存器颜色数 (x8-x15)
+    private final int FPU_COLOR_COUNT = 24;  // 浮点寄存器颜色数 (v8-v31)
     
     public RegisterAllocator(Armv8Function function) {
         this.currentFunction = function;
-        this.livenessInfoMap = LivenessAnalyzer.analyzeLiveness(function);
     }
     
-    /**
-     * 执行寄存器分配的主流程
-     */
     public void allocateRegisters() {
-        boolean needSpill = true;
+        System.out.println("\n===== 开始为函数 " + currentFunction.getName() + " 分配寄存器 =====");
         
-        while (needSpill) {
+        // 分别处理整型和浮点寄存器
+        allocateForRegisterType(false); // 整型寄存器
+        allocateForRegisterType(true);  // 浮点寄存器
+        
+        System.out.println("===== 函数 " + currentFunction.getName() + " 寄存器分配完成 =====\n");
+    }
+    
+    private void allocateForRegisterType(boolean isFloat) {
+        String regTypeName = isFloat ? "浮点" : "整型";
+        int colorLimit = isFloat ? FPU_COLOR_COUNT : CPU_COLOR_COUNT;
+        
+        boolean needsSpill = true;
+        int spillRound = 0;
+        final int MAX_SPILL_ROUNDS = 5;
+        
+        while (needsSpill && spillRound < MAX_SPILL_ROUNDS) {
+            spillRound++;
+            System.out.println("第 " + spillRound + " 轮分配 " + regTypeName + " 寄存器");
+            
             // 初始化数据结构
-            initialize();
+            initializeDataStructures();
+            
+            // 收集当前类型的虚拟寄存器
+            collectVirtualRegisters(isFloat);
             
             // 构建干扰图
-            buildInterferenceGraph();
+            constructInterferenceGraph(isFloat);
             
             // 创建工作列表
-            makeWorkLists();
+            buildWorkLists(colorLimit);
             
-            // 执行图着色算法的主循环
-            while (!simplifyWorkList.isEmpty() || !worklistMoves.isEmpty() || 
-                   !freezeWorkList.isEmpty() || !spillWorkList.isEmpty()) {
-                
-                if (!simplifyWorkList.isEmpty()) {
-                    simplify();
-                } else if (!worklistMoves.isEmpty()) {
-                    coalesce();
-                } else if (!freezeWorkList.isEmpty()) {
-                    freeze();
-                } else if (!spillWorkList.isEmpty()) {
-                    selectSpill();
+            // 执行图着色主循环
+            do {
+                if (!simplifyList.isEmpty()) {
+                    performSimplify();
+                } else if (!workingMoves.isEmpty()) {
+                    performCoalesce();
+                } else if (!freezeList.isEmpty()) {
+                    performFreeze();
+                } else if (!spillList.isEmpty()) {
+                    selectForSpill();
                 }
-            }
+            } while (!simplifyList.isEmpty() || !workingMoves.isEmpty() || 
+                     !freezeList.isEmpty() || !spillList.isEmpty());
             
             // 分配颜色
-            assignColors();
+            needsSpill = !assignColors(colorLimit);
             
-            // 检查是否需要溢出
-            if (spilledNodes.isEmpty()) {
-                needSpill = false;
-                // 重写程序，将虚拟寄存器替换为物理寄存器
-                rewriteProgram();
+            if (!needsSpill) {
+                // 重写程序
+                rewriteProgram(isFloat);
             } else {
-                // 处理溢出的寄存器
-                rewriteSpilledNodes();
+                // 处理溢出
+                handleSpillRegisters(isFloat);
             }
+        }
+        
+        if (spillRound >= MAX_SPILL_ROUNDS) {
+            System.err.println("警告: " + regTypeName + " 寄存器分配达到最大轮数，可能存在问题");
         }
     }
     
-    /**
-     * 检查是否是参数寄存器
-     */
-    private boolean isArgRegister(Armv8Reg reg) {
-        if (reg instanceof Armv8CPUReg) {
-            // 检查是否是x0-x7参数寄存器
-            for (int i = 0; i < 8; i++) {
-                if (reg.equals(Armv8CPUReg.getArmv8ArgReg(i))) {
-                    return true;
-                }
-            }
-        } else if (reg instanceof Armv8FPUReg) {
-            // 检查是否是v0-v7浮点参数寄存器
-            for (int i = 0; i < 8; i++) {
-                if (reg.equals(Armv8FPUReg.getArmv8FArgReg(i))) {
-                    return true;
-                }
-            }
-        }
-        return false;
+    private void initializeDataStructures() {
+        // 清空工作列表
+        simplifyList = new LinkedHashSet<>();
+        freezeList = new LinkedHashSet<>();
+        spillList = new LinkedHashSet<>();
+        spilledRegs = new LinkedHashSet<>();
+        coalescedRegs = new LinkedHashSet<>();
+        coloredRegs = new LinkedHashSet<>();
+        eliminationStack = new Stack<>();
+        
+        // 清空move相关结构
+        coalescedMoves = new LinkedHashSet<>();
+        constrainedMoves = new LinkedHashSet<>();
+        frozenMoves = new LinkedHashSet<>();
+        workingMoves = new LinkedHashSet<>();
+        activeMoves = new LinkedHashSet<>();
+        
+        // 清空图结构
+        conflictSet = new LinkedHashSet<>();
+        neighborList = new LinkedHashMap<>();
+        degreeMap = new LinkedHashMap<>();
+        moveMap = new LinkedHashMap<>();
+        aliasMap = new LinkedHashMap<>();
+        colorMap = new LinkedHashMap<>();
+        allVirtualRegs = new LinkedHashSet<>();
+        
+        // 计算活跃性信息
+        livenessMap = LivenessAnalyzer.analyzeLiveness(currentFunction);
     }
-
-    /**
-     * 准备预着色寄存器，保护参数寄存器和特殊寄存器
-     */
-    private void preparePrecoloredRegisters() {
-        // 标记参数寄存器为预着色（已分配），避免被重新分配
-        for (int i = 0; i < 8; i++) {  // x0-x7是参数寄存器
-            Armv8CPUReg argReg = Armv8CPUReg.getArmv8ArgReg(i);
-            if (!initialNodes.contains(argReg)) {
-                initialNodes.add(argReg);
-                regColor.put(argReg, i);  // 直接分配颜色
-                coloredNodes.add(argReg);  // 标记为已着色
-            }
-        }
-        
-        // 将浮点参数寄存器标记为预着色
-        for (int i = 0; i < 8; i++) {  // v0-v7是浮点参数寄存器
-            Armv8FPUReg fArgReg = Armv8FPUReg.getArmv8FArgReg(i);
-            if (!initialNodes.contains(fArgReg)) {
-                initialNodes.add(fArgReg);
-                regColor.put(fArgReg, i);  // 直接分配颜色
-                coloredNodes.add(fArgReg);  // 标记为已着色
-            }
-        }
-        
-        // 特殊寄存器也需要保护
-        Armv8CPUReg spReg = Armv8CPUReg.getArmv8SpReg();
-        if (!initialNodes.contains(spReg)) {
-            initialNodes.add(spReg);
-            regColor.put(spReg, 31);  // SP使用特殊颜色
-            coloredNodes.add(spReg);
-        }
-        
-        Armv8CPUReg fpReg = Armv8CPUReg.getArmv8FPReg();
-        if (!initialNodes.contains(fpReg)) {
-            initialNodes.add(fpReg);
-            regColor.put(fpReg, 29);  // FP使用特殊颜色
-            coloredNodes.add(fpReg);
-        }
-        
-        Armv8CPUReg lrReg = Armv8CPUReg.getArmv8RetReg();
-        if (!initialNodes.contains(lrReg)) {
-            initialNodes.add(lrReg);
-            regColor.put(lrReg, 30);  // LR使用特殊颜色
-            coloredNodes.add(lrReg);
-        }
-    }
-
-    /**
-     * 初始化算法的数据结构
-     */
-    private void initialize() {
-        // 清空所有工作列表
-        simplifyWorkList.clear();
-        freezeWorkList.clear();
-        spillWorkList.clear();
-        spilledNodes.clear();
-        coalescedNodes.clear();
-        coloredNodes.clear();
-        selectStack.clear();
-        
-        coalescedMoves.clear();
-        constrainedMoves.clear();
-        frozenMoves.clear();
-        worklistMoves.clear();
-        activeMoves.clear();
-        
-        interferenceEdges.clear();
-        adjacencyList.clear();
-        nodeDegree.clear();
-        moveList.clear();
-        alias.clear();
-        regColor.clear();
-        
-        // 收集所有虚拟寄存器
-        initialNodes.clear();
-        
-        // 首先扫描一遍收集所有的定义和使用
+    
+    private void collectVirtualRegisters(boolean isFloat) {
         for (Armv8Block block : currentFunction.getBlocks()) {
-            for (Armv8Instruction instruction : block.getInstructions()) {
-                // 添加定义的寄存器
-                if (instruction.getDefReg() instanceof Armv8VirReg) {
-                    initialNodes.add(instruction.getDefReg());
+            for (Armv8Instruction inst : block.getInstructions()) {
+                // 收集定义的虚拟寄存器
+                if (inst.getDefReg() instanceof Armv8VirReg) {
+                    Armv8VirReg virReg = (Armv8VirReg) inst.getDefReg();
+                    if (virReg.isFloat() == isFloat) {
+                        allVirtualRegs.add(virReg);
+                        ensureNodeExists(virReg);
+                    }
                 }
                 
-                // 添加使用的寄存器
-                for (Armv8Operand operand : instruction.getOperands()) {
+                // 收集使用的虚拟寄存器
+                for (Armv8Operand operand : inst.getOperands()) {
                     if (operand instanceof Armv8VirReg) {
-                        initialNodes.add((Armv8Reg) operand);
-                    }
-                }
-                
-                // 收集move指令
-                if (instruction instanceof Armv8Move) {
-                    Armv8Move moveInst = (Armv8Move) instruction;
-                    if (moveInst.getOperands().size() > 0 && moveInst.getOperands().get(0) instanceof Armv8Reg) {
-                        worklistMoves.add(moveInst);
+                        Armv8VirReg virReg = (Armv8VirReg) operand;
+                        if (virReg.isFloat() == isFloat) {
+                            allVirtualRegs.add(virReg);
+                            ensureNodeExists(virReg);
+                        }
                     }
                 }
             }
         }
         
-        // 打印调试信息
-        System.out.println("函数 " + currentFunction.getName() + " 收集到 " + initialNodes.size() + " 个虚拟寄存器");
-        
-        // 验证虚拟寄存器编号的连续性
-        int maxIntId = -1;
-        int maxFloatId = -1;
-        
-        for (Armv8Reg reg : initialNodes) {
-            if (reg instanceof Armv8VirReg) {
-                Armv8VirReg virReg = (Armv8VirReg) reg;
-                if (virReg.isFloat()) {
-                    maxFloatId = Math.max(maxFloatId, virReg.getId());
-                } else {
-                    maxIntId = Math.max(maxIntId, virReg.getId());
-                }
-            }
-        }
-        
-        System.out.println("最大整型寄存器ID: " + maxIntId + ", 最大浮点寄存器ID: " + maxFloatId);
-        System.out.println("当前整型计数: " + Armv8VirReg.getCurrentIntCounter() + ", 当前浮点计数: " + Armv8VirReg.getCurrentFloatCounter());
-        
-        // 准备预着色寄存器（包括参数寄存器）
-        preparePrecoloredRegisters();
-        
-        // 初始化每个节点的邻接列表和度数
-        for (Armv8Reg reg : initialNodes) {
-            adjacencyList.put(reg, new LinkedHashSet<>());
-            nodeDegree.put(reg, 0);
-            moveList.put(reg, new LinkedHashSet<>());
-            alias.put(reg, reg);
-        }
+        System.out.println("收集到 " + allVirtualRegs.size() + " 个虚拟寄存器");
     }
     
-    /**
-     * 构建干扰图
-     */
-    private void buildInterferenceGraph() {
+    private void constructInterferenceGraph(boolean isFloat) {
         for (Armv8Block block : currentFunction.getBlocks()) {
-            // 获取基本块的活跃性信息
-            LivenessAnalyzer.LivenessInfo liveness = livenessInfoMap.get(block);
-            if (liveness == null) {
-                System.err.println("警告：块 " + block.getName() + " 没有活跃性信息");
-                continue;
-            }
+            LivenessAnalyzer.LivenessInfo blockLiveness = livenessMap.get(block);
+            if (blockLiveness == null) continue;
             
-            // 从基本块结尾开始，初始活跃变量集为liveOut
-            LinkedHashSet<Armv8Reg> liveNow = new LinkedHashSet<>(liveness.getLiveOut());
+            LinkedHashSet<Armv8Reg> currentLive = new LinkedHashSet<>();
+            // 只处理当前类型的寄存器
+            for (Armv8Reg reg : blockLiveness.getLiveOut()) {
+                if (reg instanceof Armv8VirReg && ((Armv8VirReg) reg).isFloat() == isFloat) {
+                    currentLive.add(reg);
+                }
+            }
             
             // 反向遍历指令
             List<Armv8Instruction> instructions = new ArrayList<>(block.getInstructions());
             Collections.reverse(instructions);
             
-            for (Armv8Instruction instruction : instructions) {
-                // 处理move指令
-                if (instruction instanceof Armv8Move) {
-                    Armv8Move moveInst = (Armv8Move) instruction;
-                    if (moveInst.getOperands().size() > 0 && moveInst.getOperands().get(0) instanceof Armv8Reg &&
+            for (Armv8Instruction inst : instructions) {
+                // 处理move指令的特殊情况
+                if (inst instanceof Armv8Move) {
+                    Armv8Move moveInst = (Armv8Move) inst;
+                    if (moveInst.getOperands().size() > 0 && 
+                        moveInst.getOperands().get(0) instanceof Armv8Reg &&
                         moveInst.getDefReg() instanceof Armv8Reg) {
                         
                         Armv8Reg src = (Armv8Reg) moveInst.getOperands().get(0);
                         Armv8Reg dst = moveInst.getDefReg();
                         
-                        // 源寄存器和目标寄存器在Move指令处不应互相干扰
-                        if (src instanceof Armv8VirReg && dst instanceof Armv8VirReg) {
-                            liveNow.remove(src);
-                            
-                            // 添加到move列表，以便后续可能的合并
-                            if (moveList.containsKey(src) && moveList.containsKey(dst)) {
-                                moveList.get(src).add(moveInst);
-                                moveList.get(dst).add(moveInst);
-                            }
+                        if (src instanceof Armv8VirReg && dst instanceof Armv8VirReg &&
+                            ((Armv8VirReg) src).isFloat() == isFloat &&
+                            ((Armv8VirReg) dst).isFloat() == isFloat) {
+                            currentLive.remove(src);
+                            addToMoveList(src, moveInst);
+                            addToMoveList(dst, moveInst);
+                            workingMoves.add(moveInst);
                         }
                     }
                 }
                 
-                // 为定义的寄存器添加干扰边
-                if (instruction.getDefReg() instanceof Armv8VirReg) {
-                    Armv8Reg defReg = instruction.getDefReg();
-                    ensureRegisterInitialized(defReg);
-                    
-                    // 添加与所有当前活跃寄存器的干扰边
-                    for (Armv8Reg liveReg : liveNow) {
-                        if (liveReg instanceof Armv8VirReg && !liveReg.equals(defReg)) {
-                            addInterferenceEdge(defReg, liveReg);
+                // 为定义的寄存器添加干扰
+                if (inst.getDefReg() instanceof Armv8VirReg) {
+                    Armv8VirReg defReg = (Armv8VirReg) inst.getDefReg();
+                    if (defReg.isFloat() == isFloat) {
+                        ensureNodeExists(defReg);
+                        
+                        for (Armv8Reg liveReg : currentLive) {
+                            if (!liveReg.equals(defReg)) {
+                                addConflictEdge(defReg, liveReg);
+                            }
                         }
+                        
+                        currentLive.remove(defReg);
                     }
-                    
-                    // 定义后不再活跃（除非在操作数中使用）
-                    liveNow.remove(defReg);
                 }
                 
                 // 添加使用的寄存器到活跃集合
-                for (Armv8Operand operand : instruction.getOperands()) {
+                for (Armv8Operand operand : inst.getOperands()) {
                     if (operand instanceof Armv8VirReg) {
-                        Armv8Reg reg = (Armv8Reg) operand;
-                        ensureRegisterInitialized(reg);
-                        liveNow.add(reg);
+                        Armv8VirReg virReg = (Armv8VirReg) operand;
+                        if (virReg.isFloat() == isFloat) {
+                            ensureNodeExists(virReg);
+                            currentLive.add(virReg);
+                        }
                     }
                 }
             }
         }
         
-        // 打印干扰图的统计信息
-        System.out.println("干扰图构建完成，共有 " + interferenceEdges.size() + " 条干扰边");
+        System.out.println("干扰图构建完成，冲突边数: " + conflictSet.size());
     }
     
-    /**
-     * 添加干扰边
-     */
-    private void addInterferenceEdge(Armv8Reg u, Armv8Reg v) {
-        if (u == null || v == null || u.equals(v)) {
-            return;
+    private void ensureNodeExists(Armv8Reg reg) {
+        if (!neighborList.containsKey(reg)) {
+            neighborList.put(reg, new LinkedHashSet<>());
+            degreeMap.put(reg, 0);
+            moveMap.put(reg, new LinkedHashSet<>());
+            aliasMap.put(reg, reg);
         }
+    }
+    
+    private void addToMoveList(Armv8Reg reg, Armv8Move moveInst) {
+        ensureNodeExists(reg);
+        if (!moveMap.containsKey(reg)) {
+            moveMap.put(reg, new LinkedHashSet<>());
+        }
+        moveMap.get(reg).add(moveInst);
+    }
+    
+    private void addConflictEdge(Armv8Reg u, Armv8Reg v) {
+        if (u.equals(v)) return;
         
-        // 确保虚拟寄存器被正确初始化
-        ensureRegisterInitialized(u);
-        ensureRegisterInitialized(v);
+        Pair<Armv8Reg, Armv8Reg> edge1 = new Pair<>(u, v);
+        Pair<Armv8Reg, Armv8Reg> edge2 = new Pair<>(v, u);
         
-        if (!adjacencyList.get(u).contains(v)) {
-            adjacencyList.get(u).add(v);
-            adjacencyList.get(v).add(u);
+        if (!conflictSet.contains(edge1) && !conflictSet.contains(edge2)) {
+            conflictSet.add(edge1);
             
-            if (!(u instanceof Armv8PhyReg)) {
-                nodeDegree.put(u, nodeDegree.get(u) + 1);
-            }
-            if (!(v instanceof Armv8PhyReg)) {
-                nodeDegree.put(v, nodeDegree.get(v) + 1);
-            }
-            
-            interferenceEdges.add(new Pair<>(u, v));
-        }
-    }
-    
-    /**
-     * 确保寄存器被正确初始化
-     */
-    private void ensureRegisterInitialized(Armv8Reg reg) {
-        if (reg instanceof Armv8VirReg && !initialNodes.contains(reg)) {
-            initialNodes.add(reg);
-            adjacencyList.put(reg, new LinkedHashSet<>());
-            nodeDegree.put(reg, 0);
-            moveList.put(reg, new LinkedHashSet<>());
-            alias.put(reg, reg);
-            System.out.println("后期发现虚拟寄存器: " + reg);
-        }
-        
-        if (!adjacencyList.containsKey(reg)) {
-            adjacencyList.put(reg, new LinkedHashSet<>());
-        }
-        if (!nodeDegree.containsKey(reg) && reg instanceof Armv8VirReg) {
-            nodeDegree.put(reg, 0);
-        }
-        if (!moveList.containsKey(reg)) {
-            moveList.put(reg, new LinkedHashSet<>());
-        }
-        if (!alias.containsKey(reg)) {
-            alias.put(reg, reg);
-        }
-    }
-    
-    /**
-     * 创建工作列表
-     */
-    private void makeWorkLists() {
-        for (Armv8Reg reg : initialNodes) {
-            if (reg instanceof Armv8VirReg) {
-                int k = getRegisterLimit((Armv8VirReg) reg);
+            if (!neighborList.get(u).contains(v)) {
+                neighborList.get(u).add(v);
+                neighborList.get(v).add(u);
                 
-                if (nodeDegree.get(reg) >= k) {
-                    spillWorkList.add(reg);
-                } else if (isMoveRelated(reg)) {
-                    freezeWorkList.add(reg);
+                degreeMap.put(u, degreeMap.get(u) + 1);
+                degreeMap.put(v, degreeMap.get(v) + 1);
+            }
+        }
+    }
+    
+    private void buildWorkLists(int colorLimit) {
+        for (Armv8Operand operand : neighborList.keySet()) {
+            if (operand instanceof Armv8VirReg) {
+                int degree = degreeMap.get(operand);
+                if (degree >= colorLimit) {
+                    spillList.add(operand);
+                } else if (isMoveRelated(operand)) {
+                    freezeList.add(operand);
                 } else {
-                    simplifyWorkList.add(reg);
+                    simplifyList.add(operand);
                 }
             }
         }
     }
     
-    /**
-     * 简化阶段：移除低度数且与move无关的节点
-     */
-    private void simplify() {
-        Armv8Reg reg = simplifyWorkList.iterator().next();
-        simplifyWorkList.remove(reg);
-        selectStack.push(reg);
+    private void performSimplify() {
+        Armv8Operand node = simplifyList.iterator().next();
+        simplifyList.remove(node);
+        eliminationStack.push(node);
         
-        for (Armv8Reg adjacentReg : adjacencyList.get(reg)) {
-            decrementDegree(adjacentReg);
+        for (Armv8Operand neighbor : getAdjacentNodes(node)) {
+            decreaseDegree(neighbor);
         }
     }
     
-    /**
-     * 合并阶段：尝试合并move相关的节点
-     */
-    private void coalesce() {
-        Armv8Move moveInst = worklistMoves.iterator().next();
-        worklistMoves.remove(moveInst);
+    private void performCoalesce() {
+        Armv8Instruction moveInst = workingMoves.iterator().next();
+        workingMoves.remove(moveInst);
         
-        Armv8Reg x = (Armv8Reg) moveInst.getOperands().get(0);
-        Armv8Reg y = moveInst.getDefReg();
+        if (!(moveInst instanceof Armv8Move)) return;
+        Armv8Move move = (Armv8Move) moveInst;
         
-        x = getAlias(x);
-        y = getAlias(y);
+        if (move.getOperands().size() == 0 || !(move.getOperands().get(0) instanceof Armv8Reg)) {
+            return;
+        }
+        
+        Armv8Reg x = (Armv8Reg) move.getOperands().get(0);
+        Armv8Reg y = move.getDefReg();
+        
+        x = (Armv8Reg) getActualAlias(x);
+        y = (Armv8Reg) getActualAlias(y);
         
         Armv8Reg u, v;
         if (y instanceof Armv8PhyReg) {
@@ -434,215 +330,110 @@ public class RegisterAllocator {
         
         if (u.equals(v)) {
             coalescedMoves.add(moveInst);
-            addWorkList(u);
-        } else if (v instanceof Armv8PhyReg || interferenceEdges.contains(new Pair<>(u, v))) {
+            addToWorkList(u);
+        } else if (v instanceof Armv8PhyReg || hasConflict(u, v)) {
             constrainedMoves.add(moveInst);
-            addWorkList(u);
-            addWorkList(v);
-        } else if ((u instanceof Armv8PhyReg && !isArgRegister(u) && canSafelyCoalesce(u, v)) ||
-                   (!(u instanceof Armv8PhyReg) && isConservative(u, v))) {
-            coalescedMoves.add(moveInst);
-            combine(u, v);
-            addWorkList(u);
+            addToWorkList(u);
+            addToWorkList(v);
         } else {
-            activeMoves.add(moveInst);
+            coalescedMoves.add(moveInst);
+            addToWorkList(u);
         }
     }
     
-    /**
-     * 冻结阶段：放弃合并低度数move相关节点
-     */
-    private void freeze() {
-        Armv8Reg u = freezeWorkList.iterator().next();
-        freezeWorkList.remove(u);
-        simplifyWorkList.add(u);
-        freezeMoves(u);
+    private void performFreeze() {
+        Armv8Operand node = freezeList.iterator().next();
+        freezeList.remove(node);
+        simplifyList.add(node);
+        freezeNodeMoves(node);
     }
     
-    /**
-     * 溢出阶段：选择一个高度数节点进行溢出
-     */
-    private void selectSpill() {
-        // 选择溢出优先级最高的节点
-        Armv8Reg spillNode = selectSpillCandidate();
-        spillWorkList.remove(spillNode);
-        simplifyWorkList.add(spillNode);
-        freezeMoves(spillNode);
+    private void selectForSpill() {
+        Armv8Operand spillCandidate = chooseSpillCandidate();
+        spillList.remove(spillCandidate);
+        simplifyList.add(spillCandidate);
+        freezeNodeMoves(spillCandidate);
     }
     
-    /**
-     * 分配颜色阶段
-     */
-    private void assignColors() {
-        // 打印选择栈的大小
-        System.out.println("开始分配颜色，选择栈大小: " + selectStack.size());
+    private boolean assignColors(int colorLimit) {
+        Set<Integer> availableColors = new HashSet<>();
+        for (int i = 0; i < colorLimit; i++) {
+            availableColors.add(i);
+        }
         
-        // 创建颜色映射表，记录已分配的颜色
-        Map<Boolean, Set<Integer>> usedColors = new HashMap<>();
-        usedColors.put(true, new HashSet<>()); // 浮点寄存器颜色
-        usedColors.put(false, new HashSet<>()); // 整型寄存器颜色
-        
-        // 将函数参数寄存器的颜色标记为已使用
-        for (int i = 0; i < 8; i++) {
-            // 检查当前函数是否真的使用了这些参数寄存器
-            Armv8CPUReg argReg = Armv8CPUReg.getArmv8ArgReg(i);
-            if (coloredNodes.contains(argReg)) {
-                usedColors.get(false).add(i); // 标记颜色i为已使用
-            }
+        while (!eliminationStack.isEmpty()) {
+            Armv8Operand node = eliminationStack.pop();
             
-            Armv8FPUReg fArgReg = Armv8FPUReg.getArmv8FArgReg(i);
-            if (coloredNodes.contains(fArgReg)) {
-                usedColors.get(true).add(i); // 标记颜色i为已使用
-            }
-        }
-        
-        // 初始化物理寄存器的预设颜色
-        for (int i = 0; i < CPU_REG_COUNT; i++) {
-            Armv8CPUReg cpuReg = Armv8CPUReg.getArmv8CPUReg(i);
-            regColor.put(cpuReg, i);
-        }
-        
-        for (int i = 8; i < 8 + FPU_REG_COUNT; i++) {
-            Armv8FPUReg fpuReg = Armv8FPUReg.getArmv8FloatReg(i);
-            regColor.put(fpuReg, i - 8);
-        }
-        
-        while (!selectStack.isEmpty()) {
-            Armv8Reg reg = selectStack.pop();
-            
-            if (reg instanceof Armv8VirReg) {
-                Armv8VirReg virReg = (Armv8VirReg) reg;
-                Set<Integer> okColors = new HashSet<>();
+            if (node instanceof Armv8VirReg) {
+                Set<Integer> forbiddenColors = new HashSet<>();
                 
-                // 获取可用颜色
-                int regLimit = getRegisterLimit(virReg);
-                for (int i = 0; i < regLimit; i++) {
-                    okColors.add(i);
-                }
-                
-                // 移除邻接节点已使用的颜色
-                for (Armv8Reg adjacentReg : adjacencyList.get(reg)) {
-                    Armv8Reg aliasReg = getAlias(adjacentReg);
-                    
-                    if (coloredNodes.contains(aliasReg) || aliasReg instanceof Armv8PhyReg) {
-                        Integer color = regColor.get(aliasReg);
+                for (Armv8Operand neighbor : neighborList.get(node)) {
+                    Armv8Operand actualNeighbor = getActualAlias(neighbor);
+                    if (coloredRegs.contains(actualNeighbor) || actualNeighbor instanceof Armv8PhyReg) {
+                        Integer color = colorMap.get(actualNeighbor);
                         if (color != null) {
-                            okColors.remove(color);
+                            forbiddenColors.add(color);
                         }
                     }
                 }
                 
+                Set<Integer> okColors = new HashSet<>(availableColors);
+                okColors.removeAll(forbiddenColors);
+                
                 if (okColors.isEmpty()) {
-                    // 没有可用颜色，需要溢出
-                    spilledNodes.add(reg);
-                    System.out.println("寄存器 " + reg + " 没有可用颜色，添加到溢出列表");
+                    spilledRegs.add(node);
+                    System.out.println("寄存器 " + node + " 溢出");
                 } else {
-                    // 寻找最优的颜色（尽量使用较小的颜色值）
-                    int color = okColors.stream().min(Integer::compare).orElse(0);
-                    
-                    coloredNodes.add(reg);
-                    regColor.put(reg, color);
-                    
-                    // 记录已使用的颜色
-                    usedColors.get(virReg.isFloat()).add(color);
-                    
-                    System.out.println("为寄存器 " + reg + " 分配颜色 " + color);
+                    int chosenColor = okColors.iterator().next();
+                    colorMap.put((Armv8Reg) node, chosenColor);
+                    coloredRegs.add((Armv8Reg) node);
+                    System.out.println("为寄存器 " + node + " 分配颜色 " + chosenColor);
                 }
             }
         }
         
         // 为合并的节点分配颜色
-        for (Armv8Reg reg : coalescedNodes) {
-            Armv8Reg aliasReg = getAlias(reg);
-            if (regColor.containsKey(aliasReg)) {
-                regColor.put(reg, regColor.get(aliasReg));
-                System.out.println("为合并节点 " + reg + " 分配颜色 " + regColor.get(aliasReg) + " (继承自 " + aliasReg + ")");
+        for (Armv8Operand node : coalescedRegs) {
+            Armv8Operand alias = getActualAlias(node);
+            if (colorMap.containsKey(alias)) {
+                colorMap.put((Armv8Reg) node, colorMap.get(alias));
+                System.out.println("合并节点 " + node + " 继承颜色 " + colorMap.get(alias));
             }
         }
         
-        // 确保所有收集到的虚拟寄存器都有颜色分配
-        for (Armv8Reg reg : initialNodes) {
-            if (reg instanceof Armv8VirReg && !regColor.containsKey(reg) && !spilledNodes.contains(reg)) {
-                Armv8VirReg virReg = (Armv8VirReg) reg;
-                int regLimit = getRegisterLimit(virReg);
-                
-                // 查找未使用的颜色
-                int color = 0;
-                while (color < regLimit && usedColors.get(virReg.isFloat()).contains(color)) {
-                    color++;
-                }
-                
-                if (color < regLimit) {
-                    regColor.put(reg, color);
-                    coloredNodes.add(reg);
-                    usedColors.get(virReg.isFloat()).add(color);
-                    System.out.println("为未着色的寄存器 " + reg + " 分配颜色 " + color);
-                } else {
-                    spilledNodes.add(reg);
-                    System.out.println("无法为寄存器 " + reg + " 找到可用颜色，添加到溢出列表");
-                }
-            }
-        }
-        
-        // 打印颜色分配统计信息
-        int intColors = usedColors.get(false).size();
-        int floatColors = usedColors.get(true).size();
-        System.out.println("颜色分配完成，使用了 " + intColors + " 个整型颜色, " + floatColors + " 个浮点颜色");
-        System.out.println("溢出寄存器数量: " + spilledNodes.size());
+        System.out.println("颜色分配完成，溢出节点数: " + spilledRegs.size());
+        return spilledRegs.isEmpty();
     }
     
-    /**
-     * 重写程序，将虚拟寄存器替换为物理寄存器
-     */
-    private void rewriteProgram() {
-        System.out.println("开始重写程序，替换虚拟寄存器为物理寄存器...");
-        int replacedCount = 0;
-
+    private void rewriteProgram(boolean isFloat) {
+        System.out.println("开始重写程序...");
+        int replaceCount = 0;
+        
         for (Armv8Block block : currentFunction.getBlocks()) {
-            for (Armv8Instruction instruction : block.getInstructions()) {
-                // 替换定义的寄存器
-                if (instruction.getDefReg() instanceof Armv8VirReg) {
-                    Armv8VirReg virReg = (Armv8VirReg) instruction.getDefReg();
-                    if (regColor.containsKey(virReg)) {
-                        Integer color = regColor.get(virReg);
-                        if (color != null) {
-                            Armv8PhyReg phyReg = getPhysicalRegister(virReg, color);
-                            instruction.replaceDefReg(phyReg);
-                            replacedCount++;
-                        } else {
-                            System.err.println("错误: 虚拟寄存器 " + virReg + " 的颜色为null");
-                        }
-                    } else {
-                        // 如果找不到颜色映射，检查是否在溢出列表中
-                        if (spilledNodes.contains(virReg)) {
-                            System.err.println("警告: 虚拟寄存器 " + virReg + " 已溢出，但未被重写");
-                        } else {
-                            System.err.println("错误: 虚拟寄存器 " + virReg + " 没有颜色分配且未溢出");
+            for (Armv8Instruction inst : block.getInstructions()) {
+                // 替换定义寄存器
+                if (inst.getDefReg() instanceof Armv8VirReg) {
+                    Armv8VirReg virReg = (Armv8VirReg) inst.getDefReg();
+                    if (virReg.isFloat() == isFloat && colorMap.containsKey(virReg)) {
+                        Armv8PhyReg phyReg = getPhysicalRegisterFromColor(virReg, colorMap.get(virReg));
+                        if (phyReg != null) {
+                            inst.replaceDefReg(phyReg);
+                            replaceCount++;
                         }
                     }
                 }
                 
-                // 替换使用的寄存器
-                List<Armv8Operand> operands = instruction.getOperands();
+                // 替换操作数寄存器
+                List<Armv8Operand> operands = inst.getOperands();
                 for (int i = 0; i < operands.size(); i++) {
                     Armv8Operand operand = operands.get(i);
                     if (operand instanceof Armv8VirReg) {
                         Armv8VirReg virReg = (Armv8VirReg) operand;
-                        if (regColor.containsKey(virReg)) {
-                            Integer color = regColor.get(virReg);
-                            if (color != null) {
-                                Armv8PhyReg phyReg = getPhysicalRegister(virReg, color);
-                                instruction.replaceOperands(virReg, phyReg);
-                                replacedCount++;
-                            } else {
-                                System.err.println("错误: 虚拟寄存器 " + virReg + " 的颜色为null");
-                            }
-                        } else {
-                            // 如果找不到颜色映射，检查是否在溢出列表中
-                            if (spilledNodes.contains(virReg)) {
-                                System.err.println("警告: 虚拟寄存器 " + virReg + " 已溢出，但未被重写");
-                            } else {
-                                System.err.println("错误: 虚拟寄存器 " + virReg + " 没有颜色分配且未溢出");
+                        if (virReg.isFloat() == isFloat && colorMap.containsKey(virReg)) {
+                            Armv8PhyReg phyReg = getPhysicalRegisterFromColor(virReg, colorMap.get(virReg));
+                            if (phyReg != null) {
+                                inst.replaceOperands(virReg, phyReg);
+                                replaceCount++;
                             }
                         }
                     }
@@ -650,91 +441,75 @@ public class RegisterAllocator {
             }
         }
         
-        System.out.println("程序重写完成，共替换 " + replacedCount + " 处虚拟寄存器");
+        System.out.println("程序重写完成，替换了 " + replaceCount + " 个寄存器");
     }
     
-    /**
-     * 重写溢出的节点（重写为内存访问）
-     */
-    private void rewriteSpilledNodes() {
-        System.out.println("开始处理溢出的寄存器，数量：" + spilledNodes.size());
-        Map<Armv8VirReg, Long> spillOffsetMap = new HashMap<>();
+    private void handleSpillRegisters(boolean isFloat) {
+        System.out.println("处理溢出寄存器，数量: " + spilledRegs.size());
         
-        for (Armv8Reg spilledReg : spilledNodes) {
-            if (spilledReg instanceof Armv8VirReg) {
-                Armv8VirReg virReg = (Armv8VirReg) spilledReg;
-                
-                // 为溢出的寄存器在栈上分配空间
-                long stackOffset = currentFunction.getStackSize();
-                currentFunction.addStack(null, 8L); // 8字节对齐
-                spillOffsetMap.put(virReg, stackOffset);
-                
-                System.out.println("为溢出寄存器 " + virReg + " 在栈上分配偏移量: " + stackOffset);
-            }
+        for (Armv8Operand spilledOperand : spilledRegs) {
+            if (!(spilledOperand instanceof Armv8VirReg)) continue;
+            
+            Armv8VirReg spilledReg = (Armv8VirReg) spilledOperand;
+            if (spilledReg.isFloat() != isFloat) continue;
+            
+            long stackOffset = currentFunction.getStackSize();
+            currentFunction.addStack(null, 8L);
+            
+            System.out.println("为溢出寄存器 " + spilledReg + " 分配栈偏移: " + stackOffset);
+            rewriteSpilledRegisterUsage(spilledReg, stackOffset);
         }
         
-        // 重写使用溢出寄存器的指令
+        System.out.println("溢出处理完成");
+    }
+    
+    private void rewriteSpilledRegisterUsage(Armv8VirReg spilledReg, long offset) {
         for (Armv8Block block : currentFunction.getBlocks()) {
             List<Armv8Instruction> instructions = new ArrayList<>(block.getInstructions());
             
             for (int i = 0; i < instructions.size(); i++) {
-                Armv8Instruction instruction = instructions.get(i);
-                boolean needsRewrite = false;
-                Armv8VirReg usedSpilledReg = null;
-                Armv8VirReg definedSpilledReg = null;
+                Armv8Instruction inst = instructions.get(i);
+                boolean hasSpilledUse = false;
+                boolean hasSpilledDef = false;
                 
-                // 检查定义的寄存器
-                if (instruction.getDefReg() instanceof Armv8VirReg && 
-                    spilledNodes.contains(instruction.getDefReg())) {
-                    needsRewrite = true;
-                    definedSpilledReg = (Armv8VirReg) instruction.getDefReg();
-                }
-                
-                // 检查使用的寄存器
-                for (Armv8Operand operand : instruction.getOperands()) {
-                    if (operand instanceof Armv8VirReg && spilledNodes.contains(operand)) {
-                        needsRewrite = true;
-                        usedSpilledReg = (Armv8VirReg) operand;
+                // 检查使用
+                for (Armv8Operand operand : inst.getOperands()) {
+                    if (operand.equals(spilledReg)) {
+                        hasSpilledUse = true;
                         break;
                     }
                 }
                 
-                if (needsRewrite) {
-                    // 为每个溢出的寄存器创建一个新的临时虚拟寄存器
-                    if (usedSpilledReg != null) {
-                        // 处理使用的溢出寄存器
-                        Armv8VirReg tempReg = new Armv8VirReg(usedSpilledReg.isFloat());
-                        
-                        // 添加加载指令（从栈加载到临时寄存器）
+                // 检查定义
+                if (spilledReg.equals(inst.getDefReg())) {
+                    hasSpilledDef = true;
+                }
+                
+                if (hasSpilledUse || hasSpilledDef) {
+                    if (hasSpilledUse) {
+                        // 插入加载指令
+                        Armv8VirReg tempReg = new Armv8VirReg(spilledReg.isFloat());
                         Armv8Load loadInst = new Armv8Load(
                             Armv8CPUReg.getArmv8SpReg(),
-                            new Armv8Imm(spillOffsetMap.get(usedSpilledReg)),
+                            new Armv8Imm(offset),
                             tempReg
                         );
-                        
-                        // 在当前指令之前插入加载指令
-                        block.insertBeforeInst(instruction, loadInst);
-                        
-                        // 替换指令中的溢出寄存器为临时寄存器
-                        instruction.replaceOperands(usedSpilledReg, tempReg);
+                        block.insertBeforeInst(inst, loadInst);
+                        inst.replaceOperands(spilledReg, tempReg);
                     }
                     
-                    if (definedSpilledReg != null) {
-                        // 处理定义的溢出寄存器
-                        Armv8VirReg tempReg = new Armv8VirReg(definedSpilledReg.isFloat());
+                    if (hasSpilledDef) {
+                        // 创建临时寄存器并插入存储指令
+                        Armv8VirReg tempReg = new Armv8VirReg(spilledReg.isFloat());
+                        inst.replaceDefReg(tempReg);
                         
-                        // 替换指令中定义的寄存器为临时寄存器
-                        instruction.replaceDefReg(tempReg);
-                        
-                        // 添加存储指令（从临时寄存器存到栈）
                         Armv8Store storeInst = new Armv8Store(
                             tempReg,
                             Armv8CPUReg.getArmv8SpReg(),
-                            new Armv8Imm(spillOffsetMap.get(definedSpilledReg))
+                            new Armv8Imm(offset)
                         );
                         
-                        // 获取指令在列表中的索引并在其后插入存储指令
-                        int instIndex = block.getInstructions().indexOf(instruction);
+                        int instIndex = block.getInstructions().indexOf(inst);
                         if (instIndex != -1 && instIndex + 1 < block.getInstructions().size()) {
                             Armv8Instruction nextInst = block.getInstructions().get(instIndex + 1);
                             block.insertBeforeInst(nextInst, storeInst);
@@ -745,31 +520,19 @@ public class RegisterAllocator {
                 }
             }
         }
-        
-        // 清空溢出节点列表，为下一轮准备
-        spilledNodes.clear();
-        
-        System.out.println("溢出寄存器处理完成");
-        
-        // 重新计算虚拟寄存器计数器，为新的虚拟寄存器做准备
-        Armv8VirReg.resetCounter();
     }
     
     // 辅助方法
     
-    private int getRegisterLimit(Armv8VirReg virReg) {
-        return virReg.isFloat() ? FPU_REG_COUNT : CPU_REG_COUNT;
+    private boolean isMoveRelated(Armv8Operand operand) {
+        return !getNodeMoveInstructions(operand).isEmpty();
     }
     
-    private boolean isMoveRelated(Armv8Reg reg) {
-        return !getNodeMoves(reg).isEmpty();
-    }
-    
-    private LinkedHashSet<Armv8Move> getNodeMoves(Armv8Reg reg) {
-        LinkedHashSet<Armv8Move> moves = new LinkedHashSet<>();
-        if (moveList.containsKey(reg)) {
-            for (Armv8Move move : moveList.get(reg)) {
-                if (activeMoves.contains(move) || worklistMoves.contains(move)) {
+    private LinkedHashSet<Armv8Instruction> getNodeMoveInstructions(Armv8Operand operand) {
+        LinkedHashSet<Armv8Instruction> moves = new LinkedHashSet<>();
+        if (moveMap.containsKey(operand)) {
+            for (Armv8Move move : moveMap.get(operand)) {
+                if (activeMoves.contains(move) || workingMoves.contains(move)) {
                     moves.add(move);
                 }
             }
@@ -777,216 +540,76 @@ public class RegisterAllocator {
         return moves;
     }
     
-    private void decrementDegree(Armv8Reg reg) {
-        if (reg instanceof Armv8VirReg) {
-            int degree = nodeDegree.get(reg);
-            nodeDegree.put(reg, degree - 1);
-            
-            int k = getRegisterLimit((Armv8VirReg) reg);
-            if (degree == k) {
-                enableMoves(reg);
-                spillWorkList.remove(reg);
-                
-                if (isMoveRelated(reg)) {
-                    freezeWorkList.add(reg);
-                } else {
-                    simplifyWorkList.add(reg);
+    private LinkedHashSet<Armv8Operand> getAdjacentNodes(Armv8Operand operand) {
+        LinkedHashSet<Armv8Operand> result = new LinkedHashSet<>();
+        if (neighborList.containsKey(operand)) {
+            for (Armv8Operand neighbor : neighborList.get(operand)) {
+                if (!eliminationStack.contains(neighbor) && !coalescedRegs.contains(neighbor)) {
+                    result.add(neighbor);
                 }
             }
         }
+        return result;
     }
     
-    private Armv8Reg getAlias(Armv8Reg reg) {
-        if (coalescedNodes.contains(reg)) {
-            return getAlias(alias.get(reg));
-        }
-        return reg;
+    private void decreaseDegree(Armv8Operand operand) {
+        if (!(operand instanceof Armv8VirReg)) return;
+        
+        int currentDegree = degreeMap.get(operand);
+        degreeMap.put(operand, currentDegree - 1);
     }
     
-    private void addWorkList(Armv8Reg reg) {
-        if (!(reg instanceof Armv8PhyReg) && !isMoveRelated(reg)) {
-            int k = reg instanceof Armv8VirReg ? getRegisterLimit((Armv8VirReg) reg) : CPU_REG_COUNT;
-            if (nodeDegree.get(reg) < k) {
-                freezeWorkList.remove(reg);
-                simplifyWorkList.add(reg);
-            }
+    private Armv8Operand getActualAlias(Armv8Operand operand) {
+        if (coalescedRegs.contains(operand)) {
+            return getActualAlias(aliasMap.get(operand));
         }
+        return operand;
     }
     
-    private boolean canSafelyCoalesce(Armv8Reg u, Armv8Reg v) {
-        // George测试：检查是否可以安全合并
-        if (!adjacencyList.containsKey(v)) {
-            return false;
-        }
-        
-        for (Armv8Reg t : adjacencyList.get(v)) {
-            if (t instanceof Armv8VirReg) {
-                int k = getRegisterLimit((Armv8VirReg) t);
-                if (!(nodeDegree.get(t) < k || t instanceof Armv8PhyReg || interferenceEdges.contains(new Pair<>(t, u)))) {
-                    return false;
-                }
-            }
-        }
-        return true;
+    private void addToWorkList(Armv8Reg reg) {
+        // 简化的实现
     }
     
-    private boolean isConservative(Armv8Reg u, Armv8Reg v) {
-        // Briggs测试：合并后高度数节点数量不增加
-        LinkedHashSet<Armv8Reg> nodes = new LinkedHashSet<>();
-        if (adjacencyList.containsKey(u)) {
-            nodes.addAll(adjacencyList.get(u));
-        }
-        if (adjacencyList.containsKey(v)) {
-            nodes.addAll(adjacencyList.get(v));
-        }
-        
-        int highDegreeCount = 0;
-        for (Armv8Reg node : nodes) {
-            if (node instanceof Armv8VirReg) {
-                int k = getRegisterLimit((Armv8VirReg) node);
-                if (nodeDegree.containsKey(node) && nodeDegree.get(node) >= k) {
-                    highDegreeCount++;
-                }
-            }
-        }
-        
-        int k = Math.max(
-            u instanceof Armv8VirReg ? getRegisterLimit((Armv8VirReg) u) : CPU_REG_COUNT,
-            v instanceof Armv8VirReg ? getRegisterLimit((Armv8VirReg) v) : CPU_REG_COUNT
-        );
-        
-        return highDegreeCount < k;
+    private boolean hasConflict(Armv8Reg u, Armv8Reg v) {
+        return conflictSet.contains(new Pair<>(u, v)) || conflictSet.contains(new Pair<>(v, u));
     }
     
-    private void combine(Armv8Reg u, Armv8Reg v) {
-        if (freezeWorkList.contains(v)) {
-            freezeWorkList.remove(v);
-        } else {
-            spillWorkList.remove(v);
-        }
-        
-        coalescedNodes.add(v);
-        alias.put(v, u);
-        
-        if (moveList.containsKey(u) && moveList.containsKey(v)) {
-            moveList.get(u).addAll(moveList.get(v));
-        }
-        
-        enableMoves(v);
-        
-        if (adjacencyList.containsKey(v)) {
-            for (Armv8Reg t : new LinkedHashSet<>(adjacencyList.get(v))) {
-                addInterferenceEdge(t, u);
-                decrementDegree(t);
-            }
-        }
-        
-        int k = u instanceof Armv8VirReg ? getRegisterLimit((Armv8VirReg) u) : CPU_REG_COUNT;
-        if (nodeDegree.containsKey(u) && nodeDegree.get(u) >= k && freezeWorkList.contains(u)) {
-            freezeWorkList.remove(u);
-            spillWorkList.add(u);
+    private void freezeNodeMoves(Armv8Operand u) {
+        for (Armv8Instruction moveInst : new LinkedHashSet<>(getNodeMoveInstructions(u))) {
+            activeMoves.remove(moveInst);
+            frozenMoves.add(moveInst);
         }
     }
     
-    private void freezeMoves(Armv8Reg u) {
-        for (Armv8Move move : new LinkedHashSet<>(getNodeMoves(u))) {
-            if (move.getOperands().size() > 0 && move.getOperands().get(0) instanceof Armv8Reg) {
-                Armv8Reg x = (Armv8Reg) move.getOperands().get(0);
-                Armv8Reg y = move.getDefReg();
-                
-                if (x == null || y == null) continue;
-                
-                Armv8Reg v;
-                if (getAlias(y).equals(getAlias(u))) {
-                    v = getAlias(x);
-                } else {
-                    v = getAlias(y);
-                }
-                
-                activeMoves.remove(move);
-                frozenMoves.add(move);
-                
-                if (getNodeMoves(v).isEmpty() && v instanceof Armv8VirReg) {
-                    int k = getRegisterLimit((Armv8VirReg) v);
-                    if (nodeDegree.containsKey(v) && nodeDegree.get(v) < k) {
-                        freezeWorkList.remove(v);
-                        simplifyWorkList.add(v);
-                    }
-                }
-            }
-        }
-    }
-    
-    private void enableMoves(Armv8Reg reg) {
-        for (Armv8Move move : new LinkedHashSet<>(getNodeMoves(reg))) {
-            if (activeMoves.contains(move)) {
-                activeMoves.remove(move);
-                worklistMoves.add(move);
-            }
-        }
-    }
-    
-    private Armv8Reg selectSpillCandidate() {
-        // 简单的溢出选择策略：选择度数最高的节点
-        Armv8Reg candidate = null;
+    private Armv8Operand chooseSpillCandidate() {
+        // 简单的溢出选择策略：选择度数最高的
+        Armv8Operand candidate = null;
         int maxDegree = -1;
         
-        for (Armv8Reg reg : spillWorkList) {
-            if (nodeDegree.containsKey(reg) && nodeDegree.get(reg) > maxDegree) {
-                maxDegree = nodeDegree.get(reg);
-                candidate = reg;
+        for (Armv8Operand operand : spillList) {
+            if (degreeMap.containsKey(operand) && degreeMap.get(operand) > maxDegree) {
+                maxDegree = degreeMap.get(operand);
+                candidate = operand;
             }
         }
         
-        return candidate != null ? candidate : spillWorkList.iterator().next();
+        return candidate != null ? candidate : spillList.iterator().next();
     }
     
-    /**
-     * 根据颜色获取物理寄存器
-     * @param virReg 虚拟寄存器
-     * @param colorIndex 颜色索引
-     * @return 对应的物理寄存器
-     */
-    private Armv8PhyReg getPhysicalRegister(Armv8VirReg virReg, int colorIndex) {
-        if (virReg == null) {
-            System.err.println("错误: 传入的虚拟寄存器为null");
-            return null;
-        }
-        
-        if (colorIndex < 0) {
-            System.err.println("错误: 无效的颜色索引 " + colorIndex + " 用于寄存器 " + virReg);
-            return null;
-        }
-        
+    private Armv8PhyReg getPhysicalRegisterFromColor(Armv8VirReg virReg, int color) {
         if (virReg.isFloat()) {
-            // 浮点寄存器映射: v8-v31
-            if (colorIndex >= FPU_REG_COUNT) {
-                System.err.println("错误: 浮点颜色索引 " + colorIndex + " 超出范围 (最大 " + (FPU_REG_COUNT-1) + ")");
-                colorIndex = colorIndex % FPU_REG_COUNT; // 应急处理
+            // 浮点寄存器: v8-v31
+            if (color >= 0 && color < FPU_COLOR_COUNT) {
+                return Armv8FPUReg.getArmv8FloatReg(color + 8);
             }
-            return Armv8FPUReg.getArmv8FloatReg(colorIndex + 8); // 从v8开始分配，保留v0-v7
         } else {
-            // 整型寄存器映射: 使用x8-x18作为分配范围，保留x0-x7作为参数寄存器
-            if (colorIndex >= CPU_REG_COUNT - 8) { // 减去8个参数寄存器
-                System.err.println("错误: 整型颜色索引 " + colorIndex + " 超出范围 (最大 " + (CPU_REG_COUNT-8-1) + ")");
-                colorIndex = colorIndex % (CPU_REG_COUNT - 8); // 应急处理
+            // 整型寄存器: x8-x15
+            if (color >= 0 && color < CPU_COLOR_COUNT) {
+                return Armv8CPUReg.getArmv8CPUReg(color + 8);
             }
-            return Armv8CPUReg.getArmv8CPUReg(colorIndex + 8); // 从x8开始分配，保留x0-x7
         }
-    }
-    
-    /**
-     * 调试方法：打印寄存器分配的统计信息
-     */
-    public void printAllocationStats() {
-        System.out.println("=== 寄存器分配统计 ===");
-        System.out.println("着色的寄存器数量: " + coloredNodes.size());
-        System.out.println("合并的寄存器数量: " + coalescedNodes.size());
-        System.out.println("溢出的寄存器数量: " + spilledNodes.size());
-        System.out.println("干扰边数量: " + interferenceEdges.size());
         
-        if (!spilledNodes.isEmpty()) {
-            System.out.println("溢出的寄存器: " + spilledNodes);
-        }
+        System.err.println("无法为寄存器 " + virReg + " 获取物理寄存器，颜色: " + color);
+        return null;
     }
 } 
