@@ -36,10 +36,10 @@ public class RemoveSingleJumpBB implements Pass.IRPass {
             }
             
             // 合并基本块
-            changed |= mergeBasicBlocks(function);
+            // changed |= mergeBasicBlocks(function);
             
             // 合并连续的基本块
-            changed |= mergeContinuousBlocks(function);
+            // changed |= mergeContinuousBlocks(function);
             
             // 处理入口块的特殊情况
             changed |= handleEntryBlock(function);

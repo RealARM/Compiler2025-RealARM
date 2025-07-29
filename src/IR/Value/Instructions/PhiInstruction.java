@@ -8,7 +8,7 @@ import IR.Value.ConstantInt;
 import IR.Type.IntegerType;
 
 import java.util.ArrayList;
-import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -16,7 +16,7 @@ import java.util.Map;
  * Phi指令，用于SSA形式的变量汇合
  */
 public class PhiInstruction extends Instruction {
-    private final Map<BasicBlock, Value> incomingValues = new HashMap<>();
+    private final Map<BasicBlock, Value> incomingValues = new LinkedHashMap<>();
     
     /**
      * 创建一个Phi指令
@@ -190,6 +190,57 @@ public class PhiInstruction extends Instruction {
             }
         }
     }
+    
+    /**
+     * 安全地设置Phi指令的操作数，同时更新incomingValues映射
+     * 这个方法通过基本块来标识要更新的操作数，避免索引混乱
+     */
+    public void setOperandForBlock(BasicBlock block, Value value) {
+        // 找到这个基本块在当前前驱列表中的索引
+        List<BasicBlock> predecessors = getParent().getPredecessors();
+        int index = predecessors.indexOf(block);
+        
+        if (index >= 0 && index < getOperandCount()) {
+            // 更新操作数数组
+            super.setOperand(index, value);
+            // 更新incomingValues映射
+            incomingValues.put(block, value);
+        }
+    }
+    
+    /**
+     * 重写setOperand方法，确保同时更新incomingValues映射
+     * 通过反向查找来确定哪个基本块对应这个操作数索引
+     */
+    @Override
+    public void setOperand(int index, Value value) {
+        // 获取旧的操作数，找到对应的基本块
+        Value oldOperand = null;
+        if (index >= 0 && index < getOperandCount()) {
+            oldOperand = getOperand(index);
+        }
+        
+        // 调用父类方法更新操作数数组
+        super.setOperand(index, value);
+        
+        // 找到对应的基本块并更新incomingValues映射
+        if (oldOperand != null) {
+            BasicBlock correspondingBlock = null;
+            // 在incomingValues中查找使用旧值的基本块
+            for (Map.Entry<BasicBlock, Value> entry : incomingValues.entrySet()) {
+                if (entry.getValue() == oldOperand) {
+                    correspondingBlock = entry.getKey();
+                    break;
+                }
+            }
+            
+            // 如果找到对应的基本块，更新映射
+            if (correspondingBlock != null) {
+                incomingValues.put(correspondingBlock, value);
+            }
+        }
+    }
+
     
     @Override
     public String getOpcodeName() {
