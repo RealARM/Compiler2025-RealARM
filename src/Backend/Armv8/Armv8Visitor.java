@@ -667,8 +667,8 @@ public class Armv8Visitor {
                     if (!RegList.containsKey(arg)) {
                         // 如果没有关联的寄存器，需要创建一个
                         if (arg instanceof Instruction) {
-                            // 递归处理指令
-                            parseInstruction((Instruction) arg, true);
+                            // 递归处理指令 - 对于数组参数需要生成地址计算指令
+                            parseInstruction((Instruction) arg, false);
                         } else if (arg instanceof GlobalVariable) {
                             // 处理全局变量参数
                             GlobalVariable globalVar = (GlobalVariable) arg;
@@ -717,7 +717,11 @@ public class Armv8Visitor {
                     }
                 }
                 curArmv8Function.addRegArg(arg, argReg);
-                RegList.put(arg, argReg);
+                // 注意：不要覆盖数组的地址寄存器映射
+                // 对于非指令类型的参数才更新RegList映射
+                if (!(arg instanceof Instruction)) {
+                    RegList.put(arg, argReg);
+                }
             } else {
                 // 使用栈传递参数
                 stackOffset += 8;
@@ -789,8 +793,8 @@ public class Armv8Visitor {
                     if (!RegList.containsKey(arg)) {
                         // 如果没有关联的寄存器，需要创建一个
                         if (arg instanceof Instruction) {
-                            // 递归处理指令
-                            parseInstruction((Instruction) arg, true);
+                            // 递归处理指令 - 对于数组参数需要生成地址计算指令
+                            parseInstruction((Instruction) arg, false);
                         } else if (arg instanceof GlobalVariable) {
                             // 处理全局变量参数
                             GlobalVariable globalVar = (GlobalVariable) arg;
