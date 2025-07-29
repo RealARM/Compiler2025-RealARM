@@ -44,6 +44,13 @@ public class PassManager {
      * 初始化默认的优化Pass
      */
     private void initializePasses() {
+        // 尾递归消除优化
+        addIRPass(new TailRecursionElimination());
+        
+        // 常量优化
+        addIRPass(new ConstantDeduplication());
+        addIRPass(new ConstantArraySimplifier());
+        
         // 基本块处理
         addIRPass(new EmptyBlockHandler());
         
@@ -51,17 +58,47 @@ public class PassManager {
         addIRPass(new ConstantPropagation());
         addIRPass(new ConstantFolding());
         
+        // 全局变量优化
+        addIRPass(new GlobalValueLocalize());
+        
         // 指令组合优化
         addIRPass(new InstCombine());
         
+        // 窥孔优化
+        addIRPass(new PeepHole());
+        
+        // 删除单跳转基本块优化 - 暂时禁用，因为它与PeepHole有冲突
+        addIRPass(new RemoveSingleJumpBB());
+        
+        // 移除无用的不等于比较指令优化
+        addIRPass(new RemoveUselessNE());
+        
         // 控制流优化
         addIRPass(new BranchSimplifier());
+        
+        // 循环SSA形式转换（在循环优化之前）
+        addIRPass(new LoopSSATransform());
+        
+        // 循环优化
+        addIRPass(new LoopInvariantCodeMotion());
+        
+        // 循环指针访问优化
+        addIRPass(new LoopPtrExtract());
+        
+        // 循环交换优化
+        addIRPass(new LoopInterchange());
+        
+        // 全局代码移动优化
+        addIRPass(new GCM());
         
         // 全局值编号优化 (GVN)
         addIRPass(new GVN());
         
         // 无用代码消除
         addIRPass(new DCE());
+        
+        // PHI指令消除（在进入后端前将PHI转换为Move指令）
+        addIRPass(new RemovePhiPass());
     }
     
     /**
@@ -136,8 +173,8 @@ public class PassManager {
      */
     public void runFunctionPassesOnModule(Module module) {
         for (Function function : module.functions()) {
-            // 跳过外部函数
-            if (function.isExternal()) {
+            // 检查是否为库函数（外部函数），跳过库函数
+            if (module.libFunctions().contains(function)) {
                 continue;
             }
             

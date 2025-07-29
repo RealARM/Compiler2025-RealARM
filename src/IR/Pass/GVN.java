@@ -35,6 +35,12 @@ public class GVN implements Pass.IRPass {
     private Map<BasicBlock, Set<BasicBlock>> dominatorMap;
     private Map<BasicBlock, BasicBlock> immediateDominators;
     private List<BasicBlock> domOrderBlocks;
+    
+    // 调试模式
+    private final boolean debug = false;
+    
+    // 基本块数量阈值，超过此阈值的函数将跳过GVN优化
+    private final int MAX_BLOCKS_THRESHOLD = 1000;
 
     @Override
     public String getName() {
@@ -45,10 +51,26 @@ public class GVN implements Pass.IRPass {
     public boolean run(Module module) {
         boolean modified = false;
         
+        if (debug) System.out.println("[GVN] Starting optimization on module");
+        
         for (Function function : module.functions()) {
             // 跳过外部函数
             if (function.isExternal()) {
                 continue;
+            }
+            
+            int blockCount = function.getBasicBlocks().size();
+            if (debug) {
+                System.out.println("[GVN] Processing function: " + function.getName() + " with " + blockCount + " blocks");
+            }
+            
+            // 检查基本块数量是否超过阈值
+            if (blockCount > MAX_BLOCKS_THRESHOLD) {
+                if (debug) {
+                    System.out.println("[GVN] Skipping function: " + function.getName() + 
+                                     " - too many blocks (" + blockCount + " > " + MAX_BLOCKS_THRESHOLD + ")");
+                }
+                continue; // 跳过此函数
             }
             
             // 初始化数据结构
@@ -56,12 +78,22 @@ public class GVN implements Pass.IRPass {
             visited.clear();
             
             // 计算支配关系
-            computeDominators(function);
-            
-            // 执行GVN
-            modified |= runGVNOnFunction(function);
+            try {
+                if (debug) System.out.println("[GVN] Computing dominators for function: " + function.getName());
+                computeDominators(function);
+                
+                // 执行GVN
+                boolean changed = runGVNOnFunction(function);
+                modified |= changed;
+                
+                if (debug) System.out.println("[GVN] Completed processing " + function.getName() + ", changed: " + changed);
+            } catch (Exception e) {
+                System.err.println("[GVN] Error processing function " + function.getName() + ": " + e.getMessage());
+                e.printStackTrace();
+            }
         }
         
+        if (debug) System.out.println("[GVN] Optimization completed, modified: " + modified);
         return modified;
     }
 

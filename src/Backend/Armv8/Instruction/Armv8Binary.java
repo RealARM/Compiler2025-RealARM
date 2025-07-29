@@ -2,6 +2,7 @@ package Backend.Armv8.Instruction;
 
 import Backend.Armv8.Operand.Armv8Operand;
 import Backend.Armv8.Operand.Armv8Reg;
+import Backend.Armv8.Operand.Armv8Imm;
 
 import java.util.ArrayList;
 
@@ -9,31 +10,38 @@ public class Armv8Binary extends Armv8Instruction {
     private final Armv8BinaryType instType;
     private final int shiftBit;
     private final Armv8ShiftType shiftType;
-    private final boolean is32Bit; // 是否使用32位操作(w寄存器)而非64位(x寄存器)
+    private final Armv8Imm imm;
 
-    public Armv8Binary(ArrayList<Armv8Operand> uses, Armv8Reg defReg, Armv8BinaryType type, boolean is32Bit) {
+    public Armv8Binary(ArrayList<Armv8Operand> uses, Armv8Reg defReg, Armv8BinaryType type) {
         super(defReg, uses);
         this.instType = type;
         this.shiftBit = 0;
         this.shiftType = Armv8ShiftType.LSL;
-        this.is32Bit = is32Bit;
+        this.imm = null;
     }
 
     public Armv8Binary(ArrayList<Armv8Operand> uses, Armv8Reg defReg, int shiftBit,
-                     Armv8ShiftType shiftType, Armv8BinaryType type, boolean is32Bit) {
+                     Armv8ShiftType shiftType, Armv8BinaryType type) {
         super(defReg, uses);
         this.instType = type;
         this.shiftBit = shiftBit;
         this.shiftType = shiftType;
-        this.is32Bit = is32Bit;
+        this.imm = null;
+    }
+
+    public Armv8Binary(Armv8Reg defReg, Armv8Reg srcReg, Armv8Imm imm, Armv8BinaryType type) {
+        super(defReg, new ArrayList<Armv8Operand>() {{
+            add(srcReg);
+            add(imm);
+        }});
+        this.instType = type;
+        this.shiftBit = 0;
+        this.shiftType = Armv8ShiftType.LSL;
+        this.imm = imm;
     }
 
     public Armv8BinaryType getInstType() {
         return instType;
-    }
-
-    public boolean is32Bit() {
-        return is32Bit;
     }
 
     public enum Armv8ShiftType {
@@ -45,20 +53,17 @@ public class Armv8Binary extends Armv8Instruction {
 
     public String shiftTypeToString() {
         switch (shiftType) {
-            case LSL -> {
+            case LSL:
                 return "LSL";
-            }
-            case LSR -> {
+            case LSR:
                 return "LSR";
-            }
-            case ASR -> {
+            case ASR:
                 return "ASR";
-            }
-            case ROR -> {
+            case ROR:
                 return "ROR";
-            }
+            default:
+                return null;
         }
-        return null;
     }
 
     public enum Armv8BinaryType {
@@ -95,79 +100,108 @@ public class Armv8Binary extends Armv8Instruction {
 
     public String binaryTypeToString() {
         switch(instType) {
-            case add -> {
-                return is32Bit ? "add" : "add";
-            }
-            case adds -> {
-                return is32Bit ? "adds" : "adds";
-            }
-            case sub -> {
-                return is32Bit ? "sub" : "sub";
-            }
-            case subs -> {
-                return is32Bit ? "subs" : "subs";
-            }
-            case mul -> {
-                return is32Bit ? "mul" : "mul";
-            }
-            case sdiv -> {
-                return is32Bit ? "sdiv" : "sdiv";
-            }
-            case udiv -> {
-                return is32Bit ? "udiv" : "udiv";
-            }
-            case msub -> {
-                return is32Bit ? "msub" : "msub";
-            }
-            case madd -> {
-                return is32Bit ? "madd" : "madd";
-            }
-            case and -> {
-                return is32Bit ? "and" : "and";
-            }
-            case ands -> {
-                return is32Bit ? "ands" : "ands";
-            }
-            case orr -> {
-                return is32Bit ? "orr" : "orr";
-            }
-            case eor -> {
-                return is32Bit ? "eor" : "eor";
-            }
-            case bic -> {
-                return is32Bit ? "bic" : "bic";
-            }
-            case lsl -> {
-                return is32Bit ? "lsl" : "lsl";
-            }
-            case lsr -> {
-                return is32Bit ? "lsr" : "lsr";
-            }
-            case asr -> {
-                return is32Bit ? "asr" : "asr";
-            }
-            case ror -> {
-                return is32Bit ? "ror" : "ror";
-            }
-            case fadd -> {
+            case add:
+                return "add";
+            case adds:
+                return "adds";
+            case sub:
+                return "sub";
+            case subs:
+                return "subs";
+            case mul:
+                return "mul";
+            case sdiv:
+                return "sdiv";
+            case udiv:
+                return "udiv";
+            case msub:
+                return "msub";
+            case madd:
+                return "madd";
+            case and:
+                return "and";
+            case ands:
+                return "ands";
+            case orr:
+                return "orr";
+            case eor:
+                return "eor";
+            case bic:
+                return "bic";
+            case lsl:
+                return "lsl";
+            case lsr:
+                return "lsr";
+            case asr:
+                return "asr";
+            case ror:
+                return "ror";
+            case fadd:
                 return "fadd";
-            }
-            case fsub -> {
+            case fsub:
                 return "fsub";
-            }
-            case fmul -> {
+            case fmul:
                 return "fmul";
-            }
-            case fdiv -> {
+            case fdiv:
                 return "fdiv";
-            }
+            default:
+                return null;
         }
-        return null;
     }
 
     @Override
     public String toString() {
-        if (shiftBit == 0) {
+        if (imm != null) {
+            return binaryTypeToString() + "\t" + getDefReg() + ", " + getOperands().get(0) + ", " + getOperands().get(1);
+        } else if (instType == Armv8BinaryType.madd || instType == Armv8BinaryType.msub) {
+            // MADD/MSUB指令有特殊格式：madd d, a, b, c （d = a*b + c）
+            if (getOperands().size() >= 3) {
+                return binaryTypeToString() + "\t" + getDefReg() + ", " +
+                       getOperands().get(1) + ", " + getOperands().get(2) + ", " + getOperands().get(0);
+            } else {
+                return binaryTypeToString() + "\t" + getDefReg() + ", " + 
+                       getOperands().get(0) + ", " + getOperands().get(1);
+            }
+        } else if (shiftBit == 0) {
+            // 检查SUB指令的特殊情况：如果第一个操作数是立即数，第二个是寄存器，需要调整为NEG指令
+            // 检查是否是0减某个数的情况
+            if (instType == Armv8BinaryType.sub && 
+                getOperands().size() == 2 && 
+                getOperands().get(0) instanceof Armv8Imm && 
+                ((Armv8Imm)getOperands().get(0)).getValue() == 0) {
+                // sub dest, #0, src -> neg dest, src (相当于 dest = 0 - src = -src)
+                // 直接使用标准的取负值指令
+                return "sub\t" + getDefReg() + ", xzr, " + getOperands().get(1);
+            }
+            
+            // 检查是否两个操作数都是立即数（这是错误的ARM语法）
+            if (getOperands().size() == 2 && 
+                getOperands().get(0) instanceof Armv8Imm && 
+                getOperands().get(1) instanceof Armv8Imm) {
+                
+                // 对于两个立即数的情况，先用mov指令加载第一个立即数到零寄存器xzr的别名
+                // 实际上这种情况不应该发生，因为编译器应该在前面就处理了
+                // 这里作为保护措施，使用mov + add的组合
+                Armv8Imm firstImm = (Armv8Imm) getOperands().get(0);
+                Armv8Imm secondImm = (Armv8Imm) getOperands().get(1);
+                
+                // 如果是简单的常量计算，直接计算结果
+                if (instType == Armv8BinaryType.add) {
+                    long result = firstImm.getValue() + secondImm.getValue();
+                    return "mov\t" + getDefReg() + ", #" + result;
+                } else if (instType == Armv8BinaryType.sub) {
+                    long result = firstImm.getValue() - secondImm.getValue();
+                    return "mov\t" + getDefReg() + ", #" + result;
+                } else if (instType == Armv8BinaryType.mul) {
+                    long result = firstImm.getValue() * secondImm.getValue();
+                    return "mov\t" + getDefReg() + ", #" + result;
+                } else {
+                    // 对于其他操作，使用mov指令加载第一个操作数，然后执行运算
+                    return "mov\t" + getDefReg() + ", " + getOperands().get(0) + "\n\t" +
+                           binaryTypeToString() + "\t" + getDefReg() + ", " + getDefReg() + ", " + getOperands().get(1);
+                }
+            }
+            
             return binaryTypeToString() + "\t" + getDefReg() + ", " +
                     getOperands().get(0) + ", " + getOperands().get(1);
         } else {

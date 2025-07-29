@@ -31,6 +31,11 @@ public class Armv8Branch extends Armv8Instruction {
 
     @Override
     public String toString() {
-        return "b" + Armv8Tools.getCondString(this.type) + "\t" + getOperands().get(0);
+        if (getOperands().size() > 0 && getOperands().get(0) instanceof Armv8Block) {
+            Armv8Block targetBlock = (Armv8Block) getOperands().get(0);
+            return "b" + Armv8Tools.getCondString(this.type) + "\t" + targetBlock.getLabelName();
+        } else {
+            return "b" + Armv8Tools.getCondString(this.type) + "\t" + getOperands().get(0);
+        }
     }
 } 

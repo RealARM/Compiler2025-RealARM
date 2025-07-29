@@ -1,28 +1,63 @@
 package Backend.Armv8.Operand;
 
-public class Armv8VirReg extends Armv8Operand {
-    private static int cnt = 0;
+public class Armv8VirReg extends Armv8Reg {
+    private static int intRegCounter = 0;
+    private static int floatRegCounter = 0;
     private final int id;
     private final String name;
-    private final Armv8Reg register;
+    private final boolean isFloat;
 
-    public Armv8VirReg() {
-        super();
-        this.id = cnt++;
-        this.name = "vr" + this.id;
-        this.register = Armv8Reg.allocateVirtualReg();
+    public Armv8VirReg(boolean isFloat) {
+        this.isFloat = isFloat;
+        if (isFloat) {
+            this.id = floatRegCounter++;
+            this.name = "vf" + this.id;
+        } else {
+            this.id = intRegCounter++;
+            this.name = "vi" + this.id;
+        }
     }
 
+    public boolean isFloat() {
+        return this.isFloat;
+    }
+    
     public int getId() {
         return id;
     }
     
-    public Armv8Reg getRegister() {
-        return register;
+    /**
+     * 重置虚拟寄存器计数器
+     * 确保每个函数开始时有连续的寄存器编号
+     */
+    public static void resetCounter() {
+        intRegCounter = 0;
+        floatRegCounter = 0;
     }
-
-    public static void resetId() {
-        cnt = 0;
+    
+    /**
+     * 获取当前整型寄存器计数
+     */
+    public static int getCurrentIntCounter() {
+        return intRegCounter;
+    }
+    
+    /**
+     * 获取当前浮点寄存器计数
+     */
+    public static int getCurrentFloatCounter() {
+        return floatRegCounter;
+    }
+    
+    /**
+     * 检查寄存器编号是否有效
+     */
+    public boolean hasValidId() {
+        if (isFloat) {
+            return id >= 0 && id < floatRegCounter;
+        } else {
+            return id >= 0 && id < intRegCounter;
+        }
     }
 
     @Override

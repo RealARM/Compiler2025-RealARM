@@ -13,19 +13,16 @@ import java.util.ArrayList;
 public class Armv8Cset extends Armv8Instruction {
     private Armv8Reg destReg;
     private Armv8Tools.CondType condType;
-    private boolean is32Bit;
 
     /**
      * Creates a new CSET instruction
      * @param destReg The destination register
      * @param condType The condition type
-     * @param is32Bit Whether this is a 32-bit operation (true) or 64-bit (false)
      */
-    public Armv8Cset(Armv8Reg destReg, Armv8Tools.CondType condType, boolean is32Bit) {
+    public Armv8Cset(Armv8Reg destReg, Armv8Tools.CondType condType) {
         super(destReg, new ArrayList<>());  // CSET has no operands, but we need an empty ArrayList
         this.destReg = destReg;
         this.condType = condType;
-        this.is32Bit = is32Bit;
     }
 
     public Armv8Reg getDestReg() {
@@ -36,18 +33,13 @@ public class Armv8Cset extends Armv8Instruction {
         return condType;
     }
 
-    public boolean is32Bit() {
-        return is32Bit;
-    }
-
     @Override
     public String toString() {
         StringBuilder sb = new StringBuilder();
         sb.append("cset ");
         
-        // Append destination register with appropriate width
-        sb.append(is32Bit ? "w" : "x");
-        sb.append(destReg.getRegNum());
+        // 使用父类的getDefReg()方法，确保获取到寄存器分配后的物理寄存器
+        sb.append(getDefReg().toString());
         
         // Append condition
         sb.append(", ");

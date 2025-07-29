@@ -55,7 +55,7 @@ public class Armv8CPUReg extends Armv8PhyReg {
     private final String name;
 
     public Armv8CPUReg(int index, String name) {
-        super(index);
+        super();
         this.index = index;
         this.name = name;
     }
@@ -115,6 +115,7 @@ public class Armv8CPUReg extends Armv8PhyReg {
         return this.name;
     }
 
+    // 默认使用64位寄存器
     @Override
     public String toString() {
         return this.name;
@@ -125,5 +126,12 @@ public class Armv8CPUReg extends Armv8PhyReg {
         if (index == 31) return "wsp"; // 32位SP是wsp
         if (index == 32) return "wzr"; // 32位零寄存器是wzr
         return "w" + index;
+    }
+    
+    // 检查是否是64位寄存器(x寄存器)
+    public boolean is64Bit() {
+        // 在AArch64中，所有的CPU寄存器名称如果以'x'开头则为64位
+        // 以'w'开头则为32位
+        return this.name.startsWith("x") || this.name.equals("sp") || this.name.equals("xzr");
     }
 } 

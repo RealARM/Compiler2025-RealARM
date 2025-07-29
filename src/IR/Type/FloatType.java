@@ -29,7 +29,8 @@ public class FloatType extends Type {
     
     @Override
     public String toString() {
-        return bitWidth == 32 ? "float" : "double";
+        // return bitWidth == 32 ? "float" : "double";
+        return "float";
     }
     
     @Override

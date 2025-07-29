@@ -49,8 +49,15 @@ public class DominatorAnalysis {
         
         // 迭代计算支配关系，直到不再变化
         boolean changed;
+        int iterationCount = 0;
         do {
             changed = false;
+            iterationCount++;
+            
+            if (iterationCount > 1000) {
+                System.out.println("[DominatorAnalysis] WARNING: Excessive iterations in computeDominators: " + iterationCount);
+                break;
+            }
             
             // 对除入口块外的每个块进行更新
             for (BasicBlock block : blocks) {
@@ -62,7 +69,12 @@ public class DominatorAnalysis {
                 Set<BasicBlock> newDomSet = new HashSet<>(blocks);
                 
                 // 处理该块的所有前驱
-                for (BasicBlock pred : block.getPredecessors()) {
+                List<BasicBlock> predecessors = block.getPredecessors();
+                if (predecessors.isEmpty()) {
+                    continue;
+                }
+                
+                for (BasicBlock pred : predecessors) {
                     Set<BasicBlock> predDomSet = dominatorMap.get(pred);
                     if (!predDomSet.isEmpty()) {  // 只取已有支配关系的前驱
                         newDomSet.retainAll(predDomSet);  // 交集操作
@@ -79,6 +91,7 @@ public class DominatorAnalysis {
                     changed = true;
                 }
             }
+            
         } while (changed);
         
         return dominatorMap;
@@ -91,43 +104,48 @@ public class DominatorAnalysis {
      */
     public static Map<BasicBlock, BasicBlock> computeImmediateDominators(
             Map<BasicBlock, Set<BasicBlock>> dominators) {
-        Map<BasicBlock, BasicBlock> idoms = new HashMap<>();
-        
-        for (BasicBlock block : dominators.keySet()) {
-            // 获取支配block的所有块（不包括block自身）
-            Set<BasicBlock> domSet = new HashSet<>(dominators.get(block));
-            domSet.remove(block); // 移除自身
+        try {
+            Map<BasicBlock, BasicBlock> idoms = new HashMap<>();
             
-            // 如果没有支配者（只有入口块会出现这种情况），跳过
-            if (domSet.isEmpty()) {
-                continue;
-            }
-            
-            // 找出直接支配者
-            BasicBlock idom = null;
-            for (BasicBlock dominator : domSet) {
-                boolean isIdom = true;
+            for (BasicBlock block : dominators.keySet()) {
+                // 获取支配block的所有块（不包括block自身）
+                Set<BasicBlock> domSet = new HashSet<>(dominators.get(block));
+                domSet.remove(block); // 移除自身
                 
-                // 检查是否有其他块位于当前块和候选直接支配者之间
-                for (BasicBlock other : domSet) {
-                    if (other != dominator && dominators.get(other).contains(dominator)) {
-                        isIdom = false;
+                // 如果没有支配者（只有入口块会出现这种情况），跳过
+                if (domSet.isEmpty()) {
+                    continue;
+                }
+                
+                // 找出直接支配者
+                BasicBlock idom = null;
+                for (BasicBlock dominator : domSet) {
+                    boolean isIdom = true;
+                    
+                    // 检查是否有其他块位于当前块和候选直接支配者之间
+                    for (BasicBlock other : domSet) {
+                        if (other != dominator && dominators.get(other).contains(dominator)) {
+                            isIdom = false;
+                            break;
+                        }
+                    }
+                    
+                    if (isIdom) {
+                        idom = dominator;
                         break;
                     }
                 }
                 
-                if (isIdom) {
-                    idom = dominator;
-                    break;
+                if (idom != null) {
+                    idoms.put(block, idom);
                 }
             }
             
-            if (idom != null) {
-                idoms.put(block, idom);
-            }
+            return idoms;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return new HashMap<>();
         }
-        
-        return idoms;
     }
     
     /**
@@ -213,5 +231,143 @@ public class DominatorAnalysis {
         }
         
         return result;
+    }
+    
+    /**
+     * 获取按支配树后序遍历排列的基本块列表
+     * @param function 待分析的函数
+     * @return 按支配树后序遍历排列的基本块列表
+     */
+    public static List<BasicBlock> getDomPostOrder(Function function) {
+        List<BasicBlock> result = new ArrayList<>();
+        Set<BasicBlock> visited = new HashSet<>();
+        
+        // 获取入口基本块
+        BasicBlock entry = function.getEntryBlock();
+        if (entry == null) {
+            return result;
+        }
+        
+        // 执行后序遍历
+        postOrderTraversal(entry, visited, result);
+        
+        return result;
+    }
+    
+    /**
+     * 支配树的后序遍历辅助方法
+     * @param block 当前基本块
+     * @param visited 已访问的基本块集合
+     * @param result 结果列表
+     */
+    private static void postOrderTraversal(BasicBlock block, Set<BasicBlock> visited, 
+            List<BasicBlock> result) {
+        if (visited.contains(block)) {
+            return;
+        }
+        
+        visited.add(block);
+        
+        // 遍历当前块支配的子节点
+        for (BasicBlock succ : block.getSuccessors()) {
+            if (!visited.contains(succ)) {
+                postOrderTraversal(succ, visited, result);
+            }
+        }
+        
+        // 后序遍历：先添加所有子节点，再添加自身
+        result.add(block);
+    }
+    
+    /**
+     * 计算并设置支配树（直接支配者和支配级别）
+     * @param function 待分析的函数
+     */
+    public static void computeDominatorTree(Function function) {
+        try {
+            // 计算支配关系
+            Map<BasicBlock, Set<BasicBlock>> dominators = computeDominators(function);
+            
+            // 计算直接支配者关系
+            Map<BasicBlock, BasicBlock> idoms = computeImmediateDominators(dominators);
+            
+            // 重置所有块的直接支配者和支配级别
+            for (BasicBlock block : function.getBasicBlocks()) {
+                block.setIdominator(null);
+                block.setDomLevel(0);
+            }
+            
+            // 设置直接支配者关系
+            for (Map.Entry<BasicBlock, BasicBlock> entry : idoms.entrySet()) {
+                BasicBlock block = entry.getKey();
+                BasicBlock idom = entry.getValue();
+                block.setIdominator(idom);
+            }
+            
+            // 计算支配级别（入口块级别为0，其他块级别为其直接支配者级别+1）
+            BasicBlock entry = function.getEntryBlock();
+            if (entry != null) {
+                computeDomLevelDFS(entry, 0);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * 深度优先搜索计算支配级别
+     * @param block 当前块
+     * @param level 当前级别
+     */
+    private static void computeDomLevelDFS(BasicBlock block, int level) {
+        try {
+            block.setDomLevel(level);
+            
+            // 添加一个深度检查，防止过深递归
+            if (level > 1000) {
+                return;
+            }
+            
+            // 遍历当前块直接支配的所有块
+            List<BasicBlock> dominated = findDominatedBlocks(block);
+            
+            for (BasicBlock dom : dominated) {
+                computeDomLevelDFS(dom, level + 1);
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * 查找被指定块直接支配的所有块
+     * @param dominator 支配者
+     * @return 被直接支配的块列表
+     */
+    private static List<BasicBlock> findDominatedBlocks(BasicBlock dominator) {
+        try {
+            List<BasicBlock> dominated = new ArrayList<>();
+            Function function = dominator.getParentFunction();
+            
+            if (function == null) {
+                return dominated;
+            }
+            
+            for (BasicBlock block : function.getBasicBlocks()) {
+                if (block == null) {
+                    continue;
+                }
+                
+                BasicBlock idom = block.getIdominator();
+                if (idom == dominator) {
+                    dominated.add(block);
+                }
+            }
+            
+            return dominated;
+        } catch (Exception e) {
+            e.printStackTrace();
+            return new ArrayList<>();
+        }
     }
 } 

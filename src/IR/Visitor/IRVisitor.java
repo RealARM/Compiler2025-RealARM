@@ -91,20 +91,17 @@ public class IRVisitor {
      * 初始化标准库函数
      */
     private void initializeLibraryFunctions() {
-        // 输入输出函数
+        // 声明输入输出相关的库函数
         declareLibFunction("getint", IntegerType.I32);
-        declareLibFunction("putint", VoidType.VOID, IntegerType.I32);
         declareLibFunction("getch", IntegerType.I32);
-        declareLibFunction("putch", VoidType.VOID, IntegerType.I32);
-        
-        // 数组操作函数
-        declareLibFunction("getarray", IntegerType.I32, new PointerType(IntegerType.I32));
-        declareLibFunction("putarray", VoidType.VOID, IntegerType.I32, new PointerType(IntegerType.I32));
-        
-        // 浮点操作函数
         declareLibFunction("getfloat", FloatType.F64);
-        declareLibFunction("putfloat", VoidType.VOID, FloatType.F64);
+        declareLibFunction("getarray", IntegerType.I32, new PointerType(IntegerType.I32));
         declareLibFunction("getfarray", IntegerType.I32, new PointerType(FloatType.F64));
+
+        declareLibFunction("putint", VoidType.VOID, IntegerType.I32);
+        declareLibFunction("putch", VoidType.VOID, IntegerType.I32);
+        declareLibFunction("putfloat", VoidType.VOID, FloatType.F64);
+        declareLibFunction("putarray", VoidType.VOID, IntegerType.I32, new PointerType(IntegerType.I32));
         declareLibFunction("putfarray", VoidType.VOID, IntegerType.I32, new PointerType(FloatType.F64));
         
         // 时间函数
@@ -115,7 +112,7 @@ public class IRVisitor {
         symbolTables.get(0).put("starttime", startTimeFunc);
         symbolTables.get(0).put("stoptime", stopTimeFunc);
         
-        // 内存操作函数
+        // 声明memset函数
         declareLibFunction("memset", VoidType.VOID, new PointerType(IntegerType.I32), IntegerType.I32, IntegerType.I32);
     }
     
@@ -247,11 +244,19 @@ public class IRVisitor {
                 // 处理数组初始化
                 if (varDef.init != null) {
                     if (varDef.init instanceof SyntaxTree.ArrayInitExpr) {
-                        // 处理数组初始化表达式
-                        List<Value> initValues = processGlobalArrayInit((SyntaxTree.ArrayInitExpr) varDef.init, 
-                                                                       dims, 
-                                                                       baseType);
-                        arrayVar.setArrayValues(initValues);
+                        // 检查是否是全零初始化数组
+                        boolean isAllZero = isAllZeroInitializer((SyntaxTree.ArrayInitExpr) varDef.init);
+                        
+                        if (isAllZero) {
+                            // 全零初始化，直接使用zeroinitializer
+                            arrayVar.setZeroInitialized(totalSize);
+                        } else {
+                            // 处理数组初始化表达式
+                            List<Value> initValues = processGlobalArrayInit((SyntaxTree.ArrayInitExpr) varDef.init, 
+                                                                           dims, 
+                                                                           baseType);
+                            arrayVar.setArrayValues(initValues);
+                        }
                     } else {
                         throw new RuntimeException("全局数组初始化必须使用数组初始化表达式");
                     }
@@ -268,6 +273,43 @@ public class IRVisitor {
     }
     
     /**
+     * 检查数组初始化表达式是否全为零值
+     * @param initExpr 数组初始化表达式
+     * @return 如果全为零值返回true，否则返回false
+     */
+    private boolean isAllZeroInitializer(SyntaxTree.ArrayInitExpr initExpr) {
+        // 检查是否是空初始化 {}
+        if (initExpr.elements.isEmpty()) {
+            return true;
+        }
+        
+        for (SyntaxTree.Expr expr : initExpr.elements) {
+            if (expr instanceof SyntaxTree.ArrayInitExpr) {
+                // 递归检查嵌套数组
+                if (!isAllZeroInitializer((SyntaxTree.ArrayInitExpr) expr)) {
+                    return false;
+                }
+            } else if (expr instanceof SyntaxTree.LiteralExpr) {
+                // 检查字面量是否为0
+                Object value = ((SyntaxTree.LiteralExpr) expr).value;
+                if (value instanceof Integer && (Integer) value != 0) {
+                    return false;
+                } else if (value instanceof Float && (Float) value != 0.0f) {
+                    return false;
+                } else if (value instanceof Double && (Double) value != 0.0) {
+                    return false;
+                }
+            } else {
+                // 非字面量表达式，保守估计可能非零
+                return false;
+            }
+        }
+        
+        // 如果数组为空或所有元素都是0，则返回true
+        return true;
+    }
+    
+    /**
      * 处理全局数组初始化
      */
     private List<Value> processGlobalArrayInit(SyntaxTree.ArrayInitExpr initExpr, 
@@ -279,61 +321,140 @@ public class IRVisitor {
             totalSize *= dim;
         }
         
-        // 收集初始化值
-        List<Value> initValues = new ArrayList<>();
-        flattenGlobalArrayInit(initExpr, initValues, elementType);
+        // 检查是否是全零初始化数组
+        boolean isAllZero = isAllZeroInitializer(initExpr);
         
-        // 如果初始化值不足，用0填充
-        while (initValues.size() < totalSize) {
+        if (isAllZero) {
+            // 全零初始化，返回空列表表示使用zeroinitializer
+            return new ArrayList<>();
+        }
+        
+        // 初始化结果列表，先全部填充0
+        List<Value> result = new ArrayList<>(totalSize);
+        for (int i = 0; i < totalSize; i++) {
             if (elementType == IntegerType.I32) {
-                initValues.add(new ConstantInt(0));
+                result.add(new ConstantInt(0));
             } else { // FloatType
-                initValues.add(new ConstantFloat(0.0));
+                result.add(new ConstantFloat(0.0));
             }
         }
         
-        return initValues;
+        // 递归填充初始化值
+        int[] indices = new int[dims.size()];
+        fillArrayInitValues(initExpr, result, elementType, dims, indices, 0);
+        
+        return result;
     }
-    
+
     /**
-     * 展平全局数组初始化表达式
+     * 递归填充多维数组的初始化值
+     * @param expr 初始化表达式
+     * @param result 结果列表
+     * @param elementType 元素类型
+     * @param dims 每个维度的大小
+     * @param indices 当前索引数组
+     * @param dimLevel 当前维度级别
      */
-    private void flattenGlobalArrayInit(SyntaxTree.Expr expr, List<Value> result, Type elementType) {
+    private void fillArrayInitValues(SyntaxTree.Expr expr, List<Value> result,
+                                   Type elementType, List<Integer> dims, 
+                                   int[] indices, int dimLevel) {
         if (expr instanceof SyntaxTree.ArrayInitExpr) {
             SyntaxTree.ArrayInitExpr arrayInit = (SyntaxTree.ArrayInitExpr) expr;
-            for (SyntaxTree.Expr element : arrayInit.elements) {
-                flattenGlobalArrayInit(element, result, elementType);
+            
+            // 处理当前维度的每个元素
+            for (int i = 0; i < Math.min(arrayInit.elements.size(), dims.get(dimLevel)); i++) {
+                indices[dimLevel] = i;
+                
+                if (dimLevel < dims.size() - 1) {
+                    // 非最后维度，递归处理子数组
+                    if (i < arrayInit.elements.size() && arrayInit.elements.get(i) instanceof SyntaxTree.ArrayInitExpr) {
+                        // 如果子元素是数组初始化表达式，递归处理下一维度
+                        fillArrayInitValues(arrayInit.elements.get(i), result, elementType, dims, indices, dimLevel + 1);
+                    } else if (i < arrayInit.elements.size()) {
+                        // 如果子元素不是数组初始化表达式但当前不是最后维度，
+                        // 将该元素放在下一维度的首位置，其余位置填0
+                        indices[dimLevel + 1] = 0;
+                        fillSingleElement(arrayInit.elements.get(i), result, elementType, dims, indices);
+                        
+                        // 重置下一维度的索引，保持当前维度索引不变
+                        for (int j = dimLevel + 1; j < indices.length; j++) {
+                            indices[j] = 0;
+                        }
+                    }
+                } else {
+                    // 最后一维，处理单个元素
+                    if (i < arrayInit.elements.size()) {
+                        fillSingleElement(arrayInit.elements.get(i), result, elementType, dims, indices);
+                    }
+                }
             }
         } else {
-            // 处理表达式元素
-            currentValue = null;
-            visitExpr(expr);
+            // 单个元素直接填充
+            fillSingleElement(expr, result, elementType, dims, indices);
+        }
+    }
+
+    /**
+     * 填充单个数组元素
+     * @param expr 表达式
+     * @param result 结果列表
+     * @param elementType 元素类型
+     * @param dims 每个维度的大小
+     * @param indices 当前索引数组
+     */
+    private void fillSingleElement(SyntaxTree.Expr expr, List<Value> result,
+                                 Type elementType, List<Integer> dims, int[] indices) {
+        // 计算线性索引
+        int linearIndex = calculateLinearIndex(dims, indices);
+        
+        // 处理表达式
+        currentValue = null;
+        visitExpr(expr);
+        
+        if (currentValue != null) {
+            Constant constResult = IR.Pass.ConstantExpressionEvaluator.evaluate(currentValue);
+            Value valueToAdd = null;
             
-            if (currentValue != null) {
-                // 尝试将表达式结果评估为常量
-                Constant constResult = IR.Pass.ConstantExpressionEvaluator.evaluate(currentValue);
-                Value valueToAdd = null;
-                
-                if (constResult != null) {
-                    valueToAdd = constResult;
-                } else if (currentValue instanceof Constant) {
-                    valueToAdd = currentValue;
-                } else {
-                    throw new RuntimeException("全局数组初始化必须使用常量表达式");
-                }
-                
-                // 类型转换处理
-                if (valueToAdd instanceof ConstantInt && elementType.isFloatType()) {
-                    result.add(new ConstantFloat((double)((ConstantInt) valueToAdd).getValue()));
-                } else if (valueToAdd instanceof ConstantFloat && elementType == IntegerType.I32) {
-                    result.add(new ConstantInt((int) ((ConstantFloat)valueToAdd).getValue()));
-                } else {
-                    result.add((Constant) valueToAdd);
-                }
+            if (constResult != null) {
+                valueToAdd = constResult;
+            } else if (currentValue instanceof Constant) {
+                valueToAdd = currentValue;
             } else {
-                throw new RuntimeException("全局数组初始化表达式计算失败");
+                throw new RuntimeException("全局数组初始化必须使用常量表达式");
+            }
+            
+            // 类型转换
+            if (valueToAdd instanceof ConstantInt && elementType.isFloatType()) {
+                result.set(linearIndex, new ConstantFloat((double)((ConstantInt) valueToAdd).getValue()));
+            } else if (valueToAdd instanceof ConstantFloat && elementType == IntegerType.I32) {
+                result.set(linearIndex, new ConstantInt((int) ((ConstantFloat)valueToAdd).getValue()));
+            } else {
+                result.set(linearIndex, (Constant) valueToAdd);
+            }
+        } else {
+            throw new RuntimeException("全局数组初始化表达式计算失败");
+        }
+    }
+
+    /**
+     * 计算多维数组的线性索引
+     * @param dims 每个维度的大小
+     * @param indices 当前索引数组
+     * @return 线性索引
+     */
+    private int calculateLinearIndex(List<Integer> dims, int[] indices) {
+        int linearIndex = 0;
+        int factor = 1;
+        
+        // 从最后一个维度开始计算
+        for (int i = dims.size() - 1; i >= 0; i--) {
+            linearIndex += indices[i] * factor;
+            if (i > 0) {
+                factor *= dims.get(i);
             }
         }
+        
+        return linearIndex;
     }
     
     /**
@@ -859,7 +980,6 @@ public class IRVisitor {
      * 处理数组初始化
      */
     private void processArrayInit(SyntaxTree.ArrayInitExpr initExpr, Value arrayPtr, List<Integer> dims, Type elementType) {
-        // 计算索引因子（与数组访问完全相同的逻辑）
         List<Integer> factors = new ArrayList<>();
         for (int i = 0; i < dims.size(); i++) {
             int factor = 1;
@@ -875,15 +995,54 @@ public class IRVisitor {
             totalSize *= dim;
         }
         
+        // 检查是否可以使用memset优化（仅用于整型数组）
+        boolean useMemset = (elementType == IntegerType.I32 || elementType == IntegerType.I1 || elementType == IntegerType.I8);
+        int elementSizeInBytes = elementType.getSize();
+        int totalSizeInBytes = totalSize * elementSizeInBytes;
+        
+        // 如果是整型数组且全为0，直接使用memset优化
+        if (useMemset && isLocalArrayAllZero(initExpr)) {
+            Function memsetFunc = module.getLibFunction("memset");
+            if (memsetFunc != null) {
+                List<Value> args = new ArrayList<>();
+                args.add(arrayPtr);
+                args.add(new ConstantInt(0));
+                args.add(new ConstantInt(totalSizeInBytes));
+                IRBuilder.createCall(memsetFunc, args, currentBlock);
+                return;
+            }
+        }
+        
         // 初始化所有元素为0（防止部分初始化）
-        for (int i = 0; i < totalSize; i++) {
-            Value indexValue = new ConstantInt(i);
-            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
-            if (elementType == IntegerType.I32) {
-                IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
-            } else if (elementType == FloatType.F64) {
+        if (useMemset) {
+            // 对于整型数组，使用memset
+            Function memsetFunc = module.getLibFunction("memset");
+            if (memsetFunc != null) {
+                List<Value> args = new ArrayList<>();
+                args.add(arrayPtr);
+                args.add(new ConstantInt(0));
+                args.add(new ConstantInt(totalSizeInBytes));
+                IRBuilder.createCall(memsetFunc, args, currentBlock);
+            } else {
+                // 如果memset不可用，使用传统方法初始化为0
+                for (int i = 0; i < totalSize; i++) {
+                    Value indexValue = new ConstantInt(i);
+                    Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                    IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
+                }
+            }
+        } else {
+            // 对于浮点数组，使用循环逐个初始化
+            for (int i = 0; i < totalSize; i++) {
+                Value indexValue = new ConstantInt(i);
+                Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
                 IRBuilder.createStore(new ConstantFloat(0.0), elemPtr, currentBlock);
             }
+        }
+        
+        // 如果数组全为0，上面已经完成了初始化，可以直接返回
+        if (isLocalArrayAllZero(initExpr)) {
+            return;
         }
         
         // 使用嵌套数组初始化表达式的结构进行初始化
@@ -1579,7 +1738,7 @@ public class IRVisitor {
     }
     
     /**
-     * 访问二元表达式
+     * 访问二元表达式（非递归迭代实现）
      */
     private void visitBinaryExpr(SyntaxTree.BinaryExpr expr) {
         String op = expr.op;
@@ -1593,13 +1752,74 @@ public class IRVisitor {
             return;
         }
         
-        // 处理普通的二元运算
-        visitExpr(expr.left);
-        Value leftValue = currentValue;
+        // 使用迭代算法处理二元表达式树
+        // 定义表达式处理的状态: 0=未处理，1=已处理左操作数
+        class ExprState {
+            SyntaxTree.Expr expr;
+            int state;
+            Value leftValue; // 存储左操作数的值
+            
+            ExprState(SyntaxTree.Expr expr, int state) {
+                this.expr = expr;
+                this.state = state;
+                this.leftValue = null;
+            }
+        }
         
-        visitExpr(expr.right);
-        Value rightValue = currentValue;
+        Stack<ExprState> stack = new Stack<>();
+        stack.push(new ExprState(expr, 0));
         
+        while (!stack.isEmpty()) {
+            ExprState current = stack.peek();
+            
+            if (current.expr instanceof SyntaxTree.BinaryExpr) {
+                SyntaxTree.BinaryExpr binaryExpr = (SyntaxTree.BinaryExpr) current.expr;
+                String currentOp = binaryExpr.op;
+                
+                // 如果是逻辑运算符，应该已经在外部处理过了
+                if (currentOp.equals("&&") || currentOp.equals("||")) {
+                    throw new RuntimeException("逻辑运算符应该已经被单独处理");
+                }
+                
+                if (current.state == 0) {
+                    // 先处理左子表达式
+                    current.state = 1;
+                    stack.push(new ExprState(binaryExpr.left, 0));
+                } else {
+                    // 已处理左子表达式，现在处理右子表达式
+                    stack.pop(); // 弹出当前表达式
+                    
+                    Value leftValue = current.leftValue != null ? current.leftValue : currentValue;
+                    
+                    // 处理右子表达式
+                    visitExpr(binaryExpr.right);
+                    Value rightValue = currentValue;
+                    
+                    // 根据操作符处理结果
+                    processBinaryOperation(currentOp, leftValue, rightValue);
+                    
+                    // 如果栈不为空，将结果保存到上层表达式的leftValue中
+                    if (!stack.isEmpty()) {
+                        stack.peek().leftValue = currentValue;
+                    }
+                }
+            } else {
+                // 处理非二元表达式
+                stack.pop();
+                visitExpr(current.expr);
+                
+                // 如果栈不为空，将结果保存到上层表达式的leftValue中
+                if (!stack.isEmpty()) {
+                    stack.peek().leftValue = currentValue;
+                }
+            }
+        }
+    }
+    
+    /**
+     * 处理二元运算操作
+     */
+    private void processBinaryOperation(String op, Value leftValue, Value rightValue) {
         // 处理比较操作
         if (isCmpOp(op)) {
             OpCode compareType;
@@ -1618,7 +1838,6 @@ public class IRVisitor {
             Value compResult = IRBuilder.createCompare(compareType, predicate, leftValue, rightValue, currentBlock);
             
             // 在SysY语言中，比较结果通常需要在后续表达式中使用，需要将i1类型提升为i32类型
-            // 这样可以避免类型不匹配的问题
             currentValue = IRBuilder.createZeroExtend(compResult, IntegerType.I32, currentBlock);
         } else {
             // 判断左右值是否有布尔值和整数混合的情况
@@ -2198,7 +2417,6 @@ public class IRVisitor {
      * 处理局部数组声明
      */
     private void processLocalArrayDecl(String name, Type elementType, List<Integer> dimensions, SyntaxTree.ArrayInitExpr initExpr) {
-        // 计算数组总大小
         int totalSize = 1;
         for (int dim : dimensions) {
             totalSize *= dim;
@@ -2213,8 +2431,27 @@ public class IRVisitor {
         // 存储维度信息，这对于后续数组索引计算很关键
         addArrayDimensions(name, dimensions);
         
+        // 检查是否可以使用memset优化（仅用于整型数组）
+        boolean useMemset = (elementType == IntegerType.I32 || elementType == IntegerType.I1 || elementType == IntegerType.I8);
+        int elementSizeInBytes = elementType.getSize();
+        int totalSizeInBytes = totalSize * elementSizeInBytes;
+        
         // 初始化数组元素
         if (initExpr != null) {
+            // 检查是否全部为0，如果是则使用memset优化（仅用于整型数组）
+            if (useMemset && isLocalArrayAllZero(initExpr)) {
+                // 使用memset将数组初始化为0
+                Function memsetFunc = module.getLibFunction("memset");
+                if (memsetFunc != null) {
+                    List<Value> args = new ArrayList<>();
+                    args.add(arrayPtr);
+                    args.add(new ConstantInt(0));
+                    args.add(new ConstantInt(totalSizeInBytes));
+                    IRBuilder.createCall(memsetFunc, args, currentBlock);
+                    return;
+                }
+            }
+            
             // 如果数组初始化中包含特殊元素如a[3][0]，我们需要先处理这些表达式
             // 先简单检查是否存在数组访问表达式
             boolean hasArrayAccess = false;
@@ -2227,13 +2464,29 @@ public class IRVisitor {
             
             // 如果包含数组访问表达式，需要特殊处理
             if (hasArrayAccess) {
-                // 先把整个数组初始化为0
-                for (int i = 0; i < totalSize; i++) {
-                    Value indexValue = new ConstantInt(i);
-                    Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
-                    if (elementType == IntegerType.I32) {
-                        IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
-                    } else { // FloatType
+                // 先初始化整个数组为0
+                if (useMemset) {
+                    // 对于整型数组，使用memset
+                    Function memsetFunc = module.getLibFunction("memset");
+                    if (memsetFunc != null) {
+                        List<Value> args = new ArrayList<>();
+                        args.add(arrayPtr);
+                        args.add(new ConstantInt(0));
+                        args.add(new ConstantInt(totalSizeInBytes));
+                        IRBuilder.createCall(memsetFunc, args, currentBlock);
+                    } else {
+                        // 如果找不到memset函数，手动将数组初始化为0
+                        for (int i = 0; i < totalSize; i++) {
+                            Value indexValue = new ConstantInt(i);
+                            Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                            IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
+                        }
+                    }
+                } else {
+                    // 对于浮点数组，使用循环逐个初始化
+                    for (int i = 0; i < totalSize; i++) {
+                        Value indexValue = new ConstantInt(i);
+                        Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
                         IRBuilder.createStore(new ConstantFloat(0.0), elemPtr, currentBlock);
                     }
                 }
@@ -2326,12 +2579,72 @@ public class IRVisitor {
                     
                     currentPos++;
                 }
+                
+                // 检查是否还有剩余的元素需要初始化为0
+                if (currentPos < totalSize) {
+                    // 计算剩余部分的大小和字节数
+                    int remainingElements = totalSize - currentPos;
+                    int remainingBytes = remainingElements * elementSizeInBytes;
+                    
+                    // 计算剩余部分在数组中的位置
+                    Value ptrOffset = IRBuilder.createGetElementPtr(arrayPtr, new ConstantInt(currentPos), currentBlock);
+                    
+                    // 对于整型数组且剩余元素较多时使用memset初始化剩余的元素为0
+                    if (useMemset && remainingElements > 32) {
+                        Function remainingMemsetFunc = module.getLibFunction("memset");
+                        if (remainingMemsetFunc != null) {
+                            List<Value> args = new ArrayList<>();
+                            args.add(ptrOffset);
+                            args.add(new ConstantInt(0));
+                            args.add(new ConstantInt(remainingBytes));
+                            IRBuilder.createCall(remainingMemsetFunc, args, currentBlock);
+                        } else {
+                            // 如果找不到memset，手动初始化剩余元素
+                            for (int i = 0; i < remainingElements; i++) {
+                                Value indexValue = new ConstantInt(i);
+                                Value elemPtr = IRBuilder.createGetElementPtr(ptrOffset, indexValue, currentBlock);
+                                IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
+                            }
+                        }
+                    } else {
+                        // 对于浮点数组或剩余元素较少，使用循环逐个初始化
+                        for (int i = 0; i < remainingElements; i++) {
+                            Value indexValue = new ConstantInt(i);
+                            Value elemPtr = IRBuilder.createGetElementPtr(ptrOffset, indexValue, currentBlock);
+                            if (elementType == IntegerType.I32 || elementType == IntegerType.I1 || elementType == IntegerType.I8) {
+                                IRBuilder.createStore(new ConstantInt(0), elemPtr, currentBlock);
+                            } else { // FloatType
+                                IRBuilder.createStore(new ConstantFloat(0.0), elemPtr, currentBlock);
+                            }
+                        }
+                    }
+                }
             } else {
                 // 正常处理数组初始化
                 processArrayInit(initExpr, arrayPtr, dimensions, elementType);
             }
+        } else {
+            // 如果没有初始化表达式，使用适当的方法初始化为0
+            if (useMemset) {
+                // 对于整型数组，使用memset
+                Function noInitMemsetFunc = module.getLibFunction("memset");
+                if (noInitMemsetFunc != null) {
+                    List<Value> args = new ArrayList<>();
+                    args.add(arrayPtr);
+                    args.add(new ConstantInt(0));
+                    args.add(new ConstantInt(totalSizeInBytes));
+                    IRBuilder.createCall(noInitMemsetFunc, args, currentBlock);
+                }
+                // 如果找不到memset，则不进行任何初始化，与C语言行为一致
+            } else {
+                // 对于浮点数组，使用循环逐个初始化
+                for (int i = 0; i < totalSize; i++) {
+                    Value indexValue = new ConstantInt(i);
+                    Value elemPtr = IRBuilder.createGetElementPtr(arrayPtr, indexValue, currentBlock);
+                    IRBuilder.createStore(new ConstantFloat(0.0), elemPtr, currentBlock);
+                }
+            }
         }
-        // 如果没有初始化表达式，不进行任何初始化
     }
     
     /**
@@ -2390,43 +2703,67 @@ public class IRVisitor {
         symbolTables.remove(symbolTables.size() - 1);
         arrayDimensions.remove(arrayDimensions.size() - 1);
     }
-
+    
     /**
-     * 获取布尔值的否定结果
-     * 例如：true -> false, false -> true
+     * 检查局部数组初始化是否全为0
+     * @param initExpr 数组初始化表达式
+     * @return 如果数组初始化全为0，返回true，否则返回false
      */
-    private Value getNegatedBooleanValue(Value boolValue, BasicBlock block) {
-        if (boolValue instanceof ConstantInt) {
-            // 如果是常量，直接求反
-            int value = ((ConstantInt) boolValue).getValue();
-            return new ConstantInt(value == 0 ? 1 : 0, IntegerType.I1);
-        } else {
-            // 否则使用异或运算
-            return IRBuilder.createBinaryInst(OpCode.XOR, boolValue, new ConstantInt(1, IntegerType.I1), block);
+    private boolean isLocalArrayAllZero(SyntaxTree.ArrayInitExpr initExpr) {
+        if (initExpr == null) {
+            return true; // 没有初始化表达式，默认全为0
         }
-    }
-
-    /**
-     * 访问一个表达式，如果是常量，尝试获取它的实际值
-     */
-    private Value getConstantValue(SyntaxTree.Expr expr) {
-        // 保存当前值
-        Value oldValue = currentValue;
         
-        // 访问表达式
-        visitExprAndLoad(expr);
-        Value result = currentValue;
-        
-        // 尝试评估为常量
-        if (result != null) {
-            Constant constResult = IR.Pass.ConstantExpressionEvaluator.evaluate(result);
-            if (constResult != null) {
-                result = constResult;
+        for (SyntaxTree.Expr expr : initExpr.elements) {
+            if (expr instanceof SyntaxTree.LiteralExpr) {
+                SyntaxTree.LiteralExpr lit = (SyntaxTree.LiteralExpr) expr;
+                if (lit.value instanceof Integer && (Integer)lit.value != 0) {
+                    return false;
+                } else if (lit.value instanceof Float && (Float)lit.value != 0.0f) {
+                    return false;
+                }
+            } else if (expr instanceof SyntaxTree.ArrayInitExpr) {
+                if (!isLocalArrayAllZero((SyntaxTree.ArrayInitExpr) expr)) {
+                    return false;
+                }
+            } else {
+                return false; // 非字面量或数组初始化表达式，无法在编译时确定是否为0
             }
         }
         
-        // 恢复当前值
-        currentValue = oldValue;
-        return result;
+        return true;
     }
+    
+    /**
+     * 判断数组初始化表达式从指定位置开始是否全为0
+     * @param initExpr 数组初始化表达式
+     * @param startPos 开始位置
+     * @return 如果从指定位置开始全为0，返回true，否则返回false
+     */
+    private boolean isRemainingArrayZero(SyntaxTree.ArrayInitExpr initExpr, int startPos) {
+        if (initExpr == null || startPos >= initExpr.elements.size()) {
+            return true;
+        }
+        
+        for (int i = startPos; i < initExpr.elements.size(); i++) {
+            SyntaxTree.Expr expr = initExpr.elements.get(i);
+            if (expr instanceof SyntaxTree.LiteralExpr) {
+                SyntaxTree.LiteralExpr lit = (SyntaxTree.LiteralExpr) expr;
+                if (lit.value instanceof Integer && (Integer)lit.value != 0) {
+                    return false;
+                } else if (lit.value instanceof Float && (Float)lit.value != 0.0f) {
+                    return false;
+                }
+            } else if (expr instanceof SyntaxTree.ArrayInitExpr) {
+                if (!isLocalArrayAllZero((SyntaxTree.ArrayInitExpr) expr)) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
+        }
+        
+        return true;
+    }
+
 } 
