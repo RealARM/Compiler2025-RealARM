@@ -49,7 +49,7 @@ public class PassManager {
         addIRPass(new TailRecursionElimination());
         
         // Mem2Reg优化（SSA构造） - 在尾递归消除之后运行
-        addIRPass(new Mem2Reg());
+        // addIRPass(new Mem2Reg());
         
         // 常量优化
         addIRPass(new ConstantDeduplication());
@@ -102,7 +102,7 @@ public class PassManager {
         addIRPass(new DCE());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        // addIRPass(new RemovePhiPass());
+        addIRPass(new RemovePhiPass());
     }
     
     /**

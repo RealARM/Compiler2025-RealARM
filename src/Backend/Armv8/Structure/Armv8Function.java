@@ -14,6 +14,7 @@ public class Armv8Function {
     private ArrayList<Armv8Block> blocks = new ArrayList<>();
     private LinkedList<Armv8Block> blockList = new LinkedList<>();
     private Long stackSize = 0L;
+    private Armv8Stack stackSpace = new Armv8Stack();
     private LinkedHashMap<Value, Long> stack = new LinkedHashMap<>();
 
     private HashMap<Value, Armv8Reg> RegArgList = new HashMap<>();
@@ -88,6 +89,7 @@ public class Armv8Function {
             this.stack.put(value, stackSize);
         }
         this.stackSize += offset;
+        this.stackSpace.addOffset(offset);
     }
 
     public void addRegArg(Value arg, Armv8Reg value) {
@@ -98,6 +100,9 @@ public class Armv8Function {
         this.stackArgList.put(arg, offset);
     }
     
+    public Armv8Stack getStackSpace() {
+        return this.stackSpace;
+    }
 
     public void addBlock(Armv8Block block) {
         this.blocks.add(block);

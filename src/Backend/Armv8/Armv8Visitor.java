@@ -241,11 +241,18 @@ public class Armv8Visitor {
             size = 8;
         }
         
+        // 获取当前栈大小作为这个变量的偏移量
+        long currentStackPos = curArmv8Function.getStackSize();
+        
         // 在函数栈上分配空间（如果真正需要）
         curArmv8Function.addStack(ins, size);
         
         // 记录分配的偏移量，用于后续访问
-        ptrList.put(ins, stackPos);
+        ptrList.put(ins, currentStackPos);
+        
+        // 调试信息：打印栈分配情况
+        System.err.println("!!! STACK ALLOCATION DEBUG !!! 为变量 " + ins + " 分配栈位置 [sp, #" + currentStackPos + "], 大小: " + size);
+        System.err.flush();
         
         // 分配虚拟寄存器用于存储地址，注意不要影响参数寄存器
         if (!predefine) {
@@ -255,7 +262,7 @@ public class Armv8Visitor {
             
             // 计算局部变量地址：SP + 偏移量
             // 检查偏移量是否在范围内，并获取适当的操作数
-            Armv8Operand offsetOp = checkImmediate(stackPos, ImmediateRange.ADD_SUB, null, predefine);
+            Armv8Operand offsetOp = checkImmediate(currentStackPos, ImmediateRange.ADD_SUB, null, predefine);
             
             // 创建加法指令
             if (offsetOp instanceof Armv8Reg) {
@@ -276,9 +283,6 @@ public class Armv8Visitor {
                 addInstr(addInst, null, predefine);
             }
         }
-        
-        // 更新栈指针偏移
-        stackPos += size;
     }
 
     private void parseBinaryInst(BinaryInstruction ins, boolean predefine) {
@@ -732,7 +736,7 @@ public class Armv8Visitor {
                 ArrayList<Armv8Operand> operands = new ArrayList<>();
                 operands.add(Armv8CPUReg.getArmv8SpReg());
                 operands.add(sizeOp);
-                Armv8Binary addInst = new Armv8Binary(operands, Armv8CPUReg.getArmv8SpReg(), Armv8Binary.Armv8BinaryType.add);
+                Armv8Binary addInst = new Armv8Binary(operands, Armv8CPUReg.getArmv8SpReg(), Armv8Binary.Armv8BinaryType.sub);
                 addInstr(addInst, insList, predefine);
             } else {
                 // 使用立即数形式的add指令
@@ -740,7 +744,7 @@ public class Armv8Visitor {
                     Armv8CPUReg.getArmv8SpReg(), 
                     Armv8CPUReg.getArmv8SpReg(), 
                     (Armv8Imm)sizeOp, 
-                    Armv8Binary.Armv8BinaryType.add
+                    Armv8Binary.Armv8BinaryType.sub
                 );
                 addInstr(addInst, insList, predefine);
             }
@@ -1468,32 +1472,37 @@ public class Armv8Visitor {
         
         // 获取函数的栈大小
         Long localSize = curArmv8Function.getStackSize();
-        if (localSize > 0) {
-            // 计算对齐后的栈大小
-            long alignedSize = (localSize + 15) & ~15;  // 对齐到16字节
+        ArrayList<Armv8Operand> operands = new ArrayList<>();
+        operands.add(Armv8CPUReg.getArmv8SpReg());
+        operands.add(curArmv8Function.getStackSpace());
+        Armv8Binary addSpInst = new Armv8Binary(operands, Armv8CPUReg.getArmv8SpReg(), Armv8Binary.Armv8BinaryType.add);
+        addInstr(addSpInst, insList, predefine);
+        // if (localSize > 0) {
+        //     // 计算对齐后的栈大小
+        //     long alignedSize = (localSize + 15) & ~15;  // 对齐到16字节
             
-            // 使用通用的立即数检查机制
-            Armv8Operand sizeOp = checkImmediate(alignedSize, ImmediateRange.ADD_SUB, insList, predefine);
+        //     // 使用通用的立即数检查机制
+        //     Armv8Operand sizeOp = checkImmediate(alignedSize, ImmediateRange.ADD_SUB, insList, predefine);
             
-            // 如果有局部变量空间，调整SP释放局部变量空间
-            if (sizeOp instanceof Armv8Reg) {
-                // 如果栈大小被加载到寄存器，使用寄存器形式的add指令
-                ArrayList<Armv8Operand> operands = new ArrayList<>();
-                operands.add(Armv8CPUReg.getArmv8SpReg());
-                operands.add(sizeOp);
-                Armv8Binary addSpInst = new Armv8Binary(operands, Armv8CPUReg.getArmv8SpReg(), Armv8Binary.Armv8BinaryType.add);
-                addInstr(addSpInst, insList, predefine);
-            } else {
-                // 使用立即数形式的add指令
-                Armv8Binary addSpInst = new Armv8Binary(
-                    Armv8CPUReg.getArmv8SpReg(), 
-                    Armv8CPUReg.getArmv8SpReg(), 
-                    (Armv8Imm)sizeOp, 
-                    Armv8Binary.Armv8BinaryType.add
-                );
-                addInstr(addSpInst, insList, predefine);
-            }
-        }
+        //     // 如果有局部变量空间，调整SP释放局部变量空间
+        //     if (sizeOp instanceof Armv8Reg) {
+        //         // 如果栈大小被加载到寄存器，使用寄存器形式的add指令
+        //         ArrayList<Armv8Operand> operands = new ArrayList<>();
+        //         operands.add(Armv8CPUReg.getArmv8SpReg());
+        //         operands.add(sizeOp);
+        //         Armv8Binary addSpInst = new Armv8Binary(operands, Armv8CPUReg.getArmv8SpReg(), Armv8Binary.Armv8BinaryType.add);
+        //         addInstr(addSpInst, insList, predefine);
+        //     } else {
+        //         // 使用立即数形式的add指令
+        //         Armv8Binary addSpInst = new Armv8Binary(
+        //             Armv8CPUReg.getArmv8SpReg(), 
+        //             Armv8CPUReg.getArmv8SpReg(), 
+        //             (Armv8Imm)sizeOp, 
+        //             Armv8Binary.Armv8BinaryType.add
+        //         );
+        //         addInstr(addSpInst, insList, predefine);
+        //     }
+        // }
         
         // 恢复FP(x29)和LR(x30)寄存器，并调整SP
         Armv8LoadPair ldpInst = new Armv8LoadPair(
