@@ -151,7 +151,16 @@ public class Armv8Function {
         if (stackSize > 0) {
             // 计算需要为栈分配的空间（向上取整到16的倍数）
             long alignedSize = (stackSize + 15) & ~15;  // 对齐到16字节
-            sb.append("\tsub sp, sp, #").append(alignedSize).append("\n");
+            
+            // 检查栈大小是否超出ARMv8指令的立即数范围(4095)
+            if (alignedSize > 4095) {
+                // 如果超出范围，使用临时寄存器
+                sb.append("\tmov x8, #").append(alignedSize).append("\n");
+                sb.append("\tsub sp, sp, x8\n");
+            } else {
+                // 在范围内直接使用立即数
+                sb.append("\tsub sp, sp, #").append(alignedSize).append("\n");
+            }
         }
         
         return sb.toString();
@@ -164,7 +173,16 @@ public class Armv8Function {
         if (stackSize > 0) {
             // 计算对齐后的栈大小
             long alignedSize = (stackSize + 15) & ~15;
-            sb.append("\tadd sp, sp, #").append(alignedSize).append("\n");
+            
+            // 检查栈大小是否超出ARMv8指令的立即数范围(4095)
+            if (alignedSize > 4095) {
+                // 如果超出范围，使用临时寄存器
+                sb.append("\tmov x8, #").append(alignedSize).append("\n");
+                sb.append("\tadd sp, sp, x8\n");
+            } else {
+                // 在范围内直接使用立即数
+                sb.append("\tadd sp, sp, #").append(alignedSize).append("\n");
+            }
         }
         
         // 2. 恢复帧指针和返回地址，同时调整栈指针
