@@ -22,7 +22,7 @@ public class GCM implements IRPass {
     private final Set<Instruction> visited = new LinkedHashSet<>();
     
     // 调试模式
-    private boolean debug = false;
+    private boolean debug = true;
     
     // 基本块数量阈值，超过此阈值的函数将跳过GCM优化
     private final int MAX_BLOCKS_THRESHOLD = 1000;
@@ -269,13 +269,12 @@ public class GCM implements IRPass {
                 // 特殊处理Phi指令
                 if (userInst instanceof PhiInstruction phi) {
                     // 找到Phi指令中使用当前指令的前驱块
-                    for (int i = 0; i < phi.getIncomingValues().size(); i++) {
-                        Value value = phi.getIncomingValues().get(i);
-                        if (value == instruction) {
-                            useBB = phi.getIncomingBlocks().get(i);
+                    for (Map.Entry<BasicBlock, Value> entry : phi.getIncomingValues().entrySet()) {
+                        if (entry.getValue() == instruction) {
+                            useBB = entry.getKey();
                             if (useBB != null) {
                                 lca = findLCA(lca, useBB);
-                                if (debug) System.out.println("[GCM] Late: Found phi use in " + useBB + ", LCA now " + lca);
+                                if (debug) System.out.println("[GCM] Late: Found phi use in " + useBB + " by phi " + phi + ", LCA now " + lca);
                             }
                         }
                     }

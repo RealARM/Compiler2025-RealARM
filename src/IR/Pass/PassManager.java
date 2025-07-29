@@ -44,8 +44,12 @@ public class PassManager {
      * 初始化默认的优化Pass
      */
     private void initializePasses() {
-        // 尾递归消除优化
+
+        // 尾递归消除优化 - 应该在Mem2Reg之前运行，避免phi指令冲突
         addIRPass(new TailRecursionElimination());
+        
+        // Mem2Reg优化（SSA构造） - 在尾递归消除之后运行
+        addIRPass(new Mem2Reg());
         
         // 常量优化
         addIRPass(new ConstantDeduplication());
@@ -67,7 +71,7 @@ public class PassManager {
         // 窥孔优化
         addIRPass(new PeepHole());
         
-        // 删除单跳转基本块优化 - 暂时禁用，因为它与PeepHole有冲突
+        // 删除单跳转基本块优化 - 存在问题
         addIRPass(new RemoveSingleJumpBB());
         
         // 移除无用的不等于比较指令优化
@@ -76,17 +80,17 @@ public class PassManager {
         // 控制流优化
         addIRPass(new BranchSimplifier());
         
-        // 循环SSA形式转换（在循环优化之前）
-        addIRPass(new LoopSSATransform());
+        // // 循环SSA形式转换（在循环优化之前）
+        // addIRPass(new LoopSSATransform());
         
-        // 循环优化
-        addIRPass(new LoopInvariantCodeMotion());
+        // // 循环优化
+        // addIRPass(new LoopInvariantCodeMotion());
         
-        // 循环指针访问优化
-        addIRPass(new LoopPtrExtract());
+        // // 循环指针访问优化
+        // addIRPass(new LoopPtrExtract());
         
-        // 循环交换优化
-        addIRPass(new LoopInterchange());
+        // // 循环交换优化
+        // addIRPass(new LoopInterchange());
         
         // 全局代码移动优化
         addIRPass(new GCM());
@@ -98,7 +102,7 @@ public class PassManager {
         addIRPass(new DCE());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        addIRPass(new RemovePhiPass());
+        // addIRPass(new RemovePhiPass());
     }
     
     /**
