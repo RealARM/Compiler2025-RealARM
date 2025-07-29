@@ -609,6 +609,12 @@ public class Armv8Visitor {
         ArrayList<Value> stackArgList = new ArrayList<>();
         for (int i = 0; i < argCount; i++) {
             Value arg = arguments.get(i);
+            if (i == 2) {
+                if (callee.getName().contains("memset") && arg instanceof ConstantInt) {
+                    ConstantInt arg1 = (ConstantInt) arg;
+                    arg = new ConstantInt(arg1.getValue() * 2);
+                }
+            }
             boolean isFloat = arg.getType() instanceof FloatType;
             
             // 检查是否需要使用栈传递
@@ -1305,27 +1311,27 @@ public class Armv8Visitor {
         // 处理多维数组索引
         if (indices.size() > 0) {
             // 获取数组的类型信息
-            Type arrayType = ((PointerType)pointer.getType()).getElementType();
+            // Type arrayType = ((PointerType)pointer.getType()).getElementType();
             
             // 遍历所有索引
             for (int i = 0; i < indices.size(); i++) {
                 Value indexValue = indices.get(i);
                 
                 // 获取当前维度的元素大小
-                int elementSize;
-                if (arrayType instanceof PointerType) {
-                    // 如果是多层指针，元素大小是指针大小（通常为8字节）
-                    elementSize = 8;
-                    arrayType = ((PointerType) arrayType).getElementType();
-                } else {
-                    // 对于全局变量的整型数组，强制使用8字节元素大小
-                    if (pointer instanceof GlobalVariable && !(arrayType instanceof FloatType)) {
-                        elementSize = 8;  // 全局变量整型强制使用64位
-                    } else {
-                        // 基本类型元素使用原始大小
-                        elementSize = arrayType.getSize();
-                    }
-                }
+                int elementSize = 8;
+                // if (arrayType instanceof PointerType) {
+                //     // 如果是多层指针，元素大小是指针大小（通常为8字节）
+                //     elementSize = 8;
+                //     arrayType = ((PointerType) arrayType).getElementType();
+                // } else {
+                //     // 对于全局变量的整型数组，强制使用8字节元素大小
+                //     if (pointer instanceof GlobalVariable && !(arrayType instanceof FloatType)) {
+                //         elementSize = 8;  // 全局变量整型强制使用64位
+                //     } else {
+                //         // 基本类型元素使用原始大小
+                //         elementSize = arrayType.getSize();
+                //     }
+                // }
                 
                 // 处理索引值
                 if (indexValue instanceof ConstantInt) {
