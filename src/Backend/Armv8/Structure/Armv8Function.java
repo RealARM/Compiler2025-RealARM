@@ -5,6 +5,8 @@ import java.util.*;
 import Backend.Armv8.Armv8Visitor;
 import Backend.Armv8.Instruction.Armv8Fmov;
 import Backend.Armv8.Instruction.Armv8Move;
+import Backend.Armv8.Instruction.Armv8Load;
+import Backend.Armv8.Instruction.Armv8Store;
 import Backend.Armv8.Operand.*;
 import IR.Type.FloatType;
 import IR.Value.*;
@@ -16,6 +18,7 @@ public class Armv8Function {
     private Long stackSize = 0L;
     private Armv8Stack stackSpace = new Armv8Stack();
     private LinkedHashMap<Value, Long> stack = new LinkedHashMap<>();
+    private ArrayList<Armv8Reg> paraReg2Stack = new ArrayList<>();
 
     private HashMap<Value, Armv8Reg> RegArgList = new HashMap<>();
     private HashMap<Value, Long> stackArgList = new HashMap<>();
@@ -42,6 +45,7 @@ public class Armv8Function {
         // 记录函数的参数数量和类型，用于生成序言代码
         for (int i = 0; i < argCount; i++) {
             Value arg = arguments.get(i);
+            System.out.println(arg);
             boolean isFloat = arg.getType() instanceof FloatType;
             
             // 检查是否需要使用栈传递
@@ -63,6 +67,9 @@ public class Armv8Function {
                     // 整数参数使用x0-x7寄存器
                     argReg = Armv8CPUReg.getArmv8ArgReg(intArgCount-1);
                 }
+
+                //将参数寄存器加入保护行列
+                paraReg2Stack.add(argReg);
                 // 直接建立映射关系，无需复制
                 addRegArg(arg, argReg);
                 Armv8Visitor.getRegList().put(arg, argReg);
@@ -73,12 +80,29 @@ public class Armv8Function {
                 stackOffset += 8; // 每个参数占8字节
             }
         }
+
+        for(int i = 0; i < paraReg2Stack.size(); i++) {
+            this.stackSize += 8;
+            this.stackSpace.addOffset(8);
+        }
+    }
+
+    public void saveParamRegs(Armv8Block block) {
+        for(int i = 0; i < paraReg2Stack.size(); i++) {
+            Armv8Reg reg = paraReg2Stack.get(i);
+            block.addArmv8Instruction(new Armv8Store(reg, Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(i*8)));
+        }
+    }
+
+    public void loadParamRegs(Armv8Block block) {
+        for(int i = 0; i < paraReg2Stack.size(); i++) {
+            Armv8Reg reg = paraReg2Stack.get(i);
+            block.addArmv8Instruction(new Armv8Load(Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(i*8), reg));
+        }
     }
 
     public void addStack(Value value, Long offset) {
-        // 对于简单函数（如func），我们可能不需要任何栈空间
         // 只有在指令真正需要栈空间时才分配
-        
         // 如果offset为0，不需要增加栈大小
         if (offset <= 0) {
             return;

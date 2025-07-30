@@ -24,7 +24,6 @@ public class Armv8Visitor {
     private static final LinkedHashMap<Value, Armv8Label> LabelList = new LinkedHashMap<>();
     private static final LinkedHashMap<Value, Armv8Reg> RegList = new LinkedHashMap<>();
     private static final LinkedHashMap<Value, Long> ptrList = new LinkedHashMap<>();
-    private Long stackPos = 0L;
     private Armv8Block curArmv8Block = null;
     private Armv8Function curArmv8Function = null;
     private final LinkedHashMap<Instruction, ArrayList<Armv8Instruction>> predefines = new LinkedHashMap<>();
@@ -137,7 +136,6 @@ public class Armv8Visitor {
 
         String functionName = removeLeadingAt(function.getName());
         curArmv8Function = new Armv8Function(functionName, function);
-        stackPos = 0L;
         armv8Module.addFunction(functionName, curArmv8Function);
         Armv8VirReg.resetCounter();
 
@@ -597,7 +595,7 @@ public class Armv8Visitor {
 
     private void parseCallInst(CallInstruction ins, boolean predefine) {
         ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
-        
+        curArmv8Function.saveParamRegs(curArmv8Block);
         // 获取被调用的函数
         Function callee = ins.getCallee();
         String functionName = removeLeadingAt(callee.getName());
@@ -918,6 +916,8 @@ public class Armv8Visitor {
             }
         }
         
+        curArmv8Function.loadParamRegs(curArmv8Block);
+
         if (predefine) {
             predefines.put(ins, insList);
         }
