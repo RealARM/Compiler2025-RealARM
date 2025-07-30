@@ -38,7 +38,7 @@ public class Compiler {
         boolean printAST = false;       // 是否打印语法树
         boolean generateIR = true;      // 是否生成IR
         boolean printIR = true;         // 是否打印IR
-        boolean generateARM = false;     // 是否生成ARM汇编代码
+        boolean generateARM = true;     // 是否生成ARM汇编代码
         int optimizationLevel = 1;      // 优化级别 (0-3)
         boolean debug = true;          // 是否打印调试信息
         
