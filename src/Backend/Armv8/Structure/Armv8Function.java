@@ -45,7 +45,6 @@ public class Armv8Function {
         // 记录函数的参数数量和类型，用于生成序言代码
         for (int i = 0; i < argCount; i++) {
             Value arg = arguments.get(i);
-            System.out.println(arg);
             boolean isFloat = arg.getType() instanceof FloatType;
             
             // 检查是否需要使用栈传递
@@ -81,23 +80,48 @@ public class Armv8Function {
             }
         }
 
-        for(int i = 0; i < paraReg2Stack.size(); i++) {
-            this.stackSize += 8;
-            this.stackSpace.addOffset(8);
-        }
+        // 保护空间，保存参数寄存器和返回地址
+        this.stackSize += 8 * (paraReg2Stack.size() + 32);
+        this.stackSpace.addOffset(8 * (paraReg2Stack.size() + 32));
     }
 
-    public void saveParamRegs(Armv8Block block) {
+    public void saveCallerRegs(Armv8Block block) {
         for(int i = 0; i < paraReg2Stack.size(); i++) {
             Armv8Reg reg = paraReg2Stack.get(i);
             block.addArmv8Instruction(new Armv8Store(reg, Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(i*8)));
         }
     }
 
-    public void loadParamRegs(Armv8Block block) {
+    public void loadCallerRegs(Armv8Block block) {
         for(int i = 0; i < paraReg2Stack.size(); i++) {
             Armv8Reg reg = paraReg2Stack.get(i);
             block.addArmv8Instruction(new Armv8Load(Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(i*8), reg));
+        }
+    }
+
+    public void saveCalleeRegs(Armv8Block block) {
+        int size = paraReg2Stack.size();
+        for(int i = 0; i < 8; i++) {
+            Armv8Reg reg = Armv8CPUReg.getArmv8CPUReg(i + 8);
+            block.addArmv8Instruction(new Armv8Store(reg, Armv8CPUReg.getArmv8SpReg(), new Armv8Imm((i + size) * 8)));
+        } 
+
+        for (int i = 0; i < 24; i++) {
+            Armv8Reg reg = Armv8FPUReg.getArmv8FloatReg(i + 8);
+            block.addArmv8Instruction(new Armv8Store(reg, Armv8CPUReg.getArmv8SpReg(), new Armv8Imm((i + size + 8) * 8)));
+        }
+    }
+
+    public void loadCalleeRegs(Armv8Block block) {
+        int size = paraReg2Stack.size();
+        for(int i = 0; i < 8; i++) {
+            Armv8Reg reg = Armv8CPUReg.getArmv8CPUReg(i + 8);
+            block.addArmv8Instruction(new Armv8Load(Armv8CPUReg.getArmv8SpReg(), new Armv8Imm((i + size) * 8), reg));
+        } 
+
+        for (int i = 0; i < 24; i++) {
+            Armv8Reg reg = Armv8FPUReg.getArmv8FloatReg(i + 8);
+            block.addArmv8Instruction(new Armv8Load(Armv8CPUReg.getArmv8SpReg(), new Armv8Imm((i + size + 8) * 8), reg));
         }
     }
 
