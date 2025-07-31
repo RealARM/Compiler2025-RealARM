@@ -106,7 +106,8 @@ public class RemovePhiPass implements Pass.IRPass {
             System.out.println("  开始处理PHI指令...");
         }
         
-        // 收集所有需要插入的Move指令
+        // 步骤1：为每个PHI指令创建代表性的Move指令并插入
+        Map<PhiInstruction, MoveInstruction> phiToRepresentativeMove = new HashMap<>();
         Map<BasicBlock, List<Instruction>> waitAddedMoves = new LinkedHashMap<>();
         
         // 初始化每个基本块的Move指令列表
@@ -125,10 +126,14 @@ public class RemovePhiPass implements Pass.IRPass {
             for (BasicBlock incomingBlock : phi.getIncomingBlocks()) {
                 Value incomingValue = phi.getIncomingValue(incomingBlock);
                 
-                // 关键修复：使用PHI的原始名称，不是唯一名称！
-                // 这样，无论从哪个基本块来，PHI变量都会有正确的值
+                // 创建Move指令：phi_var = mov incoming_value
                 MoveInstruction move = new MoveInstruction(phi.getName(), phi.getType(), incomingValue);
                 waitAddedMoves.get(incomingBlock).add(move);
+                
+                // 将第一个Move指令作为该PHI的代表性Move指令
+                if (!phiToRepresentativeMove.containsKey(phi)) {
+                    phiToRepresentativeMove.put(phi, move);
+                }
                 
                 if (DEBUG) {
                     System.out.println("    在 " + incomingBlock.getName() + " 中添加: " + phi.getName() + " = mov " + incomingValue.getName());
@@ -136,7 +141,7 @@ public class RemovePhiPass implements Pass.IRPass {
             }
         }
         
-        // 插入Move指令，使用循环依赖处理
+        // 步骤2：插入Move指令，使用循环依赖处理
         for (Map.Entry<BasicBlock, List<Instruction>> entry : waitAddedMoves.entrySet()) {
             BasicBlock bb = entry.getKey();
             List<Instruction> moves = entry.getValue();
@@ -151,8 +156,11 @@ public class RemovePhiPass implements Pass.IRPass {
             }
         }
         
+        // 步骤3：更新所有对PHI指令的引用，指向代表性的Move指令
+        updatePhiReferences(function, phiToRepresentativeMove);
+        
         if (DEBUG) {
-            System.out.println("  PHI指令处理完成，不需要替换引用，因为使用原始PHI名称");
+            System.out.println("  PHI指令处理完成，已更新所有引用");
         }
     }
     
@@ -245,34 +253,20 @@ public class RemovePhiPass implements Pass.IRPass {
     }
     
     /**
-     * 替换所有对PHI指令的引用
+     * 更新所有对PHI指令的引用，将它们指向代表性的Move指令
      */
-    private void replacePhiReferences(Function function, Map<PhiInstruction, MoveInstruction> phiToMoveMap) {
+    private void updatePhiReferences(Function function, Map<PhiInstruction, MoveInstruction> phiToMoveMap) {
         if (DEBUG) {
-            System.out.println("  开始替换PHI引用...");
+            System.out.println("  开始更新PHI引用...");
         }
         
-        // 建立从PHI名称到Move指令的映射
-        Map<String, MoveInstruction> nameToMoveMap = new HashMap<>();
-        for (Map.Entry<PhiInstruction, MoveInstruction> entry : phiToMoveMap.entrySet()) {
-            nameToMoveMap.put(entry.getKey().getName(), entry.getValue());
-        }
+        int replacementCount = 0;
         
-        // 收集所有的Move指令，建立名称到Move指令的映射
-        Map<String, MoveInstruction> allMovesByName = new HashMap<>();
+        // 遍历所有基本块和指令
         for (BasicBlock bb : function.getBasicBlocks()) {
             for (Instruction inst : bb.getInstructions()) {
-                if (inst instanceof MoveInstruction) {
-                    MoveInstruction move = (MoveInstruction) inst;
-                    allMovesByName.put(move.getName(), move);
-                }
-            }
-        }
-        
-        for (BasicBlock bb : function.getBasicBlocks()) {
-            for (Instruction inst : bb.getInstructions()) {
-                // 跳过PHI指令本身和Move指令
-                if (inst instanceof PhiInstruction || inst instanceof MoveInstruction) {
+                // 跳过PHI指令本身，但不跳过Move指令！
+                if (inst instanceof PhiInstruction) {
                     continue;
                 }
                 
@@ -280,21 +274,23 @@ public class RemovePhiPass implements Pass.IRPass {
                 for (int i = 0; i < inst.getOperands().size(); i++) {
                     Value operand = inst.getOperand(i);
                     
-                    // 按名称查找需要替换的PHI引用
-                    String operandName = operand.getName();
-                    if (allMovesByName.containsKey(operandName)) {
-                        MoveInstruction replacement = allMovesByName.get(operandName);
+                    // 如果操作数是PHI指令，则替换为代表性的Move指令
+                    if (phiToMoveMap.containsKey(operand)) {
+                        MoveInstruction representativeMove = phiToMoveMap.get(operand);
+                        
                         if (DEBUG) {
-                            System.out.println("    替换 " + inst.toString() + " 中的 " + operandName + " 为Move指令 " + replacement.getName());
+                            System.out.println("    替换 " + inst.toString() + " 中的PHI引用 " + operand.getName() + " 为Move指令 " + representativeMove.getName());
                         }
-                        inst.setOperand(i, replacement);
+                        
+                        inst.setOperand(i, representativeMove);
+                        replacementCount++;
                     }
                 }
             }
         }
         
         if (DEBUG) {
-            System.out.println("  PHI引用替换完成");
+            System.out.println("  PHI引用更新完成，共替换 " + replacementCount + " 处引用");
         }
     }
     

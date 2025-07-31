@@ -31,3 +31,12 @@
 /functional_in
 /2
 /functional
+/h_functional
+/logs
+/log_zy
+/ARM-性能
+/.vscode
+*.class
+*.jar
+*.py
+*.ll

@@ -293,7 +293,7 @@ public class Mem2Reg implements Pass.IRPass {
                     if (!phiInserted.contains(frontier)) {
                         // 创建Phi指令，为每个前驱基本块设置初始值
                         PhiInstruction phi = IRBuilder.createPhi(alloca.getAllocatedType(), frontier);
-                        
+
                         // 为每个前驱基本块使用addIncoming正确添加映射关系
                         List<BasicBlock> predecessors = frontier.getPredecessors();
                         debug("          创建Phi指令 " + phi.getName() + " 在 " + frontier.getName());

@@ -22,7 +22,7 @@ public class GCM implements IRPass {
     private final Set<Instruction> visited = new LinkedHashSet<>();
     
     // 调试模式
-    private boolean debug = true;
+    private boolean debug = false;
     
     // 基本块数量阈值，超过此阈值的函数将跳过GCM优化
     private final int MAX_BLOCKS_THRESHOLD = 1000;
