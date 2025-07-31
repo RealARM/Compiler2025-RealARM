@@ -871,6 +871,11 @@ public class Armv8Visitor {
             }
         }
         // 创建调用标签
+        if (Armv8MyLib.has64BitVersion(functionName)) {
+            Armv8MyLib.markFunction64Used(functionName);
+            functionName = Armv8MyLib.get64BitFunctionName(functionName);
+        }
+        
         Armv8Label functionLabel = new Armv8Label(functionName);
         
         // 生成调  用指令
