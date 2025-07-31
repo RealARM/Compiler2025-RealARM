@@ -1134,7 +1134,7 @@ public class Armv8Visitor {
             long offset = ptrList.get(pointer);
             
             // 使用通用的立即数检查机制
-            offsetOp = checkImmediate(offset, ImmediateRange.MEMORY, insList, predefine);
+            offsetOp = checkImmediate(offset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
         } else if (pointer instanceof Argument) {
             // 处理函数参数，为其分配寄存器
             Argument arg = (Argument) pointer;
@@ -1146,7 +1146,7 @@ public class Armv8Visitor {
                 
                 // 创建加载指令：从FP+偏移量加载到临时寄存器
                 // 使用通用的立即数检查机制
-                Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY, insList, predefine);
+                Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
                 
                 // 根据偏移量类型创建适当的加载指令
                 if (paramOffsetOp instanceof Armv8Reg) {
@@ -1274,7 +1274,7 @@ public class Armv8Visitor {
                 
                 // 创建加载指令：从FP+偏移量加载到临时寄存器
                 // 使用通用的立即数检查机制
-                Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY, insList, predefine);
+                Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
                 
                 // 根据偏移量类型创建适当的加载指令
                 if (paramOffsetOp instanceof Armv8Reg) {
@@ -1603,7 +1603,7 @@ public class Armv8Visitor {
                     long stackParamOffset = curArmv8Function.getStackArg(arg);
                     
                     // 使用通用的立即数检查机制
-                    Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY, insList, predefine);
+                    Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
                     
                     // 根据偏移量类型创建适当的加载指令
                     if (paramOffsetOp instanceof Armv8Reg) {
@@ -1697,7 +1697,7 @@ public class Armv8Visitor {
             long offset = ptrList.get(pointer);
             
             // 使用通用的立即数检查机制
-            offsetOp = checkImmediate(offset, ImmediateRange.MEMORY, insList, predefine);
+            offsetOp = checkImmediate(offset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
         } else if (pointer instanceof Argument) {
             // 处理函数参数，为其分配寄存器
             Argument arg = (Argument) pointer;
@@ -1709,7 +1709,7 @@ public class Armv8Visitor {
                 
                 // 创建加载指令：从FP+偏移量加载到临时寄存器
                 // 使用通用的立即数检查机制
-                Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY, insList, predefine);
+                Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
                 
                 // 根据偏移量类型创建适当的加载指令
                 if (paramOffsetOp instanceof Armv8Reg) {

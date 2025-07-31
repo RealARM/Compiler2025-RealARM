@@ -3,6 +3,7 @@ package Backend.Armv8.Structure;
 import java.util.*;
 
 import Backend.Armv8.Armv8Visitor;
+import Backend.Armv8.Instruction.Armv8Binary;
 import Backend.Armv8.Instruction.Armv8Fmov;
 import Backend.Armv8.Instruction.Armv8Move;
 import Backend.Armv8.Instruction.Armv8Load;
