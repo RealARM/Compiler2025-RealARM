@@ -468,8 +468,13 @@ public class Armv8Visitor {
                     long value = ((ConstantInt) left).getValue();
                     // ARM要求CMP的第一个操作数必须是寄存器
                     Armv8Reg leftReg = new Armv8VirReg(false);
-                    Armv8Move moveInst = new Armv8Move(leftReg, new Armv8Imm(value), true);
-                    addInstr(moveInst, insList, predefine);
+                    // 使用loadLargeImmediate处理可能的大立即数
+                    if (value > 65535 || value < -65536) {
+                        loadLargeImmediate(leftReg, value, insList, predefine);
+                    } else {
+                        Armv8Move moveInst = new Armv8Move(leftReg, new Armv8Imm(value), true);
+                        addInstr(moveInst, insList, predefine);
+                    }
                     leftOp = leftReg;
                 } else {
                     leftOp = RegList.get(left);
@@ -683,8 +688,7 @@ public class Armv8Visitor {
                             
                             // 为全局变量分配一个临时寄存器
                             Armv8VirReg tempReg = new Armv8VirReg(false);
-                            Armv8Adr adrInst = new Armv8Adr(tempReg, label);
-                            addInstr(adrInst, insList, predefine);
+                            loadGlobalAddress(tempReg, label, insList, predefine);
                             
                             // 检查参数类型：如果是指针类型，直接使用地址；否则加载值
                             if (arg.getType() instanceof PointerType) {
@@ -815,8 +819,7 @@ public class Armv8Visitor {
                             
                             // 为全局变量分配一个临时寄存器
                             Armv8VirReg tempReg = new Armv8VirReg(false);
-                            Armv8Adr adrInst = new Armv8Adr(tempReg, label);
-                            addInstr(adrInst, insList, predefine);
+                            loadGlobalAddress(tempReg, label, insList, predefine);
                             
                             // 加载全局变量的值
                             Armv8VirReg valueReg;
@@ -1119,8 +1122,7 @@ public class Armv8Visitor {
             baseReg = new Armv8VirReg(false);
             
             // 创建加载地址指令
-            Armv8Adr adrInst = new Armv8Adr(baseReg, label);
-            addInstr(adrInst, insList, predefine);
+            loadGlobalAddress(baseReg, label, insList, predefine);
         } else if (pointer instanceof AllocaInstruction) {
             // 如果是局部变量分配指令
             if (!ptrList.containsKey(pointer)) {
@@ -1235,8 +1237,7 @@ public class Armv8Visitor {
             
             // 加载全局变量地址
             baseReg = new Armv8VirReg(false);
-            Armv8Adr adrInst = new Armv8Adr(baseReg, label);
-            addInstr(adrInst, insList, predefine);
+            loadGlobalAddress(baseReg, label, insList, predefine);
         } else if (pointer instanceof AllocaInstruction) {
             // 如果基地址是局部变量
             if (!ptrList.containsKey(pointer)) {
@@ -1453,9 +1454,13 @@ public class Armv8Visitor {
             
             // 将值加载到返回寄存器中
             if (returnValue instanceof ConstantInt) {
-                // 对于常量整数，直接移动到返回寄存器
+                // 对于常量整数，移动到返回寄存器，处理大立即数
                 long value = ((ConstantInt) returnValue).getValue();
-                addInstr(new Armv8Move(returnReg, new Armv8Imm(value), false), insList, predefine);
+                if (value > 65535 || value < -65536) {
+                    loadLargeImmediate(returnReg, value, insList, predefine);
+                } else {
+                    addInstr(new Armv8Move(returnReg, new Armv8Imm(value), false), insList, predefine);
+                }
             } else if (returnValue instanceof ConstantFloat) {
                 // 对于常量浮点数，加载到返回寄存器
                 float value = (float)((ConstantFloat) returnValue).getValue();
@@ -1680,8 +1685,7 @@ public class Armv8Visitor {
             baseReg = new Armv8VirReg(false);
             
             // 创建加载地址指令
-            Armv8Adr adrInst = new Armv8Adr(baseReg, label);
-            addInstr(adrInst, insList, predefine);
+            loadGlobalAddress(baseReg, label, insList, predefine);
         } else if (pointer instanceof AllocaInstruction) {
             // 如果是局部变量分配指令
             if (!ptrList.containsKey(pointer)) {
@@ -1782,8 +1786,13 @@ public class Armv8Visitor {
             // ARM要求CMP的第一个操作数必须是寄存器
             long value = ((ConstantInt) left).getValue();
             Armv8Reg leftReg = new Armv8VirReg(false);
-            Armv8Move moveInst = new Armv8Move(leftReg, new Armv8Imm(value), true);
-            addInstr(moveInst, insList, predefine);
+            // 使用loadLargeImmediate处理可能的大立即数
+            if (value > 65535 || value < -65536) {
+                loadLargeImmediate(leftReg, value, insList, predefine);
+            } else {
+                Armv8Move moveInst = new Armv8Move(leftReg, new Armv8Imm(value), true);
+                addInstr(moveInst, insList, predefine);
+            }
             leftOp = leftReg;
         } else if (left instanceof ConstantFloat) {
             // 处理浮点常量
@@ -1822,10 +1831,14 @@ public class Armv8Visitor {
             long value = ((ConstantInt) right).getValue();
             // ARMv8 cmp指令的立即数范围为0-4095
             if (value > 4095 || value < -4095) {
-                // 如果超出范围，先加载到寄存器
+                // 如果超出范围，先加载到寄存器，处理大立即数
                 Armv8Reg rightReg = new Armv8VirReg(false);
-                Armv8Move moveInst = new Armv8Move(rightReg, new Armv8Imm(value), true);
-                addInstr(moveInst, insList, predefine);
+                if (value > 65535 || value < -65536) {
+                    loadLargeImmediate(rightReg, value, insList, predefine);
+                } else {
+                    Armv8Move moveInst = new Armv8Move(rightReg, new Armv8Imm(value), true);
+                    addInstr(moveInst, insList, predefine);
+                }
                 rightOp = rightReg;
             } else {
                 // 在范围内，可以使用立即数
@@ -2227,22 +2240,48 @@ public class Armv8Visitor {
         addInstr(movzInst, insList, predefine);
         
         // 然后加载高位（如果需要）
-        if ((bits >> 16) != 0) {
+        // 检查第二个16位（bits[31:16]）
+        if (((bits >> 16) & 0xFFFF) != 0) {
             Armv8Move movkInst = new Armv8Move(destReg, new Armv8Imm((bits >> 16) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+            movkInst.setShift(16);
             addInstr(movkInst, insList, predefine);
         }
         
-        // 如果是64位数，还需要加载更高位
-        if ((bits >> 32) != 0) {
+        // 检查第三个16位（bits[47:32]）
+        if (((bits >> 32) & 0xFFFF) != 0) {
             Armv8Move movkInst = new Armv8Move(destReg, new Armv8Imm((bits >> 32) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+            movkInst.setShift(32);
             addInstr(movkInst, insList, predefine);
         }
         
-        if ((bits >> 48) != 0) {
+        // 检查第四个16位（bits[63:48]）
+        if (((bits >> 48) & 0xFFFF) != 0) {
             Armv8Move movkInst = new Armv8Move(destReg, new Armv8Imm((bits >> 48) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+            movkInst.setShift(48);
             addInstr(movkInst, insList, predefine);
         }
     }
+    
+    /**
+     * 生成全局变量地址访问指令序列（使用ADRP+ADD替代ADR）
+     * @param destReg 目标寄存器
+     * @param label 全局变量标签
+     * @param insList 指令列表
+     * @param predefine 是否是预定义阶段
+     */
+    private void loadGlobalAddress(Armv8Reg destReg, Armv8Label label, ArrayList<Armv8Instruction> insList, boolean predefine) {
+        // 使用ADRP获取页地址
+        Armv8Adrp adrpInst = new Armv8Adrp(destReg, label);
+        addInstr(adrpInst, insList, predefine);
+        
+        // 使用ADD加上页内偏移，创建一个特殊的标签来表示:lo12:偏移
+        ArrayList<Armv8Operand> addOperands = new ArrayList<>();
+        addOperands.add(destReg);
+        addOperands.add(new Armv8Label(":lo12:" + label.getLabelName()));
+        Armv8Binary addInst = new Armv8Binary(addOperands, destReg, Armv8Binary.Armv8BinaryType.add);
+        addInstr(addInst, insList, predefine);
+    }
+    
     /**
      * 加载浮点常量到寄存器
      * @param destReg 目标浮点寄存器
@@ -2447,10 +2486,14 @@ public class Armv8Visitor {
             long value = ((ConstantInt) operand).getValue();
             // 检查是否需要寄存器形式
             if (requiresReg) {
-                // 如果需要寄存器，直接加载到寄存器
+                // 如果需要寄存器，加载到寄存器，处理大立即数
                 Armv8VirReg tempReg = new Armv8VirReg(false);
-                Armv8Move moveInst = new Armv8Move(tempReg, new Armv8Imm(value), true);
-                addInstr(moveInst, insList, predefine);
+                if (value > 65535 || value < -65536) {
+                    loadLargeImmediate(tempReg, value, insList, predefine);
+                } else {
+                    Armv8Move moveInst = new Armv8Move(tempReg, new Armv8Imm(value), true);
+                    addInstr(moveInst, insList, predefine);
+                }
                 return tempReg;
             } else {
                 // 否则检查是否在范围内，并适当处理
