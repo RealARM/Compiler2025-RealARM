@@ -2461,22 +2461,50 @@ public class Armv8Visitor {
      */
     private enum ImmediateRange {
         DEFAULT(4095),            // 默认范围，适用于大多数指令
-        CMP(4095),               // 比较指令的立即数范围
-        MOV(65535),              // 移动指令的立即数范围
-        ADD_SUB(4095),           // 加减指令的立即数范围
-        LOGICAL(4095),           // 逻辑操作指令的立即数范围
-        MEMORY(4095),            // 内存操作指令的立即数范围
-        STACK(4096);             // 栈操作指令的立即数范围
+        CMP(4095),               // 比较指令的立即数范围 (12位无符号)
+        MOV(65535),              // 移动指令的立即数范围 (16位无符号)
+        ADD_SUB(4095),           // 加减指令的立即数范围 (12位无符号)
+        LOGICAL(4095),           // 逻辑操作指令的立即数范围 (12位，但有特殊编码规则)
+        MEMORY_OFFSET_SIGNED(255), // 内存操作有符号偏移 (9位有符号，-256到255)
+        MEMORY_OFFSET_UNSIGNED(32760), // 内存操作无符号偏移 (12位，必须是8的倍数，0到32760)
+        SHIFT_AMOUNT(63),        // 移位量范围 (6位，0到63)
+        STACK(32760);            // 栈操作指令的立即数范围，使用无符号偏移
 
         private final long maxValue;
+        private final long minValue;
 
         ImmediateRange(long maxValue) {
+            this.maxValue = maxValue;
+            this.minValue = 0; // 默认最小值为0
+        }
+
+        ImmediateRange(long minValue, long maxValue) {
+            this.minValue = minValue;
             this.maxValue = maxValue;
         }
 
         public boolean isInRange(long value) {
-            return value >= 0 && value <= maxValue || value >= -maxValue && value < 0;
+            switch (this) {
+                case MEMORY_OFFSET_SIGNED:
+                    // 有符号偏移：-256到255
+                    return value >= -256 && value <= 255;
+                case MEMORY_OFFSET_UNSIGNED:
+                    // 无符号偏移：0到32760，且必须是8的倍数
+                    return value >= 0 && value <= 32760 && (value % 8 == 0);
+                case SHIFT_AMOUNT:
+                    // 移位量：0到63
+                    return value >= 0 && value <= 63;
+                case STACK:
+                    // 栈操作：0到32760，且必须是8的倍数
+                    return value >= 0 && value <= 32760 && (value % 8 == 0);
+                default:
+                    // 其他指令：12位无符号立即数
+                    return value >= 0 && value <= maxValue;
+            }
         }
+
+        public long getMaxValue() { return maxValue; }
+        public long getMinValue() { return minValue; }
     }
 
     private Armv8Operand processOperand(Value operand, ArrayList<Armv8Instruction> insList, 
@@ -2549,11 +2577,32 @@ public class Armv8Visitor {
     }
 
     
-    private void handleLargeStackOffset(Armv8Reg baseReg, long offset, Armv8Reg valueReg, 
-                                      boolean isLoad, boolean isFloat, 
-                                      ArrayList<Armv8Instruction> insList, boolean predefine) {
-        // 检查偏移量是否在范围内
-        Armv8Operand offsetOp = checkImmediate(offset, ImmediateRange.MEMORY, insList, predefine);
+    /**
+     * 安全地创建内存操作数，如果偏移量超出范围则使用寄存器
+     */
+    private Armv8Operand createSafeMemoryOperand(long offset, ArrayList<Armv8Instruction> insList, boolean predefine) {
+        // 检查是否在有符号偏移范围内（-256到255）
+        if (ImmediateRange.MEMORY_OFFSET_SIGNED.isInRange(offset)) {
+            return new Armv8Imm(offset);
+        }
+        
+        // 检查是否在无符号偏移范围内（0到32760，且是8的倍数）
+        if (ImmediateRange.MEMORY_OFFSET_UNSIGNED.isInRange(offset)) {
+            return new Armv8Imm(offset);
+        }
+        
+        // 超出范围，需要加载到寄存器
+        Armv8VirReg tempReg = new Armv8VirReg(false);
+        loadLargeImmediate(tempReg, offset, insList, predefine);
+        return tempReg;
+    }
+
+    /**
+     * 安全地创建内存访问指令，处理大偏移量
+     */
+    private void createSafeMemoryInstruction(Armv8Reg baseReg, long offset, Armv8Reg valueReg, 
+                                           boolean isLoad, ArrayList<Armv8Instruction> insList, boolean predefine) {
+        Armv8Operand offsetOp = createSafeMemoryOperand(offset, insList, predefine);
         
         if (offsetOp instanceof Armv8Reg) {
             // 如果偏移量被加载到寄存器，需要先计算地址
@@ -2566,25 +2615,27 @@ public class Armv8Visitor {
             
             // 然后使用地址寄存器加零偏移量进行加载或存储
             if (isLoad) {
-                // 加载指令
                 Armv8Load loadInst = new Armv8Load(addrReg, new Armv8Imm(0), valueReg);
                 addInstr(loadInst, insList, predefine);
             } else {
-                // 存储指令
                 Armv8Store storeInst = new Armv8Store(valueReg, addrReg, new Armv8Imm(0));
                 addInstr(storeInst, insList, predefine);
             }
         } else {
             // 在范围内直接使用偏移量
             if (isLoad) {
-                // 加载指令
                 Armv8Load loadInst = new Armv8Load(baseReg, (Armv8Imm)offsetOp, valueReg);
                 addInstr(loadInst, insList, predefine);
             } else {
-                // 存储指令
                 Armv8Store storeInst = new Armv8Store(valueReg, baseReg, (Armv8Imm)offsetOp);
                 addInstr(storeInst, insList, predefine);
             }
         }
+    }
+
+    private void handleLargeStackOffset(Armv8Reg baseReg, long offset, Armv8Reg valueReg, 
+                                      boolean isLoad, boolean isFloat, 
+                                      ArrayList<Armv8Instruction> insList, boolean predefine) {
+        createSafeMemoryInstruction(baseReg, offset, valueReg, isLoad, insList, predefine);
     }
 } 
