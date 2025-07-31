@@ -721,7 +721,6 @@ public class Armv8Visitor {
                     
                     // 获取参数的寄存器
                     Armv8Reg argValueReg = RegList.get(arg);
-                    System.out.println(arg + "\n" + argValueReg + "\n");
                     if (argValueReg != null) {
                         Armv8Move moveInst = new Armv8Move(argReg, argValueReg, false);
                         addInstr(moveInst, insList, predefine);
@@ -1508,35 +1507,25 @@ public class Armv8Visitor {
         Long localSize = curArmv8Function.getStackSize();
         ArrayList<Armv8Operand> operands = new ArrayList<>();
         operands.add(Armv8CPUReg.getArmv8SpReg());
-        operands.add(curArmv8Function.getStackSpace());
+
+        //栈溢出处理
+        long value = curArmv8Function.getStackSpace().getOffset();
+        if (ImmediateRange.ADD_SUB.isInRange(value)) {
+            operands.add(curArmv8Function.getStackSpace());
+        } else {
+            // 超出范围，加载到寄存器
+            Armv8VirReg tempReg = new Armv8VirReg(false);
+            if (value > 65535 || value < -65536) {
+                loadLargeImmediate(tempReg, value, insList, predefine);
+            } else {
+                Armv8Move moveInst = new Armv8Move(tempReg, curArmv8Function.getStackSpace(), true);
+                addInstr(moveInst, insList, predefine);
+            }
+            operands.add(tempReg);
+        }
         Armv8Binary addSpInst = new Armv8Binary(operands, Armv8CPUReg.getArmv8SpReg(), Armv8Binary.Armv8BinaryType.add);
         addInstr(addSpInst, insList, predefine);
-        // if (localSize > 0) {
-        //     // 计算对齐后的栈大小
-        //     long alignedSize = (localSize + 15) & ~15;  // 对齐到16字节
-            
-        //     // 使用通用的立即数检查机制
-        //     Armv8Operand sizeOp = checkImmediate(alignedSize, ImmediateRange.ADD_SUB, insList, predefine);
-            
-        //     // 如果有局部变量空间，调整SP释放局部变量空间
-        //     if (sizeOp instanceof Armv8Reg) {
-        //         // 如果栈大小被加载到寄存器，使用寄存器形式的add指令
-        //         ArrayList<Armv8Operand> operands = new ArrayList<>();
-        //         operands.add(Armv8CPUReg.getArmv8SpReg());
-        //         operands.add(sizeOp);
-        //         Armv8Binary addSpInst = new Armv8Binary(operands, Armv8CPUReg.getArmv8SpReg(), Armv8Binary.Armv8BinaryType.add);
-        //         addInstr(addSpInst, insList, predefine);
-        //     } else {
-        //         // 使用立即数形式的add指令
-        //         Armv8Binary addSpInst = new Armv8Binary(
-        //             Armv8CPUReg.getArmv8SpReg(), 
-        //             Armv8CPUReg.getArmv8SpReg(), 
-        //             (Armv8Imm)sizeOp, 
-        //             Armv8Binary.Armv8BinaryType.add
-        //         );
-        //         addInstr(addSpInst, insList, predefine);
-        //     }
-        // }
+        
 
         
         // 恢复FP(x29)和LR(x30)寄存器，并调整SP
@@ -2243,7 +2232,6 @@ public class Armv8Visitor {
         long bits = value;
         Armv8Move movzInst = new Armv8Move(destReg, new Armv8Imm(bits & 0xFFFF), true, Armv8Move.MoveType.MOVZ);
         addInstr(movzInst, insList, predefine);
-        
         // 然后加载高位（如果需要）
         // 检查第二个16位（bits[31:16]）
         if (((bits >> 16) & 0xFFFF) != 0) {

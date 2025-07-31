@@ -53,7 +53,7 @@ public class PostRegisterOptimizer {
         } while (changed && round < MAX_ROUNDS);
         
         // 最后一轮清理
-        finalCleanup();
+        // finalCleanup();
         
         if (round > 1) {
             System.out.println("函数 " + function.getName() + " 后端优化完成，共 " + (round - 1) + " 轮");
