@@ -8,8 +8,9 @@ import Backend.Armv8.Instruction.Armv8Move;
 import Backend.Armv8.Instruction.Armv8Load;
 import Backend.Armv8.Instruction.Armv8Store;
 import Backend.Armv8.Operand.*;
-import IR.Type.FloatType;
-import IR.Value.*;
+import MiddleEnd.IR.Type.*;
+import MiddleEnd.IR.Value.*;
+import MiddleEnd.IR.Value.Instructions.*;
 
 public class Armv8Function {
     private String name;

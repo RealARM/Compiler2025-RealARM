@@ -4,12 +4,12 @@ import Backend.Armv8.Instruction.*;
 import Backend.Armv8.Operand.*;
 import Backend.Armv8.Structure.*;
 import Backend.Armv8.tools.*;
-import IR.Module;
-import IR.OpCode;
-import IR.Type.*;
-import IR.Value.*;
-import IR.Value.Instructions.*;
-import IR.Visitor.IRVisitor;
+import MiddleEnd.IR.Module;
+import MiddleEnd.IR.OpCode;
+import MiddleEnd.IR.Type.*;
+import MiddleEnd.IR.Value.*;
+import MiddleEnd.IR.Value.Instructions.*;
+import MiddleEnd.IR.Visitor.IRVisitor;
 
 import java.io.BufferedWriter;
 import java.io.FileWriter;
@@ -28,7 +28,7 @@ public class Armv8Visitor {
     private Armv8Function curArmv8Function = null;
     private final LinkedHashMap<Instruction, ArrayList<Armv8Instruction>> predefines = new LinkedHashMap<>();
 
-    public Armv8Visitor(Module irModule) {
+    public Armv8Visitor(MiddleEnd.IR.Module irModule) {
         this.irModule = irModule;
     }
 
