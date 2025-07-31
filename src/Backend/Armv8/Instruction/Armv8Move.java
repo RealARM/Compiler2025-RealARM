@@ -1,4 +1,5 @@
 package Backend.Armv8.Instruction;
+import Backend.Armv8.Operand.Armv8FPUReg;
 import Backend.Armv8.Operand.Armv8Operand;
 import Backend.Armv8.Operand.Armv8Reg;
 
@@ -87,22 +88,31 @@ public class Armv8Move extends Armv8Instruction {
     public String toString() {
         // 构建基本指令
         StringBuilder sb = new StringBuilder();
-        sb.append(getMoveTypeString());
-        sb.append("\t");
-        sb.append(getDefReg().toString());
-        sb.append(",\t");
         
         // 安全地获取操作数，防止空指针异常
         if (getOperands().isEmpty()) {
             throw new RuntimeException("Move instruction has no operands");
-        } else {
-            Armv8Operand operand = getOperands().get(0);
-            if (operand == null) {
-                throw new RuntimeException("Move instruction operand is null");
-            } else {
-                sb.append(operand.toString());
-            }
         }
+        
+        Armv8Operand operand = getOperands().get(0);
+        if (operand == null) {
+            throw new RuntimeException("Move instruction operand is null");
+        }
+        
+        // 根据寄存器类型自动选择指令
+        if (moveType == MoveType.MOV && !isImmediate && 
+            getDefReg() instanceof Armv8FPUReg && operand instanceof Armv8FPUReg) {
+            // 浮点寄存器之间的移动使用fmov
+            sb.append("fmov");
+        } else {
+            // 其他情况使用原指令类型
+            sb.append(getMoveTypeString());
+        }
+        
+        sb.append("\t");
+        sb.append(getDefReg().toString());
+        sb.append(",\t");
+        sb.append(operand.toString());
 
         // 添加移位信息（如果有）
         if (shift > 0) {

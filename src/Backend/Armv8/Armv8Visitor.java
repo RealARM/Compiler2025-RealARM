@@ -2023,7 +2023,7 @@ public class Armv8Visitor {
             if (srcOp instanceof Armv8Imm) {
                 moveInst = new Armv8Move(destReg, srcOp, true);
             } else {
-                moveInst = new Armv8Move(destReg, (Armv8Reg) srcOp, false);
+                moveInst = new Armv8Move(destReg, (Armv8Reg) srcOp, destReg instanceof Armv8FPUReg);
             }
             
             // 为前驱块添加phi解析指令
