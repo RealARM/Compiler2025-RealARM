@@ -1493,7 +1493,7 @@ public class Armv8Visitor {
                 
                 // 将参数值移动到返回寄存器（如果需要）
                 if (paramReg != null && !paramReg.equals(returnReg)) {
-                    addInstr(new Armv8Move(returnReg, paramReg, returnValue.getType() instanceof FloatType), 
+                    addInstr(new Armv8Move(returnReg, paramReg, false), 
                         insList, predefine);
                 }
                 // 如果参数已经在返回寄存器中，无需操作
@@ -1504,7 +1504,7 @@ public class Armv8Visitor {
                 if (operand instanceof Armv8Reg) {
                     // 如果操作数是寄存器且不是返回寄存器，则需要移动
                     if (!operand.equals(returnReg)) {
-                        addInstr(new Armv8Move(returnReg, operand, returnValue.getType() instanceof FloatType), 
+                        addInstr(new Armv8Move(returnReg, operand, false), 
                             insList, predefine);
                     }
                 } else if (operand instanceof Armv8Imm) {
