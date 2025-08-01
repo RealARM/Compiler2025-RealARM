@@ -1561,7 +1561,7 @@ public class Armv8Visitor {
             operands.add(curArmv8Function.getStackSpace());
         } else {
             // 超出范围，加载到寄存器
-            Armv8VirReg tempReg = new Armv8VirReg(false);
+            Armv8Reg tempReg = Armv8CPUReg.getArmv8ArgReg(3);
             if (value > 65535 || value < -65536) {
                 loadLargeImmediate(tempReg, value, insList, predefine);
             } else {
