@@ -1,6 +1,7 @@
 package Backend.Armv8.Instruction;
 import Backend.Armv8.Operand.Armv8Operand;
 import Backend.Armv8.Operand.Armv8Reg;
+import Backend.Armv8.Operand.Armv8FPUReg;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -87,7 +88,24 @@ public class Armv8Move extends Armv8Instruction {
     public String toString() {
         // 构建基本指令
         StringBuilder sb = new StringBuilder();
-        sb.append(getMoveTypeString());
+        
+        // 检查是否需要使用fmov指令（浮点寄存器之间的移动）
+        boolean shouldUseFmov = false;
+        if (moveType == MoveType.MOV && !isImmediate) {
+            // 只有在寄存器到寄存器的MOV操作时才检查
+            if (getDefReg() instanceof Armv8FPUReg && 
+                !getOperands().isEmpty() && 
+                getOperands().get(0) instanceof Armv8FPUReg) {
+                shouldUseFmov = true;
+            }
+        }
+        
+        if (shouldUseFmov) {
+            sb.append("fmov");
+        } else {
+            sb.append(getMoveTypeString());
+        }
+        
         sb.append("\t");
         sb.append(getDefReg().toString());
         sb.append(",\t");
