@@ -1,7 +1,7 @@
 package Backend.Optimization;
 
-import Backend.Structure.Armv8Block;
-import Backend.Structure.Armv8Function;
+import Backend.Structure.AArch64Block;
+import Backend.Structure.AArch64Function;
 import Backend.Utils.LivenessAnalyzer;
 import Backend.Value.Base.*;
 import Backend.Value.Instruction.Address.*;
@@ -21,12 +21,12 @@ import java.util.*;
  */
 public class PostRegisterOptimizer {
     
-    private final Armv8Function function;
-    private LinkedHashMap<Armv8Block, LivenessAnalyzer.LivenessInfo> livenessInfoMap;
-    private LinkedHashSet<Armv8Reg> modifiedRegs;
+    private final AArch64Function function;
+    private LinkedHashMap<AArch64Block, LivenessAnalyzer.LivenessInfo> livenessInfoMap;
+    private LinkedHashSet<AArch64Reg> modifiedRegs;
     private boolean hasOptimizations = false;
     
-    public PostRegisterOptimizer(Armv8Function function) {
+    public PostRegisterOptimizer(AArch64Function function) {
         this.function = function;
         this.modifiedRegs = new LinkedHashSet<>();
     }
@@ -76,15 +76,15 @@ public class PostRegisterOptimizer {
     private boolean removeRedundantMoves() {
         boolean changed = false;
         
-        for (Armv8Block block : function.getBlocks()) {
-            List<Armv8Instruction> instructions = block.getInstructions();
-            Iterator<Armv8Instruction> iterator = instructions.iterator();
+        for (AArch64Block block : function.getBlocks()) {
+            List<AArch64Instruction> instructions = block.getInstructions();
+            Iterator<AArch64Instruction> iterator = instructions.iterator();
             
             while (iterator.hasNext()) {
-                Armv8Instruction instruction = iterator.next();
+                AArch64Instruction instruction = iterator.next();
                 
-                if (instruction instanceof Armv8Move) {
-                    Armv8Move moveInst = (Armv8Move) instruction;
+                if (instruction instanceof AArch64Move) {
+                    AArch64Move moveInst = (AArch64Move) instruction;
                     
                     if (isRedundantMove(moveInst)) {
                         iterator.remove();
@@ -105,21 +105,21 @@ public class PostRegisterOptimizer {
     private boolean optimizeArithmetic() {
         boolean changed = false;
         
-        for (Armv8Block block : function.getBlocks()) {
-            List<Armv8Instruction> instructions = block.getInstructions();
+        for (AArch64Block block : function.getBlocks()) {
+            List<AArch64Instruction> instructions = block.getInstructions();
             
             for (int i = 0; i < instructions.size(); i++) {
-                Armv8Instruction inst = instructions.get(i);
+                AArch64Instruction inst = instructions.get(i);
                 
-                if (inst instanceof Armv8Binary) {
-                    Armv8Binary binInst = (Armv8Binary) inst;
+                if (inst instanceof AArch64Binary) {
+                    AArch64Binary binInst = (AArch64Binary) inst;
                     
                     // 优化 add reg, reg, 0
-                    if (binInst.getInstType() == Armv8Binary.Armv8BinaryType.add &&
+                    if (binInst.getInstType() == AArch64Binary.AArch64BinaryType.add &&
                         binInst.getOperands().size() >= 2 &&
-                        binInst.getOperands().get(1) instanceof Armv8Imm) {
+                        binInst.getOperands().get(1) instanceof AArch64Imm) {
                         
-                        Armv8Imm imm = (Armv8Imm) binInst.getOperands().get(1);
+                        AArch64Imm imm = (AArch64Imm) binInst.getOperands().get(1);
                         if (imm.getValue() == 0) {
                             if (binInst.getDefReg().equals(binInst.getOperands().get(0))) {
                                 // add reg, reg, 0 -> 删除
@@ -130,9 +130,9 @@ public class PostRegisterOptimizer {
                                 System.out.println("删除无用加法: " + binInst);
                             } else {
                                 // add rd, rs, 0 -> mov rd, rs
-                                Armv8Move moveInst = new Armv8Move(
+                                AArch64Move moveInst = new AArch64Move(
                                     binInst.getDefReg(),
-                                    (Armv8Reg) binInst.getOperands().get(0),
+                                    (AArch64Reg) binInst.getOperands().get(0),
                                     false
                                 );
                                 instructions.set(i, moveInst);
@@ -144,11 +144,11 @@ public class PostRegisterOptimizer {
                     }
                     
                     // 优化 sub reg, reg, 0
-                    if (binInst.getInstType() == Armv8Binary.Armv8BinaryType.sub &&
+                    if (binInst.getInstType() == AArch64Binary.AArch64BinaryType.sub &&
                         binInst.getOperands().size() >= 2 &&
-                        binInst.getOperands().get(1) instanceof Armv8Imm) {
+                        binInst.getOperands().get(1) instanceof AArch64Imm) {
                         
-                        Armv8Imm imm = (Armv8Imm) binInst.getOperands().get(1);
+                        AArch64Imm imm = (AArch64Imm) binInst.getOperands().get(1);
                         if (imm.getValue() == 0) {
                             if (binInst.getDefReg().equals(binInst.getOperands().get(0))) {
                                 // sub reg, reg, 0 -> 删除
@@ -159,9 +159,9 @@ public class PostRegisterOptimizer {
                                 System.out.println("删除无用减法: " + binInst);
                             } else {
                                 // sub rd, rs, 0 -> mov rd, rs
-                                Armv8Move moveInst = new Armv8Move(
+                                AArch64Move moveInst = new AArch64Move(
                                     binInst.getDefReg(),
-                                    (Armv8Reg) binInst.getOperands().get(0),
+                                    (AArch64Reg) binInst.getOperands().get(0),
                                     false
                                 );
                                 instructions.set(i, moveInst);
@@ -184,12 +184,12 @@ public class PostRegisterOptimizer {
     private boolean removeUnusedInstructions() {
         boolean changed = false;
         
-        for (Armv8Block block : function.getBlocks()) {
-            List<Armv8Instruction> instructions = block.getInstructions();
-            Iterator<Armv8Instruction> iterator = instructions.iterator();
+        for (AArch64Block block : function.getBlocks()) {
+            List<AArch64Instruction> instructions = block.getInstructions();
+            Iterator<AArch64Instruction> iterator = instructions.iterator();
             
             while (iterator.hasNext()) {
-                Armv8Instruction inst = iterator.next();
+                AArch64Instruction inst = iterator.next();
                 
                 if (canRemoveInstruction(inst, block)) {
                     iterator.remove();
@@ -209,25 +209,25 @@ public class PostRegisterOptimizer {
     private boolean combineMemoryOperations() {
         boolean changed = false;
         
-        for (Armv8Block block : function.getBlocks()) {
-            List<Armv8Instruction> instructions = block.getInstructions();
+        for (AArch64Block block : function.getBlocks()) {
+            List<AArch64Instruction> instructions = block.getInstructions();
             
             for (int i = 0; i < instructions.size() - 1; i++) {
-                Armv8Instruction current = instructions.get(i);
-                Armv8Instruction next = instructions.get(i + 1);
+                AArch64Instruction current = instructions.get(i);
+                AArch64Instruction next = instructions.get(i + 1);
                 
                 // store + load 优化
-                if (current instanceof Armv8Store && next instanceof Armv8Load) {
-                    if (canCombineStoreLoad((Armv8Store) current, (Armv8Load) next)) {
+                if (current instanceof AArch64Store && next instanceof AArch64Load) {
+                    if (canCombineStoreLoad((AArch64Store) current, (AArch64Load) next)) {
                         // store reg1, addr; load reg2, addr -> store reg1, addr; mov reg2, reg1
-                        Armv8Store store = (Armv8Store) current;
-                        Armv8Load load = (Armv8Load) next;
+                        AArch64Store store = (AArch64Store) current;
+                        AArch64Load load = (AArch64Load) next;
                         
                         if (store.getOperands().size() >= 3 && 
-                            store.getOperands().get(0) instanceof Armv8Reg) {
-                            Armv8Move moveInst = new Armv8Move(
+                            store.getOperands().get(0) instanceof AArch64Reg) {
+                            AArch64Move moveInst = new AArch64Move(
                                 load.getDefReg(),
-                                (Armv8Reg) store.getOperands().get(0),
+                                (AArch64Reg) store.getOperands().get(0),
                                 false
                             );
                             instructions.set(i + 1, moveInst);
@@ -249,15 +249,15 @@ public class PostRegisterOptimizer {
     private boolean optimizeConditionalBranches() {
         boolean changed = false;
         
-        for (Armv8Block block : function.getBlocks()) {
-            List<Armv8Instruction> instructions = block.getInstructions();
+        for (AArch64Block block : function.getBlocks()) {
+            List<AArch64Instruction> instructions = block.getInstructions();
             
             // 查找连续的比较和分支指令
             for (int i = 0; i < instructions.size() - 1; i++) {
-                Armv8Instruction current = instructions.get(i);
-                Armv8Instruction next = instructions.get(i + 1);
+                AArch64Instruction current = instructions.get(i);
+                AArch64Instruction next = instructions.get(i + 1);
                 
-                if (current instanceof Armv8Compare && next instanceof Armv8Branch) {
+                if (current instanceof AArch64Compare && next instanceof AArch64Branch) {
                     // 可以在这里添加比较分支的优化逻辑
                     // 例如：cmp reg, 0; beq -> cbz reg
                     // 暂时保持简单实现
@@ -272,17 +272,17 @@ public class PostRegisterOptimizer {
      * 最终清理
      */
     private void finalCleanup() {
-        for (Armv8Block block : function.getBlocks()) {
-            List<Armv8Instruction> instructions = block.getInstructions();
+        for (AArch64Block block : function.getBlocks()) {
+            List<AArch64Instruction> instructions = block.getInstructions();
             
             // 删除连续的相同move指令
             for (int i = 0; i < instructions.size() - 1; i++) {
-                Armv8Instruction current = instructions.get(i);
-                Armv8Instruction next = instructions.get(i + 1);
+                AArch64Instruction current = instructions.get(i);
+                AArch64Instruction next = instructions.get(i + 1);
                 
-                if (current instanceof Armv8Move && next instanceof Armv8Move) {
-                    Armv8Move move1 = (Armv8Move) current;
-                    Armv8Move move2 = (Armv8Move) next;
+                if (current instanceof AArch64Move && next instanceof AArch64Move) {
+                    AArch64Move move1 = (AArch64Move) current;
+                    AArch64Move move2 = (AArch64Move) next;
                     
                     if (move1.getDefReg().equals(move2.getDefReg())) {
                         // 连续两个move到同一个寄存器，删除第一个
@@ -300,13 +300,13 @@ public class PostRegisterOptimizer {
     /**
      * 检查move指令是否是冗余的
      */
-    private boolean isRedundantMove(Armv8Move moveInst) {
+    private boolean isRedundantMove(AArch64Move moveInst) {
         if (moveInst.getOperands().size() > 0 && 
-            moveInst.getOperands().get(0) instanceof Armv8Reg &&
+            moveInst.getOperands().get(0) instanceof AArch64Reg &&
             moveInst.getDefReg() != null) {
             
-            Armv8Reg src = (Armv8Reg) moveInst.getOperands().get(0);
-            Armv8Reg dst = moveInst.getDefReg();
+            AArch64Reg src = (AArch64Reg) moveInst.getOperands().get(0);
+            AArch64Reg dst = moveInst.getDefReg();
             
             return src.equals(dst);
         }
@@ -317,14 +317,14 @@ public class PostRegisterOptimizer {
     /**
      * 检查指令是否可以删除
      */
-    private boolean canRemoveInstruction(Armv8Instruction inst, Armv8Block block) {
+    private boolean canRemoveInstruction(AArch64Instruction inst, AArch64Block block) {
         // 有副作用的指令不能删除
         if (hasSideEffects(inst)) {
             return false;
         }
         
         // 如果指令定义的寄存器没有被使用，可以删除
-        if (inst.getDefReg() instanceof Armv8PhyReg) {
+        if (inst.getDefReg() instanceof AArch64PhyReg) {
             LivenessAnalyzer.LivenessInfo liveness = livenessInfoMap.get(block);
             if (liveness != null && !liveness.getLiveOut().contains(inst.getDefReg())) {
                 return !isRegisterUsedLater(inst.getDefReg(), inst, block);
@@ -337,22 +337,22 @@ public class PostRegisterOptimizer {
     /**
      * 检查指令是否有副作用
      */
-    private boolean hasSideEffects(Armv8Instruction instruction) {
-        return instruction instanceof Armv8Store ||
-               instruction instanceof Armv8StorePair ||
-               instruction instanceof Armv8Call ||
-               instruction instanceof Armv8BlrCall ||
-               instruction instanceof Armv8Branch ||
-               instruction instanceof Armv8Jump ||
-               instruction instanceof Armv8Ret ||
-               instruction instanceof Armv8Compare ||
-               instruction instanceof Armv8Syscall;
+    private boolean hasSideEffects(AArch64Instruction instruction) {
+        return instruction instanceof AArch64Store ||
+               instruction instanceof AArch64StorePair ||
+               instruction instanceof AArch64Call ||
+               instruction instanceof AArch64BlrCall ||
+               instruction instanceof AArch64Branch ||
+               instruction instanceof AArch64Jump ||
+               instruction instanceof AArch64Ret ||
+               instruction instanceof AArch64Compare ||
+               instruction instanceof AArch64Syscall;
     }
     
     /**
      * 检查寄存器是否在后续被使用
      */
-    private boolean isRegisterUsedLater(Armv8Reg reg, Armv8Instruction fromInst, Armv8Block block) {
+    private boolean isRegisterUsedLater(AArch64Reg reg, AArch64Instruction fromInst, AArch64Block block) {
         // 简化实现：保守地认为物理寄存器都会被使用
         return true;
     }
@@ -360,7 +360,7 @@ public class PostRegisterOptimizer {
     /**
      * 检查store和load是否可以合并
      */
-    private boolean canCombineStoreLoad(Armv8Store store, Armv8Load load) {
+    private boolean canCombineStoreLoad(AArch64Store store, AArch64Load load) {
         // 检查是否访问相同的内存地址
         if (store.getOperands().size() >= 3 && load.getOperands().size() >= 2) {
             // 简化检查：基址寄存器和偏移量是否相同

@@ -2,34 +2,34 @@ package Backend;
 
 import Backend.Optimization.PostRegisterOptimizer;
 import Backend.RegisterManager.RegisterAllocator;
-import Backend.Structure.Armv8Block;
-import Backend.Structure.Armv8Function;
-import Backend.Structure.Armv8GlobalVariable;
-import Backend.Structure.Armv8Module;
-import Backend.Utils.Armv8MyLib;
-import Backend.Utils.Armv8Tools;
-import Backend.Value.Base.Armv8Instruction;
-import Backend.Value.Base.Armv8Operand;
-import Backend.Value.Instruction.Address.Armv8Adrp;
-import Backend.Value.Instruction.Arithmetic.Armv8Binary;
-import Backend.Value.Instruction.Arithmetic.Armv8FBinary;
-import Backend.Value.Instruction.Arithmetic.Armv8Unary;
-import Backend.Value.Instruction.Comparison.Armv8Cbz;
-import Backend.Value.Instruction.Comparison.Armv8Compare;
-import Backend.Value.Instruction.Comparison.Armv8Cset;
-import Backend.Value.Instruction.ControlFlow.Armv8Branch;
-import Backend.Value.Instruction.ControlFlow.Armv8Call;
-import Backend.Value.Instruction.ControlFlow.Armv8Jump;
-import Backend.Value.Instruction.ControlFlow.Armv8Ret;
-import Backend.Value.Instruction.DataMovement.Armv8Cvt;
-import Backend.Value.Instruction.DataMovement.Armv8Fmov;
-import Backend.Value.Instruction.DataMovement.Armv8Move;
-import Backend.Value.Instruction.Memory.Armv8Load;
-import Backend.Value.Instruction.Memory.Armv8LoadPair;
-import Backend.Value.Instruction.Memory.Armv8Store;
-import Backend.Value.Operand.Constant.Armv8Imm;
+import Backend.Structure.AArch64Block;
+import Backend.Structure.AArch64Function;
+import Backend.Structure.AArch64GlobalVariable;
+import Backend.Structure.AArch64Module;
+import Backend.Utils.AArch64MyLib;
+import Backend.Utils.AArch64Tools;
+import Backend.Value.Base.AArch64Instruction;
+import Backend.Value.Base.AArch64Operand;
+import Backend.Value.Instruction.Address.AArch64Adrp;
+import Backend.Value.Instruction.Arithmetic.AArch64Binary;
+import Backend.Value.Instruction.Arithmetic.AArch64FBinary;
+import Backend.Value.Instruction.Arithmetic.AArch64Unary;
+import Backend.Value.Instruction.Comparison.AArch64Cbz;
+import Backend.Value.Instruction.Comparison.AArch64Compare;
+import Backend.Value.Instruction.Comparison.AArch64Cset;
+import Backend.Value.Instruction.ControlFlow.AArch64Branch;
+import Backend.Value.Instruction.ControlFlow.AArch64Call;
+import Backend.Value.Instruction.ControlFlow.AArch64Jump;
+import Backend.Value.Instruction.ControlFlow.AArch64Ret;
+import Backend.Value.Instruction.DataMovement.AArch64Cvt;
+import Backend.Value.Instruction.DataMovement.AArch64Fmov;
+import Backend.Value.Instruction.DataMovement.AArch64Move;
+import Backend.Value.Instruction.Memory.AArch64Load;
+import Backend.Value.Instruction.Memory.AArch64LoadPair;
+import Backend.Value.Instruction.Memory.AArch64Store;
+import Backend.Value.Operand.Constant.AArch64Imm;
 import Backend.Value.Operand.Register.*;
-import Backend.Value.Operand.Symbol.Armv8Label;
+import Backend.Value.Operand.Symbol.AArch64Label;
 import MiddleEnd.IR.Module;
 import MiddleEnd.IR.OpCode;
 import MiddleEnd.IR.Type.*;
@@ -45,14 +45,14 @@ import java.util.stream.Collectors;
 
 public class ArmVisitor {
     public Module irModule;
-    public Armv8Module armv8Module = new Armv8Module();
-    // 使用多态性，这样可以存储Armv8Label及其子类
-    private static final LinkedHashMap<Value, Armv8Label> LabelList = new LinkedHashMap<>();
-    private static final LinkedHashMap<Value, Armv8Reg> RegList = new LinkedHashMap<>();
+    public AArch64Module armv8Module = new AArch64Module();
+    // 使用多态性，这样可以存储AArch64Label及其子类
+    private static final LinkedHashMap<Value, AArch64Label> LabelList = new LinkedHashMap<>();
+    private static final LinkedHashMap<Value, AArch64Reg> RegList = new LinkedHashMap<>();
     private static final LinkedHashMap<Value, Long> ptrList = new LinkedHashMap<>();
-    private Armv8Block curArmv8Block = null;
-    private Armv8Function curArmv8Function = null;
-    private final LinkedHashMap<Instruction, ArrayList<Armv8Instruction>> predefines = new LinkedHashMap<>();
+    private AArch64Block curAArch64Block = null;
+    private AArch64Function curAArch64Function = null;
+    private final LinkedHashMap<Instruction, ArrayList<AArch64Instruction>> predefines = new LinkedHashMap<>();
 
     public ArmVisitor(MiddleEnd.IR.Module irModule) {
         this.irModule = irModule;
@@ -65,7 +65,7 @@ public class ArmVisitor {
         return name;
     }
 
-    public static LinkedHashMap<Value, Armv8Reg> getRegList() {
+    public static LinkedHashMap<Value, AArch64Reg> getRegList() {
         return RegList;
     }
     
@@ -143,7 +143,7 @@ public class ArmVisitor {
         }
         
         // 创建ARM全局变量并添加到模块
-        Armv8GlobalVariable armv8GlobalVar = new Armv8GlobalVariable(varName, initialValues, byteSize, isFloat, elementType);
+        AArch64GlobalVariable armv8GlobalVar = new AArch64GlobalVariable(varName, initialValues, byteSize, isFloat, elementType);
         
         // 根据是否有初始值决定放在data段还是bss段
         if (initialValues == null || initialValues.isEmpty()) {
@@ -161,16 +161,16 @@ public class ArmVisitor {
         }
 
         String functionName = removeLeadingAt(function.getName());
-        curArmv8Function = new Armv8Function(functionName, function);
-        armv8Module.addFunction(functionName, curArmv8Function);
-        Armv8VirReg.resetCounter();
+        curAArch64Function = new AArch64Function(functionName, function);
+        armv8Module.addFunction(functionName, curAArch64Function);
+        AArch64VirReg.resetCounter();
 
         // 将基本块映射到ARM块
         for (BasicBlock basicBlock : function.getBasicBlocks()) {
             String blockName = removeLeadingAt(functionName) + "_" + basicBlock.getName();
-            Armv8Block armv8Block = new Armv8Block(blockName);
+            AArch64Block armv8Block = new AArch64Block(blockName);
             LabelList.put(basicBlock, armv8Block);
-            curArmv8Function.addBlock(armv8Block);
+            curAArch64Function.addBlock(armv8Block);
         }
         
         // 获取函数参数，确保它们被保存和正确处理
@@ -178,19 +178,19 @@ public class ArmVisitor {
         for (Argument arg : arguments) {
             // 确认参数已被正确记录，无需其他处理
             if (!RegList.containsKey(arg)) {
-                Armv8Reg argReg = curArmv8Function.getRegArg(arg);
+                AArch64Reg argReg = curAArch64Function.getRegArg(arg);
                 if (argReg != null) {
                     RegList.put(arg, argReg); // 确保参数有正确的寄存器映射
                 }
             }
         }
         
-        boolean first = curArmv8Function.getName().contains("main") ? false : true;
+        boolean first = curAArch64Function.getName().contains("main") ? false : true;
         // 生成函数体的指令
         for (BasicBlock basicBlock : function.getBasicBlocks()) {
-            curArmv8Block = (Armv8Block) LabelList.get(basicBlock);
+            curAArch64Block = (AArch64Block) LabelList.get(basicBlock);
             if (first) {
-                curArmv8Function.saveCalleeRegs(curArmv8Block);
+                curAArch64Function.saveCalleeRegs(curAArch64Block);
                 first = false;
             }
             generateBasicBlock(basicBlock);
@@ -198,11 +198,11 @@ public class ArmVisitor {
         
         // 进行寄存器分配
         System.out.println("\n===== 开始对函数 " + functionName + " 进行寄存器分配 =====");
-        RegisterAllocator allocator = new RegisterAllocator(curArmv8Function);
+        RegisterAllocator allocator = new RegisterAllocator(curAArch64Function);
         allocator.allocateRegisters();
         
         // 应用寄存器分配后的优化
-        PostRegisterOptimizer optimizer = new PostRegisterOptimizer(curArmv8Function);
+        PostRegisterOptimizer optimizer = new PostRegisterOptimizer(curAArch64Function);
         optimizer.optimize();
         
         System.out.println("===== 函数 " + functionName + " 寄存器分配完成 =====\n");
@@ -271,10 +271,10 @@ public class ArmVisitor {
         }
         
         // 获取当前栈大小作为这个变量的偏移量
-        long currentStackPos = curArmv8Function.getStackSize();
+        long currentStackPos = curAArch64Function.getStackSize();
         
         // 在函数栈上分配空间（如果真正需要）
-        curArmv8Function.addStack(ins, size);
+        curAArch64Function.addStack(ins, size);
         
         // 记录分配的偏移量，用于后续访问
         ptrList.put(ins, currentStackPos);
@@ -286,28 +286,28 @@ public class ArmVisitor {
         // 分配虚拟寄存器用于存储地址，注意不要影响参数寄存器
         if (!predefine) {
             // 创建新的虚拟寄存器，不使用物理寄存器x0-x7
-            Armv8VirReg allocaReg = new Armv8VirReg(false);
+            AArch64VirReg allocaReg = new AArch64VirReg(false);
             RegList.put(ins, allocaReg);
             
             // 计算局部变量地址：SP + 偏移量
             // 检查偏移量是否在范围内，并获取适当的操作数
-            Armv8Operand offsetOp = checkImmediate(currentStackPos, ImmediateRange.ADD_SUB, null, predefine);
+            AArch64Operand offsetOp = checkImmediate(currentStackPos, ImmediateRange.ADD_SUB, null, predefine);
             
             // 创建加法指令
-            if (offsetOp instanceof Armv8Reg) {
+            if (offsetOp instanceof AArch64Reg) {
                 // 如果偏移量转换为了寄存器，使用寄存器形式的ADD
-                ArrayList<Armv8Operand> operands = new ArrayList<>();
-                operands.add(Armv8CPUReg.getArmv8SpReg());
+                ArrayList<AArch64Operand> operands = new ArrayList<>();
+                operands.add(AArch64CPUReg.getAArch64SpReg());
                 operands.add(offsetOp);
-                Armv8Binary addInst = new Armv8Binary(operands, allocaReg, Armv8Binary.Armv8BinaryType.add);
+                AArch64Binary addInst = new AArch64Binary(operands, allocaReg, AArch64Binary.AArch64BinaryType.add);
                 addInstr(addInst, null, predefine);
-            } else if (offsetOp instanceof Armv8Imm) {
+            } else if (offsetOp instanceof AArch64Imm) {
                 // 使用立即数形式的ADD
-                Armv8Binary addInst = new Armv8Binary(
+                AArch64Binary addInst = new AArch64Binary(
                     allocaReg,
-                    Armv8CPUReg.getArmv8SpReg(), 
-                    (Armv8Imm)offsetOp, 
-                    Armv8Binary.Armv8BinaryType.add
+                    AArch64CPUReg.getAArch64SpReg(), 
+                    (AArch64Imm)offsetOp, 
+                    AArch64Binary.AArch64BinaryType.add
                 );
                 addInstr(addInst, null, predefine);
             }
@@ -315,7 +315,7 @@ public class ArmVisitor {
     }
 
     private void parseBinaryInst(BinaryInstruction ins, boolean predefine) {
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
         // 获取IR指令的操作码和操作数
         OpCode opCode = ins.getOpCode();
@@ -327,11 +327,11 @@ public class ArmVisitor {
                                  rightOperand.getType() instanceof FloatType;
  
         // 获取或分配寄存器
-        Armv8Reg destReg;
+        AArch64Reg destReg;
         if (isFloatOperation) {
-            destReg = new Armv8VirReg(true);
+            destReg = new AArch64VirReg(true);
         } else {
-            destReg = new Armv8VirReg(false);
+            destReg = new AArch64VirReg(false);
         }
         RegList.put(ins, destReg);
         
@@ -352,14 +352,14 @@ public class ArmVisitor {
             rightRange = ImmediateRange.ADD_SUB;
         }
         
-        Armv8Operand leftOp = processOperand(leftOperand, insList, predefine, isFloatOperation, leftRequiresReg, leftRange);
+        AArch64Operand leftOp = processOperand(leftOperand, insList, predefine, isFloatOperation, leftRequiresReg, leftRange);
         
         // 处理右操作数 - 右操作数可以是立即数（除了乘除法）
         boolean rightRequiresReg = opCode == OpCode.MUL || opCode == OpCode.DIV || opCode == OpCode.REM;
-        Armv8Operand rightOp = processOperand(rightOperand, insList, predefine, isFloatOperation, rightRequiresReg, rightRange);
+        AArch64Operand rightOp = processOperand(rightOperand, insList, predefine, isFloatOperation, rightRequiresReg, rightRange);
         
         // 创建操作数列表
-        ArrayList<Armv8Operand> operands = new ArrayList<>();
+        ArrayList<AArch64Operand> operands = new ArrayList<>();
         operands.add(leftOp);
         operands.add(rightOp);
         
@@ -370,22 +370,22 @@ public class ArmVisitor {
             switch (opCode) {
                 case FADD:
                     // 浮点加法
-                    Armv8FBinary faddInst = new Armv8FBinary(operands, destReg, Armv8FBinary.Armv8FBinaryType.fadd);
+                    AArch64FBinary faddInst = new AArch64FBinary(operands, destReg, AArch64FBinary.AArch64FBinaryType.fadd);
                     addInstr(faddInst, insList, predefine);
                     break;
                 case FSUB:
                     // 浮点减法
-                    Armv8FBinary fsubInst = new Armv8FBinary(operands, destReg, Armv8FBinary.Armv8FBinaryType.fsub);
+                    AArch64FBinary fsubInst = new AArch64FBinary(operands, destReg, AArch64FBinary.AArch64FBinaryType.fsub);
                     addInstr(fsubInst, insList, predefine);
                     break;
                 case FMUL:
                     // 浮点乘法
-                    Armv8FBinary fmulInst = new Armv8FBinary(operands, destReg, Armv8FBinary.Armv8FBinaryType.fmul);
+                    AArch64FBinary fmulInst = new AArch64FBinary(operands, destReg, AArch64FBinary.AArch64FBinaryType.fmul);
                     addInstr(fmulInst, insList, predefine);
                     break;
                 case FDIV:
                     // 浮点除法
-                    Armv8FBinary fdivInst = new Armv8FBinary(operands, destReg, Armv8FBinary.Armv8FBinaryType.fdiv);
+                    AArch64FBinary fdivInst = new AArch64FBinary(operands, destReg, AArch64FBinary.AArch64FBinaryType.fdiv);
                     addInstr(fdivInst, insList, predefine);
                     break;
                 default:
@@ -395,38 +395,38 @@ public class ArmVisitor {
         } else {
             // 整数运算处理
             // 处理整数操作
-            Armv8Binary.Armv8BinaryType binaryType;
+            AArch64Binary.AArch64BinaryType binaryType;
             switch (opCode) {
                 case ADD:
-                    binaryType = Armv8Binary.Armv8BinaryType.add;
+                    binaryType = AArch64Binary.AArch64BinaryType.add;
                     break;
                 case SUB:
-                    binaryType = Armv8Binary.Armv8BinaryType.sub;
+                    binaryType = AArch64Binary.AArch64BinaryType.sub;
                     break;
                 case MUL:
-                    binaryType = Armv8Binary.Armv8BinaryType.mul;
+                    binaryType = AArch64Binary.AArch64BinaryType.mul;
                     break;
                 case DIV:
-                    binaryType = Armv8Binary.Armv8BinaryType.sdiv;
+                    binaryType = AArch64Binary.AArch64BinaryType.sdiv;
                     break;
                 // 其他操作类型
                 case AND:
-                        binaryType = Armv8Binary.Armv8BinaryType.and;
+                        binaryType = AArch64Binary.AArch64BinaryType.and;
                     break;
                 case OR:
-                        binaryType = Armv8Binary.Armv8BinaryType.orr;
+                        binaryType = AArch64Binary.AArch64BinaryType.orr;
                     break;
                 case XOR:
-                    binaryType = Armv8Binary.Armv8BinaryType.eor;
+                    binaryType = AArch64Binary.AArch64BinaryType.eor;
                     break;
                 case SHL:
-                    binaryType = Armv8Binary.Armv8BinaryType.lsl;
+                    binaryType = AArch64Binary.AArch64BinaryType.lsl;
                     break;
                 case LSHR:
-                    binaryType = Armv8Binary.Armv8BinaryType.lsr;
+                    binaryType = AArch64Binary.AArch64BinaryType.lsr;
                     break;
                 case ASHR:
-                    binaryType = Armv8Binary.Armv8BinaryType.asr;
+                    binaryType = AArch64Binary.AArch64BinaryType.asr;
                     break;
                 case REM:
                     // 处理余数操作（需要特殊处理）
@@ -444,7 +444,7 @@ public class ArmVisitor {
             }
             
             // 创建二元指令
-            Armv8Binary binaryInst = new Armv8Binary(operands, destReg, binaryType);
+            AArch64Binary binaryInst = new AArch64Binary(operands, destReg, binaryType);
             addInstr(binaryInst, insList, predefine);
         }
         
@@ -458,15 +458,15 @@ public class ArmVisitor {
     
 
     private void parseBrInst(BranchInstruction ins, boolean predefine) {
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
         if (ins.isUnconditional()) {
             // 处理无条件跳转
             BasicBlock targetBlock = ins.getTrueBlock();
-            Armv8Block armTarget = (Armv8Block) LabelList.get(targetBlock);
+            AArch64Block armTarget = (AArch64Block) LabelList.get(targetBlock);
             
             // 创建无条件跳转指令
-            Armv8Jump jumpInst = new Armv8Jump(armTarget, curArmv8Block);
+            AArch64Jump jumpInst = new AArch64Jump(armTarget, curAArch64Block);
             addInstr(jumpInst, insList, predefine);
         } else {
             // 处理条件跳转
@@ -474,8 +474,8 @@ public class ArmVisitor {
             BasicBlock trueBlock = ins.getTrueBlock();
             BasicBlock falseBlock = ins.getFalseBlock();
             
-            Armv8Block armTrueBlock = (Armv8Block) LabelList.get(trueBlock);
-            Armv8Block armFalseBlock = (Armv8Block) LabelList.get(falseBlock);
+            AArch64Block armTrueBlock = (AArch64Block) LabelList.get(trueBlock);
+            AArch64Block armFalseBlock = (AArch64Block) LabelList.get(falseBlock);
             
             // 条件指令需要首先处理条件
             if (condition instanceof CompareInstruction) {
@@ -487,18 +487,18 @@ public class ArmVisitor {
                 OpCode predicate = cmpIns.getPredicate();
                 
                 // 获取左右操作数
-                Armv8Operand leftOp, rightOp;
+                AArch64Operand leftOp, rightOp;
                 
                 // 处理左操作数
                 if (left instanceof ConstantInt) {
                     long value = ((ConstantInt) left).getValue();
                     // ARM要求CMP的第一个操作数必须是寄存器
-                    Armv8Reg leftReg = new Armv8VirReg(false);
+                    AArch64Reg leftReg = new AArch64VirReg(false);
                     // 使用loadLargeImmediate处理可能的大立即数
                     if (value > 65535 || value < -65536) {
                         loadLargeImmediate(leftReg, value, insList, predefine);
                     } else {
-                        Armv8Move moveInst = new Armv8Move(leftReg, new Armv8Imm(value), true);
+                        AArch64Move moveInst = new AArch64Move(leftReg, new AArch64Imm(value), true);
                         addInstr(moveInst, insList, predefine);
                     }
                     leftOp = leftReg;
@@ -509,76 +509,76 @@ public class ArmVisitor {
                 // 处理右操作数
                 if (right instanceof ConstantInt) {
                     long value = ((ConstantInt) right).getValue();
-                    rightOp = new Armv8Imm(value);
+                    rightOp = new AArch64Imm(value);
                 } else {
                     rightOp = RegList.get(right);
                 }
                 
                 // 创建比较指令
-                Armv8Compare.CmpType cmpType = Armv8Compare.CmpType.cmp;
-                if (!cmpIns.isFloatCompare() && rightOp instanceof Armv8Imm) {
-                    long value = ((Armv8Imm) rightOp).getValue();
+                AArch64Compare.CmpType cmpType = AArch64Compare.CmpType.cmp;
+                if (!cmpIns.isFloatCompare() && rightOp instanceof AArch64Imm) {
+                    long value = ((AArch64Imm) rightOp).getValue();
                     if (value < 0) {
                         // 使用CMN指令，比较负值（相当于CMP reg, -imm）
-                        cmpType = Armv8Compare.CmpType.cmn;
+                        cmpType = AArch64Compare.CmpType.cmn;
                         // 将立即数改为正值
-                        rightOp = new Armv8Imm(-value);
+                        rightOp = new AArch64Imm(-value);
                     }
                 }
                 
-                Armv8Compare compareInst = new Armv8Compare(leftOp, rightOp, cmpType);
+                AArch64Compare compareInst = new AArch64Compare(leftOp, rightOp, cmpType);
                 addInstr(compareInst, insList, predefine);
                 
                 // 根据比较谓词确定条件分支类型
-                Armv8Tools.CondType condType;
+                AArch64Tools.CondType condType;
                 switch (predicate) {
                     case EQ:
-                        condType = Armv8Tools.CondType.eq;
+                        condType = AArch64Tools.CondType.eq;
                         break;
                     case NE:
-                        condType = Armv8Tools.CondType.ne;
+                        condType = AArch64Tools.CondType.ne;
                         break;
                     case SGT:
-                        condType = Armv8Tools.CondType.gt;
+                        condType = AArch64Tools.CondType.gt;
                         break;
                     case SGE:
-                        condType = Armv8Tools.CondType.ge;
+                        condType = AArch64Tools.CondType.ge;
                         break;
                     case SLT:
-                        condType = Armv8Tools.CondType.lt;
+                        condType = AArch64Tools.CondType.lt;
                         break;
                     case SLE:
-                        condType = Armv8Tools.CondType.le;
+                        condType = AArch64Tools.CondType.le;
                         break;
                     default:
                         System.err.println("不支持的比较谓词: " + predicate);
-                        condType = Armv8Tools.CondType.eq;  // 默认为等于
+                        condType = AArch64Tools.CondType.eq;  // 默认为等于
                         break;
                 }
                 
                 // 创建条件跳转到true块
-                Armv8Branch branchTrueInst = new Armv8Branch(armTrueBlock, condType);
-                branchTrueInst.setPredSucc(curArmv8Block);
+                AArch64Branch branchTrueInst = new AArch64Branch(armTrueBlock, condType);
+                branchTrueInst.setPredSucc(curAArch64Block);
                 addInstr(branchTrueInst, insList, predefine);
                 
                 // 无条件跳转到false块作为默认情况
-                Armv8Jump jumpFalseInst = new Armv8Jump(armFalseBlock, curArmv8Block);
+                AArch64Jump jumpFalseInst = new AArch64Jump(armFalseBlock, curAArch64Block);
                 addInstr(jumpFalseInst, insList, predefine);
                 
             } else {
                 // 如果不是直接的比较指令，而是一个布尔值
-                Armv8Operand condOp;
+                AArch64Operand condOp;
                 
                 if (condition instanceof ConstantInt) {
                     // 对于常量条件，直接生成对应的跳转
                     long value = ((ConstantInt) condition).getValue();
                     if (value != 0) {
                         // 条件为真，直接跳转到true块
-                        Armv8Jump jumpTrueInst = new Armv8Jump(armTrueBlock, curArmv8Block);
+                        AArch64Jump jumpTrueInst = new AArch64Jump(armTrueBlock, curAArch64Block);
                         addInstr(jumpTrueInst, insList, predefine);
                     } else {
                         // 条件为假，直接跳转到false块
-                        Armv8Jump jumpFalseInst = new Armv8Jump(armFalseBlock, curArmv8Block);
+                        AArch64Jump jumpFalseInst = new AArch64Jump(armFalseBlock, curAArch64Block);
                         addInstr(jumpFalseInst, insList, predefine);
                     }
                     return;
@@ -589,7 +589,7 @@ public class ArmVisitor {
                     // PHI消除后的修复：如果直接查找失败，按名称查找
                     if (condOp == null) {
                         String condName = condition.getName();
-                        for (Map.Entry<Value, Armv8Reg> entry : RegList.entrySet()) {
+                        for (Map.Entry<Value, AArch64Reg> entry : RegList.entrySet()) {
                             if (entry.getKey().getName().equals(condName)) {
                                 condOp = entry.getValue();
                                 break;
@@ -602,23 +602,23 @@ public class ArmVisitor {
                         System.err.println("错误: 无法找到条件变量的寄存器映射: " + condition.getName());
                         System.err.println("条件对象类型: " + condition.getClass().getName());
                         System.err.println("可用的寄存器映射:");
-                        for (Map.Entry<Value, Armv8Reg> entry : RegList.entrySet()) {
+                        for (Map.Entry<Value, AArch64Reg> entry : RegList.entrySet()) {
                             System.err.println("  " + entry.getKey().getName() + " -> " + entry.getValue());
                         }
                         // 创建一个临时寄存器作为fallback
-                        condOp = new Armv8VirReg(false);
+                        condOp = new AArch64VirReg(false);
                         System.err.println("使用临时寄存器作为fallback");
                     }
                     
                     // 使用CBZ指令测试条件是否为0
                     
                     // 如果为0则跳转到false块
-                    Armv8Cbz cbzInst = new Armv8Cbz((Armv8Reg) condOp, armFalseBlock);
-                    cbzInst.setPredSucc(curArmv8Block);
+                    AArch64Cbz cbzInst = new AArch64Cbz((AArch64Reg) condOp, armFalseBlock);
+                    cbzInst.setPredSucc(curAArch64Block);
                     addInstr(cbzInst, insList, predefine);
                     
                     // 否则跳转到true块
-                    Armv8Jump jumpTrueInst = new Armv8Jump(armTrueBlock, curArmv8Block);
+                    AArch64Jump jumpTrueInst = new AArch64Jump(armTrueBlock, curAArch64Block);
                     addInstr(jumpTrueInst, insList, predefine);
                 }
             }
@@ -630,8 +630,8 @@ public class ArmVisitor {
     }
 
     private void parseCallInst(CallInstruction ins, boolean predefine) {
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
-        curArmv8Function.saveCallerRegs(curArmv8Block);
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
+        curAArch64Function.saveCallerRegs(curAArch64Block);
         // 获取被调用的函数
         Function callee = ins.getCallee();
         String functionName = removeLeadingAt(callee.getName());
@@ -666,35 +666,35 @@ public class ArmVisitor {
             }
             
             if (!useStack) {           
-                Armv8Reg argReg;
+                AArch64Reg argReg;
                 if (isFloat) {
                     // 浮点参数使用v0-v7寄存器，使用floatArgCount-1是因为已经自增了
-                    argReg = Armv8FPUReg.getArmv8FArgReg(floatArgCount-1);
+                    argReg = AArch64FPUReg.getAArch64FArgReg(floatArgCount-1);
                 } else {
                     // 整数参数使用x0-x7寄存器，使用intArgCount-1是因为已经自增了
-                    argReg = Armv8CPUReg.getArmv8ArgReg(intArgCount-1);
+                    argReg = AArch64CPUReg.getAArch64ArgReg(intArgCount-1);
                 }
                  // 处理参数值
                 if (arg instanceof ConstantInt) {
                     // 对于常量整数，直接加载到对应的参数寄存器
                     long value = ((ConstantInt) arg).getValue();
-                    Armv8Imm imm = new Armv8Imm(value);
+                    AArch64Imm imm = new AArch64Imm(value);
                     
                     // 生成加载立即数到寄存器指令
-                    Armv8Move moveInst = new Armv8Move(argReg, imm, true);
+                    AArch64Move moveInst = new AArch64Move(argReg, imm, true);
                     addInstr(moveInst, insList, predefine);
                 } else if (arg instanceof ConstantFloat) {
                     // 对于浮点常量，先加载到虚拟寄存器，再移动到参数寄存器
                     double floatValue = ((ConstantFloat) arg).getValue();
                     
                     // 为浮点常量分配虚拟寄存器
-                    Armv8VirReg fReg = new Armv8VirReg(true);
+                    AArch64VirReg fReg = new AArch64VirReg(true);
                     
                     // 加载浮点常量到虚拟寄存器
                     loadFloatConstant(fReg, floatValue, insList, predefine);
                     
                     // 将虚拟寄存器移动到参数寄存器
-                    Armv8Fmov fmovInst = new Armv8Fmov(argReg, fReg);
+                    AArch64Fmov fmovInst = new AArch64Fmov(argReg, fReg);
                     addInstr(fmovInst, insList, predefine);
                 } else {
                     // System.out.println(arg); 
@@ -710,10 +710,10 @@ public class ArmVisitor {
                             // 处理全局变量参数
                             GlobalVariable globalVar = (GlobalVariable) arg;
                             String globalName = removeLeadingAt(globalVar.getName());
-                            Armv8Label label = new Armv8Label(globalName);
+                            AArch64Label label = new AArch64Label(globalName);
                             
                             // 为全局变量分配一个临时寄存器
-                            Armv8VirReg tempReg = new Armv8VirReg(false);
+                            AArch64VirReg tempReg = new AArch64VirReg(false);
                             loadGlobalAddress(tempReg, label, insList, predefine);
                             
                             // 检查参数类型：如果是指针类型，直接使用地址；否则加载值
@@ -722,57 +722,57 @@ public class ArmVisitor {
                                 RegList.put(arg, tempReg);
                             } else {
                                 // 对于非指针类型，加载全局变量的值
-                                Armv8VirReg valueReg;
+                                AArch64VirReg valueReg;
                                 if (arg.getType() instanceof FloatType) {
-                                    valueReg = new Armv8VirReg(true);
+                                    valueReg = new AArch64VirReg(true);
                                 } else {
-                                    valueReg = new Armv8VirReg(false);
+                                    valueReg = new AArch64VirReg(false);
                                 }
                                 
-                                Armv8Load loadInst = new Armv8Load(tempReg, new Armv8Imm(0), valueReg);
+                                AArch64Load loadInst = new AArch64Load(tempReg, new AArch64Imm(0), valueReg);
                                 addInstr(loadInst, insList, predefine);
                                 
                                 RegList.put(arg, valueReg);
                             }
                         } else if (arg.getType() instanceof FloatType) {
                             // 为浮点类型分配寄存器
-                            Armv8VirReg floatReg = new Armv8VirReg(true);
+                            AArch64VirReg floatReg = new AArch64VirReg(true);
                             RegList.put(arg, floatReg);
                         } else {
                             // 为整数类型分配寄存器
-                            Armv8VirReg intReg = new Armv8VirReg(false);
+                            AArch64VirReg intReg = new AArch64VirReg(false);
                             RegList.put(arg, intReg);
                         }
                     }
                     
                     // 获取参数的寄存器
-                    Armv8Reg argValueReg = RegList.get(arg);
+                    AArch64Reg argValueReg = RegList.get(arg);
                     if (argValueReg != null) {
                         // 检查是否是putfloat调用且参数是浮点类型
-                        if (functionName.equals("putfloat") && isFloat && argValueReg instanceof Armv8VirReg) {
+                        if (functionName.equals("putfloat") && isFloat && argValueReg instanceof AArch64VirReg) {
                             // putfloat需要单精度参数，但我们内部使用双精度计算
                             // 需要将双精度转换为单精度再传给putfloat
-                            Armv8VirReg tempSingleReg = new Armv8VirReg(true);  // 临时单精度寄存器
+                            AArch64VirReg tempSingleReg = new AArch64VirReg(true);  // 临时单精度寄存器
                             
                             // 添加fcvt指令从双精度转换为单精度
-                            Armv8Cvt cvtInst = new Armv8Cvt(argValueReg, Armv8Cvt.CvtType.FCVT_D2S, tempSingleReg);
+                            AArch64Cvt cvtInst = new AArch64Cvt(argValueReg, AArch64Cvt.CvtType.FCVT_D2S, tempSingleReg);
                             addInstr(cvtInst, insList, predefine);
                             
                             // 然后将单精度寄存器移动到参数寄存器
-                            Armv8Move moveInst = new Armv8Move(argReg, tempSingleReg, false);
+                            AArch64Move moveInst = new AArch64Move(argReg, tempSingleReg, false);
                             addInstr(moveInst, insList, predefine);
                         } else {
-                            Armv8Move moveInst = new Armv8Move(argReg, argValueReg, false);
+                            AArch64Move moveInst = new AArch64Move(argReg, argValueReg, false);
                             addInstr(moveInst, insList, predefine);
                         }
                     } else {
                         // 如果仍然没有寄存器，使用零寄存器
                         System.err.println("警告: 参数 " + arg + " 没有关联的寄存器，使用零寄存器");
-                        Armv8Move moveInst = new Armv8Move(argReg, Armv8CPUReg.getZeroReg(), false);
+                        AArch64Move moveInst = new AArch64Move(argReg, AArch64CPUReg.getZeroReg(), false);
                         addInstr(moveInst, insList, predefine);
                     }
                 }
-                curArmv8Function.addRegArg(arg, argReg);
+                curAArch64Function.addRegArg(arg, argReg);
                 // 注意：不要覆盖数组的地址寄存器映射
                 // 对于非指令类型的参数才更新RegList映射
                 // if (!(arg instanceof Instruction) && !(arg instanceof GlobalVariable)) {
@@ -782,29 +782,29 @@ public class ArmVisitor {
                 // 使用栈传递参数
                 stackOffset += 8;
                 stackArgList.add(arg);
-                curArmv8Function.addStackArg(arg, stackOffset);
+                curAArch64Function.addStackArg(arg, stackOffset);
             }
         }
         // 如果栈偏移量大于0，则需要减去栈偏移量
         if (stackOffset > 0) {
             // 使用通用的立即数检查机制
-            Armv8Operand sizeOp = checkImmediate(stackOffset, ImmediateRange.ADD_SUB, insList, predefine);
+            AArch64Operand sizeOp = checkImmediate(stackOffset, ImmediateRange.ADD_SUB, insList, predefine);
             
             // 根据操作数类型创建适当的加法指令
-            if (sizeOp instanceof Armv8Reg) {
+            if (sizeOp instanceof AArch64Reg) {
                 // 如果栈大小被加载到寄存器，使用寄存器形式的add指令
-                ArrayList<Armv8Operand> operands = new ArrayList<>();
-                operands.add(Armv8CPUReg.getArmv8SpReg());
+                ArrayList<AArch64Operand> operands = new ArrayList<>();
+                operands.add(AArch64CPUReg.getAArch64SpReg());
                 operands.add(sizeOp);
-                Armv8Binary addInst = new Armv8Binary(operands, Armv8CPUReg.getArmv8SpReg(), Armv8Binary.Armv8BinaryType.sub);
+                AArch64Binary addInst = new AArch64Binary(operands, AArch64CPUReg.getAArch64SpReg(), AArch64Binary.AArch64BinaryType.sub);
                 addInstr(addInst, insList, predefine);
             } else {
                 // 使用立即数形式的add指令
-                Armv8Binary addInst = new Armv8Binary(
-                    Armv8CPUReg.getArmv8SpReg(), 
-                    Armv8CPUReg.getArmv8SpReg(), 
-                    (Armv8Imm)sizeOp, 
-                    Armv8Binary.Armv8BinaryType.sub
+                AArch64Binary addInst = new AArch64Binary(
+                    AArch64CPUReg.getAArch64SpReg(), 
+                    AArch64CPUReg.getAArch64SpReg(), 
+                    (AArch64Imm)sizeOp, 
+                    AArch64Binary.AArch64BinaryType.sub
                 );
                 addInstr(addInst, insList, predefine);
             }
@@ -817,15 +817,15 @@ public class ArmVisitor {
                 if (arg instanceof ConstantInt) {
                     // 对于常量，先加载到临时寄存器再存入栈
                     long value = ((ConstantInt) arg).getValue();
-                    Armv8VirReg tempReg = new Armv8VirReg(false);
-                    Armv8Imm imm = new Armv8Imm(value);
+                    AArch64VirReg tempReg = new AArch64VirReg(false);
+                    AArch64Imm imm = new AArch64Imm(value);
                     
                     // 生成加载立即数到临时寄存器指令
-                    Armv8Move moveInst = new Armv8Move(tempReg, imm, true);
+                    AArch64Move moveInst = new AArch64Move(tempReg, imm, true);
                     addInstr(moveInst, insList, predefine);
                     
                                              // 将临时寄存器值存储到栈上
-                          Armv8CPUReg spReg = Armv8CPUReg.getArmv8SpReg();
+                          AArch64CPUReg spReg = AArch64CPUReg.getAArch64SpReg();
                           
                           // 使用辅助方法处理栈偏移量
                           handleLargeStackOffset(spReg, tempStackOffset, tempReg, false, false, insList, predefine);
@@ -834,13 +834,13 @@ public class ArmVisitor {
                     double floatValue = ((ConstantFloat) arg).getValue();
                     
                     // 为浮点常量分配虚拟寄存器
-                    Armv8VirReg fReg = new Armv8VirReg(true);
+                    AArch64VirReg fReg = new AArch64VirReg(true);
                     
                     // 加载浮点常量到虚拟寄存器
                     loadFloatConstant(fReg, floatValue, insList, predefine);
                     
                                           // 将虚拟寄存器值存储到栈上
-                      Armv8CPUReg spReg = Armv8CPUReg.getArmv8SpReg();
+                      AArch64CPUReg spReg = AArch64CPUReg.getAArch64SpReg();
                       
                       // 使用辅助方法处理栈偏移量
                       handleLargeStackOffset(spReg, tempStackOffset, fReg, false, true, insList, predefine);
@@ -855,53 +855,53 @@ public class ArmVisitor {
                             // 处理全局变量参数
                             GlobalVariable globalVar = (GlobalVariable) arg;
                             String globalName = removeLeadingAt(globalVar.getName());
-                            Armv8Label label = new Armv8Label(globalName);
+                            AArch64Label label = new AArch64Label(globalName);
                             
                             // 为全局变量分配一个临时寄存器
-                            Armv8VirReg tempReg = new Armv8VirReg(false);
+                            AArch64VirReg tempReg = new AArch64VirReg(false);
                             loadGlobalAddress(tempReg, label, insList, predefine);
                             
                             // 加载全局变量的值
-                            Armv8VirReg valueReg;
+                            AArch64VirReg valueReg;
                             if (arg.getType() instanceof FloatType) {
-                                valueReg = new Armv8VirReg(true);
+                                valueReg = new AArch64VirReg(true);
                             } else {
-                                valueReg = new Armv8VirReg(false);
+                                valueReg = new AArch64VirReg(false);
                             }
                             
-                            Armv8Load loadInst = new Armv8Load(tempReg, new Armv8Imm(0), valueReg);
+                            AArch64Load loadInst = new AArch64Load(tempReg, new AArch64Imm(0), valueReg);
                             addInstr(loadInst, insList, predefine);
                             
                             // 关联全局变量与其值寄存器
                             RegList.put(arg, valueReg);
                         } else if (arg.getType() instanceof FloatType) {
                             // 为浮点类型分配寄存器
-                            Armv8VirReg floatReg = new Armv8VirReg(true);
+                            AArch64VirReg floatReg = new AArch64VirReg(true);
                             RegList.put(arg, floatReg);
                         } else {
                             // 为整数类型分配寄存器
-                            Armv8VirReg intReg = new Armv8VirReg(false);
+                            AArch64VirReg intReg = new AArch64VirReg(false);
                             RegList.put(arg, intReg);
                         }
                     }
                     
                     // 获取参数的寄存器
-                    Armv8Reg argValueReg = RegList.get(arg);
+                    AArch64Reg argValueReg = RegList.get(arg);
                     if (argValueReg != null) {
                                                  // 将变量寄存器的值存储到栈上
-                          Armv8CPUReg spReg = Armv8CPUReg.getArmv8SpReg();
+                          AArch64CPUReg spReg = AArch64CPUReg.getAArch64SpReg();
                          
                          // 使用辅助方法处理栈偏移量
                          handleLargeStackOffset(spReg, tempStackOffset, argValueReg, false, arg.getType() instanceof FloatType, insList, predefine);
                     } else {
                         // 如果仍然没有寄存器，使用零寄存器
                         System.err.println("警告: 栈参数 " + arg + " 没有关联的寄存器，使用零寄存器");
-                        Armv8VirReg tempReg = new Armv8VirReg(false);
-                        Armv8Move moveInst = new Armv8Move(tempReg, Armv8CPUReg.getZeroReg(), false);
+                        AArch64VirReg tempReg = new AArch64VirReg(false);
+                        AArch64Move moveInst = new AArch64Move(tempReg, AArch64CPUReg.getZeroReg(), false);
                         addInstr(moveInst, insList, predefine);
                         
                         // 将临时寄存器值存储到栈上
-                        Armv8CPUReg spReg = Armv8CPUReg.getArmv8SpReg();
+                        AArch64CPUReg spReg = AArch64CPUReg.getAArch64SpReg();
                         
                         // 使用辅助方法处理栈偏移量
                         handleLargeStackOffset(spReg, tempStackOffset, tempReg, false, false, insList, predefine);
@@ -911,20 +911,20 @@ public class ArmVisitor {
             }
         }
         // 创建调用标签
-        if (Armv8MyLib.has64BitVersion(functionName)) {
-            Armv8MyLib.markFunction64Used(functionName);
-            functionName = Armv8MyLib.get64BitFunctionName(functionName);
+        if (AArch64MyLib.has64BitVersion(functionName)) {
+            AArch64MyLib.markFunction64Used(functionName);
+            functionName = AArch64MyLib.get64BitFunctionName(functionName);
         }
         
-        Armv8Label functionLabel = new Armv8Label(functionName);
+        AArch64Label functionLabel = new AArch64Label(functionName);
         
         // 生成调  用指令
-        Armv8Call callInst = new Armv8Call(functionLabel);
+        AArch64Call callInst = new AArch64Call(functionLabel);
         
         // 记录使用的寄存器（用于调用者保存寄存器的保存和恢复）
         // for (Value value : RegList.keySet()) {
-        //     Armv8Reg reg = RegList.get(value);
-        //     if (reg instanceof Armv8CPUReg && ((Armv8CPUReg) reg).canBeReorder()) {
+        //     AArch64Reg reg = RegList.get(value);
+        //     if (reg instanceof AArch64CPUReg && ((AArch64CPUReg) reg).canBeReorder()) {
         //         callInst.addUsedReg(reg);
         //     }
         // }
@@ -933,13 +933,13 @@ public class ArmVisitor {
         
         // 处理返回值
         if (!ins.isVoidCall()) {
-            Armv8Reg returnReg, resultReg;
+            AArch64Reg returnReg, resultReg;
             if (ins.getCallee().getReturnType().isIntegerType()) {
-                returnReg = Armv8CPUReg.getArmv8CPURetValueReg();
-                resultReg = new Armv8VirReg(false);
+                returnReg = AArch64CPUReg.getAArch64CPURetValueReg();
+                resultReg = new AArch64VirReg(false);
             } else {
-                returnReg = Armv8FPUReg.getArmv8FPURetValueReg();
-                resultReg = new Armv8VirReg(true);
+                returnReg = AArch64FPUReg.getAArch64FPURetValueReg();
+                resultReg = new AArch64VirReg(true);
             }
             
             // 为调用指令分配一个寄存器存储返回值
@@ -951,17 +951,17 @@ public class ArmVisitor {
                 if (functionName.equals("getfloat") && ins.getCallee().getReturnType() instanceof FloatType) {
                     // getfloat返回单精度浮点数在s0，但我们内部使用双精度计算
                     // 需要将单精度转换为双精度
-                    Armv8VirReg tempSingleReg = new Armv8VirReg(true);  // 临时单精度寄存器
+                    AArch64VirReg tempSingleReg = new AArch64VirReg(true);  // 临时单精度寄存器
                     
                     // 首先将s0移动到临时单精度寄存器
-                    Armv8Move moveFromS0Inst = new Armv8Move(tempSingleReg, returnReg, false);
+                    AArch64Move moveFromS0Inst = new AArch64Move(tempSingleReg, returnReg, false);
                     addInstr(moveFromS0Inst, insList, predefine);
                     
                     // 然后添加fcvt指令从单精度转换为双精度
-                    Armv8Cvt cvtInst = new Armv8Cvt(tempSingleReg, Armv8Cvt.CvtType.FCVT_S2D, resultReg);
+                    AArch64Cvt cvtInst = new AArch64Cvt(tempSingleReg, AArch64Cvt.CvtType.FCVT_S2D, resultReg);
                     addInstr(cvtInst, insList, predefine);
                 } else {
-                    Armv8Move moveReturnInst = new Armv8Move(resultReg, returnReg, false);
+                    AArch64Move moveReturnInst = new AArch64Move(resultReg, returnReg, false);
                     addInstr(moveReturnInst, insList, predefine);
                 }
             } else {
@@ -971,29 +971,29 @@ public class ArmVisitor {
 
         if (stackOffset > 0) {
             // 使用通用的立即数检查机制
-            Armv8Operand sizeOp = checkImmediate(stackOffset, ImmediateRange.ADD_SUB, insList, predefine);
+            AArch64Operand sizeOp = checkImmediate(stackOffset, ImmediateRange.ADD_SUB, insList, predefine);
             
             // 根据操作数类型创建适当的加法指令
-            if (sizeOp instanceof Armv8Reg) {
+            if (sizeOp instanceof AArch64Reg) {
                 // 如果栈大小被加载到寄存器，使用寄存器形式的add指令
-                ArrayList<Armv8Operand> operands = new ArrayList<>();
-                operands.add(Armv8CPUReg.getArmv8SpReg());
+                ArrayList<AArch64Operand> operands = new ArrayList<>();
+                operands.add(AArch64CPUReg.getAArch64SpReg());
                 operands.add(sizeOp);
-                Armv8Binary addInst = new Armv8Binary(operands, Armv8CPUReg.getArmv8SpReg(), Armv8Binary.Armv8BinaryType.add);
+                AArch64Binary addInst = new AArch64Binary(operands, AArch64CPUReg.getAArch64SpReg(), AArch64Binary.AArch64BinaryType.add);
                 addInstr(addInst, insList, predefine);
             } else {
                 // 使用立即数形式的add指令
-                Armv8Binary addInst = new Armv8Binary(
-                    Armv8CPUReg.getArmv8SpReg(), 
-                    Armv8CPUReg.getArmv8SpReg(), 
-                    (Armv8Imm)sizeOp, 
-                    Armv8Binary.Armv8BinaryType.add
+                AArch64Binary addInst = new AArch64Binary(
+                    AArch64CPUReg.getAArch64SpReg(), 
+                    AArch64CPUReg.getAArch64SpReg(), 
+                    (AArch64Imm)sizeOp, 
+                    AArch64Binary.AArch64BinaryType.add
                 );
                 addInstr(addInst, insList, predefine);
             }
         }
         
-        curArmv8Function.loadCallerRegs(curArmv8Block);
+        curAArch64Function.loadCallerRegs(curAArch64Block);
 
         if (predefine) {
             predefines.put(ins, insList);
@@ -1001,7 +1001,7 @@ public class ArmVisitor {
     }
 
     private void parseConversionInst(ConversionInstruction ins, boolean predefine) {
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
         // 获取源值和目标类型
         Value source = ins.getSource();
@@ -1009,19 +1009,19 @@ public class ArmVisitor {
         OpCode conversionType = ins.getConversionType();
         
         // 获取或分配源寄存器
-        Armv8Reg srcReg;
+        AArch64Reg srcReg;
         if (source instanceof ConstantInt) {
             // 对于常量，需要先加载到寄存器中
             long value = ((ConstantInt) source).getValue();
-            Armv8Imm imm = new Armv8Imm(value);
-            srcReg = new Armv8VirReg(false);
+            AArch64Imm imm = new AArch64Imm(value);
+            srcReg = new AArch64VirReg(false);
             
             // 创建一个移动指令将常量加载到寄存器
-            Armv8Move moveInst = new Armv8Move(srcReg, imm, false);
+            AArch64Move moveInst = new AArch64Move(srcReg, imm, false);
             addInstr(moveInst, insList, predefine);
         } else if (source instanceof ConstantFloat) {
             double value = ((ConstantFloat) source).getValue();
-            Armv8VirReg fReg = new Armv8VirReg(true);
+            AArch64VirReg fReg = new AArch64VirReg(true);
             loadFloatConstant(fReg, value, insList, predefine);
             srcReg = fReg;
         } else if (RegList.containsKey(source)) {
@@ -1032,37 +1032,37 @@ public class ArmVisitor {
         }
         
         // 分配目标寄存器
-        Armv8Reg destReg;
+        AArch64Reg destReg;
         if (targetType.isFloatType()) {
             // 目标是浮点类型，使用浮点寄存器
-            destReg = new Armv8VirReg(true);
+            destReg = new AArch64VirReg(true);
         } else {
             // 目标是整数类型，使用通用寄存器
-            destReg = new Armv8VirReg(false);
+            destReg = new AArch64VirReg(false);
         }
         RegList.put(ins, destReg);
         
         // 根据转换类型创建相应的转换指令
-        Armv8Cvt.CvtType armCvtType;
+        AArch64Cvt.CvtType armCvtType;
         
         if (ins.isIntToFloat()) {
             // 整数到浮点转换
             if (conversionType == OpCode.SITOFP) {
-                armCvtType = Armv8Cvt.CvtType.SCVTF;  // 有符号整数转浮点
+                armCvtType = AArch64Cvt.CvtType.SCVTF;  // 有符号整数转浮点
             } else {
-                armCvtType = Armv8Cvt.CvtType.UCVTF;  // 无符号整数转浮点
+                armCvtType = AArch64Cvt.CvtType.UCVTF;  // 无符号整数转浮点
             }
         } else if (ins.isFloatToInt()) {
             // 浮点到整数转换
             if (conversionType == OpCode.FPTOSI) {
-                armCvtType = Armv8Cvt.CvtType.FCVTZS; // 浮点转有符号整数，向零舍入
+                armCvtType = AArch64Cvt.CvtType.FCVTZS; // 浮点转有符号整数，向零舍入
             } else {
-                armCvtType = Armv8Cvt.CvtType.FCVTZU; // 浮点转无符号整数，向零舍入
+                armCvtType = AArch64Cvt.CvtType.FCVTZU; // 浮点转无符号整数，向零舍入
             }
         } else if (ins.isTruncation()) {
             // 位截断操作
             // ARMv8没有直接的位截断指令，可能需要使用AND指令掩码来实现
-            ArrayList<Armv8Operand> andOps = new ArrayList<>();
+            ArrayList<AArch64Operand> andOps = new ArrayList<>();
             andOps.add(srcReg);
             
             // 创建掩码，根据目标类型决定
@@ -1074,10 +1074,10 @@ public class ArmVisitor {
                 mask = 0xFFFFFFFFL; // 默认32位掩码
             }
             
-            Armv8Imm maskImm = new Armv8Imm(mask);
+            AArch64Imm maskImm = new AArch64Imm(mask);
             andOps.add(maskImm);
             
-            Armv8Binary andInst = new Armv8Binary(andOps, destReg, Armv8Binary.Armv8BinaryType.and);
+            AArch64Binary andInst = new AArch64Binary(andOps, destReg, AArch64Binary.AArch64BinaryType.and);
             addInstr(andInst, insList, predefine);
             
             // 记录指令列表并返回
@@ -1090,12 +1090,12 @@ public class ArmVisitor {
             if (conversionType == OpCode.SEXT) {
                 // 符号扩展
                 // ARMv8可以通过SBFX或者直接移位实现，这里简单处理
-                Armv8Move sextInst = new Armv8Move(destReg, srcReg, false);
+                AArch64Move sextInst = new AArch64Move(destReg, srcReg, false);
                 addInstr(sextInst, insList, predefine);
             } else {
                 // 零扩展
                 // ARMv8可以通过UBFX或者位掩码实现，这里简单处理
-                Armv8Move zextInst = new Armv8Move(destReg, srcReg, false); // 使用64位模式
+                AArch64Move zextInst = new AArch64Move(destReg, srcReg, false); // 使用64位模式
                 addInstr(zextInst, insList, predefine);
             }
             
@@ -1107,7 +1107,7 @@ public class ArmVisitor {
         } else {
             // 其他转换类型（如位转换）
             // 简单地移动数据
-            Armv8Move moveInst = new Armv8Move(destReg, srcReg, false);
+            AArch64Move moveInst = new AArch64Move(destReg, srcReg, false);
             addInstr(moveInst, insList, predefine);
             
             // 记录指令列表并返回
@@ -1118,7 +1118,7 @@ public class ArmVisitor {
         }
         
         // 创建转换指令
-        Armv8Cvt cvtInst = new Armv8Cvt(srcReg, armCvtType, destReg);
+        AArch64Cvt cvtInst = new AArch64Cvt(srcReg, armCvtType, destReg);
         addInstr(cvtInst, insList, predefine);
         
         if (predefine) {
@@ -1128,7 +1128,7 @@ public class ArmVisitor {
 
     private void parseLoad(LoadInstruction ins, boolean predefine) {
         // 创建指令列表，如果是预定义阶段则为非空列表
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
         // 获取要加载的指针
         Value pointer = ins.getPointer();
@@ -1138,19 +1138,19 @@ public class ArmVisitor {
         boolean isFloat = loadedType instanceof FloatType;
         
         // 为结果分配目标寄存器
-        Armv8Reg destReg;
+        AArch64Reg destReg;
         if (isFloat) {
             // 浮点数应该使用浮点寄存器
-            destReg = new Armv8VirReg(true);
+            destReg = new AArch64VirReg(true);
         } else {
             // 整数使用通用寄存器
-            destReg = new Armv8VirReg(false);
+            destReg = new AArch64VirReg(false);
         }
         RegList.put(ins, destReg);
         
         // 处理指针操作数
-        Armv8Reg baseReg = null;
-        Armv8Operand offsetOp = new Armv8Imm(0); // 默认偏移量为0
+        AArch64Reg baseReg = null;
+        AArch64Operand offsetOp = new AArch64Imm(0); // 默认偏移量为0
         
         // 处理各种类型的指针
         if (pointer instanceof GetElementPtrInstruction) {
@@ -1167,8 +1167,8 @@ public class ArmVisitor {
             } 
             // else if (ptrList.containsKey(pointer)) {
             //     // 使用栈指针加上偏移量
-            //     baseReg = Armv8CPUReg.getArmv8SpReg();
-            //     offsetOp = new Armv8Imm(ptrList.get(pointer).intValue());
+            //     baseReg = AArch64CPUReg.getAArch64SpReg();
+            //     offsetOp = new AArch64Imm(ptrList.get(pointer).intValue());
             // } 
             else {
                 throw new RuntimeException("无法获取GEP指令的地址: " + pointer);
@@ -1176,10 +1176,10 @@ public class ArmVisitor {
         } else if (pointer instanceof GlobalVariable) {
             // 对于全局变量，使用标签
             String globalName = removeLeadingAt(((GlobalVariable) pointer).getName());
-            Armv8Label label = new Armv8Label(globalName);
+            AArch64Label label = new AArch64Label(globalName);
             
             // 为全局变量地址分配寄存器
-            baseReg = new Armv8VirReg(false);
+            baseReg = new AArch64VirReg(false);
             
             // 创建加载地址指令
             loadGlobalAddress(baseReg, label, insList, predefine);
@@ -1190,7 +1190,7 @@ public class ArmVisitor {
             }
             
             // 使用栈指针加上偏移量
-            baseReg = Armv8CPUReg.getArmv8SpReg();
+            baseReg = AArch64CPUReg.getAArch64SpReg();
             long offset = ptrList.get(pointer);
             
             // 使用通用的立即数检查机制
@@ -1198,32 +1198,32 @@ public class ArmVisitor {
         } else if (pointer instanceof Argument) {
             // 处理函数参数，为其分配寄存器
             Argument arg = (Argument) pointer;
-            if (curArmv8Function.getRegArg(arg) != null) {
-                baseReg = curArmv8Function.getRegArg(arg);
-            } else if (curArmv8Function.getStackArg(arg) != null) {
-                baseReg = new Armv8VirReg(false);
-                long stackParamOffset = curArmv8Function.getStackArg(arg); // 前8个在寄存器中
+            if (curAArch64Function.getRegArg(arg) != null) {
+                baseReg = curAArch64Function.getRegArg(arg);
+            } else if (curAArch64Function.getStackArg(arg) != null) {
+                baseReg = new AArch64VirReg(false);
+                long stackParamOffset = curAArch64Function.getStackArg(arg); // 前8个在寄存器中
                 
                 // 创建加载指令：从FP+偏移量加载到临时寄存器
                 // 使用通用的立即数检查机制
-                Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
+                AArch64Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
                 
                 // 根据偏移量类型创建适当的加载指令
-                if (paramOffsetOp instanceof Armv8Reg) {
+                if (paramOffsetOp instanceof AArch64Reg) {
                     // 如果偏移量被加载到寄存器，需要先计算地址
-                    Armv8VirReg addrReg = new Armv8VirReg(false);
-                    ArrayList<Armv8Operand> operands = new ArrayList<>();
-                    operands.add(Armv8CPUReg.getArmv8FPReg());
+                    AArch64VirReg addrReg = new AArch64VirReg(false);
+                    ArrayList<AArch64Operand> operands = new ArrayList<>();
+                    operands.add(AArch64CPUReg.getAArch64FPReg());
                     operands.add(paramOffsetOp);
-                    Armv8Binary addInst = new Armv8Binary(operands, addrReg, Armv8Binary.Armv8BinaryType.add);
+                    AArch64Binary addInst = new AArch64Binary(operands, addrReg, AArch64Binary.AArch64BinaryType.add);
                     addInstr(addInst, insList, predefine);
                     
                     // 然后从计算出的地址加载
-                    Armv8Load loadParamInst = new Armv8Load(addrReg, new Armv8Imm(0), baseReg);
+                    AArch64Load loadParamInst = new AArch64Load(addrReg, new AArch64Imm(0), baseReg);
                     addInstr(loadParamInst, insList, predefine);
                 } else {
                     // 如果偏移量是立即数，直接使用偏移量加载
-                    Armv8Load loadParamInst = new Armv8Load(Armv8CPUReg.getArmv8FPReg(), 
+                    AArch64Load loadParamInst = new AArch64Load(AArch64CPUReg.getAArch64FPReg(), 
                         paramOffsetOp, baseReg);
                     addInstr(loadParamInst, insList, predefine);
                 }
@@ -1237,15 +1237,15 @@ public class ArmVisitor {
                     parseInstruction((Instruction) pointer, true);
                 } else if (pointer.getType() instanceof PointerType) {
                     // 处理指针类型
-                    Armv8Reg ptrReg = new Armv8VirReg(false);
+                    AArch64Reg ptrReg = new AArch64VirReg(false);
                     RegList.put(pointer, ptrReg);
                 } else if (pointer.getType() instanceof FloatType) {
                     // 处理浮点类型
-                    Armv8Reg floatReg = new Armv8VirReg(true);
+                    AArch64Reg floatReg = new AArch64VirReg(true);
                     RegList.put(pointer, floatReg);
                 } else if (pointer.getType() instanceof IntegerType) {
                     // 处理整数类型
-                    Armv8Reg intReg = new Armv8VirReg(false);
+                    AArch64Reg intReg = new AArch64VirReg(false);
                     RegList.put(pointer, intReg);
                 } else {
                     throw new RuntimeException("未处理的指针类型: " + pointer);
@@ -1260,12 +1260,12 @@ public class ArmVisitor {
         }
         
         // 使用辅助方法处理加载操作
-        if (offsetOp instanceof Armv8Imm) {
+        if (offsetOp instanceof AArch64Imm) {
             // 立即数类型，可以使用辅助方法
-            handleLargeStackOffset(baseReg, ((Armv8Imm)offsetOp).getValue(), destReg, true, isFloat, insList, predefine);
+            handleLargeStackOffset(baseReg, ((AArch64Imm)offsetOp).getValue(), destReg, true, isFloat, insList, predefine);
         } else {
             // 其他类型，直接创建加载指令
-            Armv8Load loadInst = new Armv8Load(baseReg, offsetOp, destReg);
+            AArch64Load loadInst = new AArch64Load(baseReg, offsetOp, destReg);
             addInstr(loadInst, insList, predefine);
         }
         
@@ -1277,26 +1277,26 @@ public class ArmVisitor {
 
     private void parsePtrInst(GetElementPtrInstruction ins, boolean predefine) {
         // 创建指令列表，如果是预定义阶段则为非空列表
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
         // 获取基地址指针和索引
         Value pointer = ins.getPointer();
         List<Value> indices = ins.getIndices();
         
         // 为结果分配目标寄存器
-        Armv8Reg destReg = new Armv8VirReg(false);
+        AArch64Reg destReg = new AArch64VirReg(false);
         RegList.put(ins, destReg);
         
         // 处理基地址指针
-        Armv8Reg baseReg = null;
+        AArch64Reg baseReg = null;
 
         if (pointer instanceof GlobalVariable) {
             // 如果基地址是全局变量
             String globalName = removeLeadingAt(((GlobalVariable) pointer).getName());
-            Armv8Label label = new Armv8Label(globalName);
+            AArch64Label label = new AArch64Label(globalName);
             
             // 加载全局变量地址
-            baseReg = new Armv8VirReg(false);
+            baseReg = new AArch64VirReg(false);
             loadGlobalAddress(baseReg, label, insList, predefine);
         } else if (pointer instanceof AllocaInstruction) {
             // 如果基地址是局部变量
@@ -1305,53 +1305,53 @@ public class ArmVisitor {
             }
             
             // 计算局部变量地址：SP + 偏移
-            baseReg = new Armv8VirReg(false);
+            baseReg = new AArch64VirReg(false);
             
             // 使用立即数检查来处理可能的大偏移量
             long offset = ptrList.get(pointer);
-            Armv8Operand offsetOp = checkImmediate(offset, ImmediateRange.ADD_SUB, insList, predefine);
+            AArch64Operand offsetOp = checkImmediate(offset, ImmediateRange.ADD_SUB, insList, predefine);
             
-            if (offsetOp instanceof Armv8Reg) {
+            if (offsetOp instanceof AArch64Reg) {
                 // 如果偏移量被加载到寄存器，创建寄存器形式的add指令
-                ArrayList<Armv8Operand> addOperands = new ArrayList<>();
-                addOperands.add(Armv8CPUReg.getArmv8SpReg());
+                ArrayList<AArch64Operand> addOperands = new ArrayList<>();
+                addOperands.add(AArch64CPUReg.getAArch64SpReg());
                 addOperands.add(offsetOp);
-                Armv8Binary addInst = new Armv8Binary(addOperands, baseReg, Armv8Binary.Armv8BinaryType.add);
+                AArch64Binary addInst = new AArch64Binary(addOperands, baseReg, AArch64Binary.AArch64BinaryType.add);
                 addInstr(addInst, insList, predefine);
             } else {
                 // 如果偏移量在范围内，创建立即数形式的add指令
-                Armv8Binary addInst = new Armv8Binary(baseReg, Armv8CPUReg.getArmv8SpReg(), (Armv8Imm)offsetOp, Armv8Binary.Armv8BinaryType.add);
+                AArch64Binary addInst = new AArch64Binary(baseReg, AArch64CPUReg.getAArch64SpReg(), (AArch64Imm)offsetOp, AArch64Binary.AArch64BinaryType.add);
                 addInstr(addInst, insList, predefine);
             }
         } else if (pointer instanceof Argument) {
             // 处理函数参数，为其分配寄存器
             Argument arg = (Argument) pointer;
-            if (curArmv8Function.getRegArg(arg) != null) {
-                baseReg = curArmv8Function.getRegArg(arg);
-            } else if (curArmv8Function.getStackArg(arg) != null) {
-                baseReg = new Armv8VirReg(false);
-                long stackParamOffset = curArmv8Function.getStackArg(arg); // 前8个在寄存器中
+            if (curAArch64Function.getRegArg(arg) != null) {
+                baseReg = curAArch64Function.getRegArg(arg);
+            } else if (curAArch64Function.getStackArg(arg) != null) {
+                baseReg = new AArch64VirReg(false);
+                long stackParamOffset = curAArch64Function.getStackArg(arg); // 前8个在寄存器中
                 
                 // 创建加载指令：从FP+偏移量加载到临时寄存器
                 // 使用通用的立即数检查机制
-                Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
+                AArch64Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
                 
                 // 根据偏移量类型创建适当的加载指令
-                if (paramOffsetOp instanceof Armv8Reg) {
+                if (paramOffsetOp instanceof AArch64Reg) {
                     // 如果偏移量被加载到寄存器，需要先计算地址
-                    Armv8VirReg addrReg = new Armv8VirReg(false);
-                    ArrayList<Armv8Operand> operands = new ArrayList<>();
-                    operands.add(Armv8CPUReg.getArmv8FPReg());
+                    AArch64VirReg addrReg = new AArch64VirReg(false);
+                    ArrayList<AArch64Operand> operands = new ArrayList<>();
+                    operands.add(AArch64CPUReg.getAArch64FPReg());
                     operands.add(paramOffsetOp);
-                    Armv8Binary addInst = new Armv8Binary(operands, addrReg, Armv8Binary.Armv8BinaryType.add);
+                    AArch64Binary addInst = new AArch64Binary(operands, addrReg, AArch64Binary.AArch64BinaryType.add);
                     addInstr(addInst, insList, predefine);
                     
                     // 然后从计算出的地址加载
-                    Armv8Load loadParamInst = new Armv8Load(addrReg, new Armv8Imm(0), baseReg);
+                    AArch64Load loadParamInst = new AArch64Load(addrReg, new AArch64Imm(0), baseReg);
                     addInstr(loadParamInst, insList, predefine);
                 } else {
                     // 如果偏移量是立即数，直接使用偏移量加载
-                    Armv8Load loadParamInst = new Armv8Load(Armv8CPUReg.getArmv8FPReg(), 
+                    AArch64Load loadParamInst = new AArch64Load(AArch64CPUReg.getAArch64FPReg(), 
                         paramOffsetOp, baseReg);
                     addInstr(loadParamInst, insList, predefine);
                 }
@@ -1364,15 +1364,15 @@ public class ArmVisitor {
                     parseInstruction((Instruction) pointer, true);
                 } else if (pointer.getType() instanceof PointerType) {
                     // 处理指针类型
-                    Armv8Reg ptrReg = new Armv8VirReg(false);
+                    AArch64Reg ptrReg = new AArch64VirReg(false);
                     RegList.put(pointer, ptrReg);
                 } else if (pointer.getType() instanceof FloatType) {
                     // 处理浮点类型
-                    Armv8Reg floatReg = new Armv8VirReg(true);
+                    AArch64Reg floatReg = new AArch64VirReg(true);
                     RegList.put(pointer, floatReg);
                 } else if (pointer.getType() instanceof IntegerType) {
                     // 处理整数类型
-                    Armv8Reg intReg = new Armv8VirReg(false);
+                    AArch64Reg intReg = new AArch64VirReg(false);
                     RegList.put(pointer, intReg);
                 } else {
                     throw new RuntimeException("未处理的指针类型: " + pointer);
@@ -1387,7 +1387,7 @@ public class ArmVisitor {
         }
         
         // 将基地址拷贝到目标寄存器，作为起始地址
-        Armv8Move moveInst = new Armv8Move(destReg, baseReg, false);
+        AArch64Move moveInst = new AArch64Move(destReg, baseReg, false);
         addInstr(moveInst, insList, predefine);
         
         // 处理数组索引 - 对于数组访问，不应该跳过任何索引
@@ -1425,18 +1425,18 @@ public class ArmVisitor {
                     // 如果偏移非零，添加到当前地址
                     if (offset != 0) {
                         // 使用checkImmediate检查偏移量是否在ADD指令的立即数范围内
-                        Armv8Operand offsetOp = checkImmediate(offset, ImmediateRange.ADD_SUB, insList, predefine);
+                        AArch64Operand offsetOp = checkImmediate(offset, ImmediateRange.ADD_SUB, insList, predefine);
                         
-                        if (offsetOp instanceof Armv8Imm) {
+                        if (offsetOp instanceof AArch64Imm) {
                             // 偏移量在范围内，使用立即数形式
-                            Armv8Binary addInst = new Armv8Binary(destReg, destReg, (Armv8Imm)offsetOp, Armv8Binary.Armv8BinaryType.add);
+                            AArch64Binary addInst = new AArch64Binary(destReg, destReg, (AArch64Imm)offsetOp, AArch64Binary.AArch64BinaryType.add);
                             addInstr(addInst, insList, predefine);
                         } else {
                             // 偏移量被加载到寄存器，使用寄存器形式
-                            ArrayList<Armv8Operand> addOperands = new ArrayList<>();
+                            ArrayList<AArch64Operand> addOperands = new ArrayList<>();
                             addOperands.add(destReg);
                             addOperands.add(offsetOp);
-                            Armv8Binary addInst = new Armv8Binary(addOperands, destReg, Armv8Binary.Armv8BinaryType.add);
+                            AArch64Binary addInst = new AArch64Binary(addOperands, destReg, AArch64Binary.AArch64BinaryType.add);
                             addInstr(addInst, insList, predefine);
                         }
                     }
@@ -1451,17 +1451,17 @@ public class ArmVisitor {
                     }
                     
                     // 获取索引寄存器
-                    Armv8Reg indexReg = RegList.get(indexValue);
+                    AArch64Reg indexReg = RegList.get(indexValue);
                     
                     // 为计算结果分配临时寄存器
-                    Armv8Reg tempReg = new Armv8VirReg(false);
+                    AArch64Reg tempReg = new AArch64VirReg(false);
                     
                     if (elementSize != 1) {
                         // 计算 索引 * 元素大小
                         if (isPowerOfTwo(elementSize)) {
                             // 如果元素大小是2的幂，使用左移操作
                             int shiftAmount = (int)(Math.log(elementSize) / Math.log(2));
-                            Armv8Binary lslInst = new Armv8Binary(tempReg, indexReg, new Armv8Imm(shiftAmount), Armv8Binary.Armv8BinaryType.lsl);
+                            AArch64Binary lslInst = new AArch64Binary(tempReg, indexReg, new AArch64Imm(shiftAmount), AArch64Binary.AArch64BinaryType.lsl);
                             addInstr(lslInst, insList, predefine);
                         } else {
                             // 否则使用乘法操作
@@ -1469,30 +1469,30 @@ public class ArmVisitor {
                             if (elementSize > 65535 || elementSize < -65536) {
                                 loadLargeImmediate(tempReg, elementSize, insList, predefine);
                             } else {
-                                Armv8Move moveElemSizeInst = new Armv8Move(tempReg, new Armv8Imm(elementSize), false);
+                                AArch64Move moveElemSizeInst = new AArch64Move(tempReg, new AArch64Imm(elementSize), false);
                                 addInstr(moveElemSizeInst, insList, predefine);
                             }
                             
                             // 执行乘法计算
-                            ArrayList<Armv8Operand> mulOperands = new ArrayList<>();
+                            ArrayList<AArch64Operand> mulOperands = new ArrayList<>();
                             mulOperands.add(indexReg);
                             mulOperands.add(tempReg);
                             
-                            Armv8Binary mulInst = new Armv8Binary(mulOperands, tempReg, Armv8Binary.Armv8BinaryType.mul);
+                            AArch64Binary mulInst = new AArch64Binary(mulOperands, tempReg, AArch64Binary.AArch64BinaryType.mul);
                             addInstr(mulInst, insList, predefine);
                         }
                     } else {
                         // 如果元素大小为1，索引值就是偏移量
-                        Armv8Move moveIndexInst = new Armv8Move(tempReg, indexReg, false);
+                        AArch64Move moveIndexInst = new AArch64Move(tempReg, indexReg, false);
                         addInstr(moveIndexInst, insList, predefine);
                     }
                     
                     // 将偏移量添加到基址
-                    ArrayList<Armv8Operand> addOperands = new ArrayList<>();
+                    ArrayList<AArch64Operand> addOperands = new ArrayList<>();
                     addOperands.add(destReg);
                     addOperands.add(tempReg);
                     
-                    Armv8Binary addInst = new Armv8Binary(addOperands, destReg, Armv8Binary.Armv8BinaryType.add);
+                    AArch64Binary addInst = new AArch64Binary(addOperands, destReg, AArch64Binary.AArch64BinaryType.add);
                     addInstr(addInst, insList, predefine);
                 }
             }
@@ -1514,7 +1514,7 @@ public class ArmVisitor {
 
     private void parseRetInst(ReturnInstruction ins, boolean predefine) {
         // 创建指令列表，如果是预定义阶段则为非空列表
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
         // 检查是否有返回值
         if (!ins.isVoidReturn()) {
@@ -1522,11 +1522,11 @@ public class ArmVisitor {
             Value returnValue = ins.getReturnValue();
             
             // 获取返回寄存器 - ARM调用规范中整数返回值必须在x0中，浮点返回值在v0中
-            Armv8Reg returnReg;
+            AArch64Reg returnReg;
             if (returnValue.getType() instanceof FloatType) {
-                returnReg = Armv8FPUReg.getArmv8FPURetValueReg(); // v0
+                returnReg = AArch64FPUReg.getAArch64FPURetValueReg(); // v0
             } else {
-                returnReg = Armv8CPUReg.getArmv8CPURetValueReg(); // x0
+                returnReg = AArch64CPUReg.getAArch64CPURetValueReg(); // x0
             }
             
             // 将值加载到返回寄存器中
@@ -1536,7 +1536,7 @@ public class ArmVisitor {
                 if (value > 65535 || value < -65536) {
                     loadLargeImmediate(returnReg, value, insList, predefine);
                 } else {
-                    addInstr(new Armv8Move(returnReg, new Armv8Imm(value), false), insList, predefine);
+                    addInstr(new AArch64Move(returnReg, new AArch64Imm(value), false), insList, predefine);
                 }
             } else if (returnValue instanceof ConstantFloat) {
                 // 对于常量浮点数，加载到返回寄存器
@@ -1545,80 +1545,80 @@ public class ArmVisitor {
             } else if (returnValue instanceof Argument) {
                 // 处理参数作为返回值 - 直接使用辅助方法获取参数值寄存器
                 Argument arg = (Argument) returnValue;
-                Armv8Reg paramReg = ensureArgumentArmv8Reg(arg, insList, predefine);
+                AArch64Reg paramReg = ensureArgumentAArch64Reg(arg, insList, predefine);
                 
                 // 将参数值移动到返回寄存器（如果需要）
                 if (paramReg != null && !paramReg.equals(returnReg)) {
-                    addInstr(new Armv8Move(returnReg, paramReg, false), 
+                    addInstr(new AArch64Move(returnReg, paramReg, false), 
                         insList, predefine);
                 }
                 // 如果参数已经在返回寄存器中，无需操作
             } else {
                 // 处理其他类型的返回值
-                Armv8Operand operand = processOperand(returnValue, insList, predefine, 
+                AArch64Operand operand = processOperand(returnValue, insList, predefine, 
                                                      returnValue.getType() instanceof FloatType, false);
-                if (operand instanceof Armv8Reg) {
+                if (operand instanceof AArch64Reg) {
                     // 如果操作数是寄存器且不是返回寄存器，则需要移动
                     if (!operand.equals(returnReg)) {
-                        addInstr(new Armv8Move(returnReg, operand, false), 
+                        addInstr(new AArch64Move(returnReg, operand, false), 
                             insList, predefine);
                     }
-                } else if (operand instanceof Armv8Imm) {
+                } else if (operand instanceof AArch64Imm) {
                     // 如果是立即数，直接加载到返回寄存器
-                    addInstr(new Armv8Move(returnReg, operand, false), insList, predefine);
+                    addInstr(new AArch64Move(returnReg, operand, false), insList, predefine);
                 }
             }
         }
         
         //恢复维护的寄存器
-        if (!curArmv8Function.getName().contains("main")) {
-            curArmv8Function.loadCalleeRegs(curArmv8Block);
+        if (!curAArch64Function.getName().contains("main")) {
+            curAArch64Function.loadCalleeRegs(curAArch64Block);
         }
 
 
         // 获取函数的栈大小
-        Long localSize = curArmv8Function.getStackSize();
-        ArrayList<Armv8Operand> operands = new ArrayList<>();
-        operands.add(Armv8CPUReg.getArmv8SpReg());
+        Long localSize = curAArch64Function.getStackSize();
+        ArrayList<AArch64Operand> operands = new ArrayList<>();
+        operands.add(AArch64CPUReg.getAArch64SpReg());
 
         //栈溢出处理
-        long value = curArmv8Function.getStackSpace().getOffset();
+        long value = curAArch64Function.getStackSpace().getOffset();
         if (ImmediateRange.ADD_SUB.isInRange(value)) {
-            operands.add(curArmv8Function.getStackSpace());
+            operands.add(curAArch64Function.getStackSpace());
         } else {
             // 超出范围，加载到寄存器
-            Armv8VirReg tempReg = new Armv8VirReg(false);
+            AArch64VirReg tempReg = new AArch64VirReg(false);
             if (value > 65535 || value < -65536) {
                 loadLargeImmediate(tempReg, value, insList, predefine);
             } else {
-                Armv8Move moveInst = new Armv8Move(tempReg, curArmv8Function.getStackSpace(), true);
+                AArch64Move moveInst = new AArch64Move(tempReg, curAArch64Function.getStackSpace(), true);
                 addInstr(moveInst, insList, predefine);
             }
             operands.add(tempReg);
         }
-        Armv8Binary addSpInst = new Armv8Binary(operands, Armv8CPUReg.getArmv8SpReg(), Armv8Binary.Armv8BinaryType.add);
+        AArch64Binary addSpInst = new AArch64Binary(operands, AArch64CPUReg.getAArch64SpReg(), AArch64Binary.AArch64BinaryType.add);
         addInstr(addSpInst, insList, predefine);
         
 
         
         // 恢复FP(x29)和LR(x30)寄存器，并调整SP
-        Armv8LoadPair ldpInst = new Armv8LoadPair(
-            Armv8CPUReg.getArmv8SpReg(),
-            new Armv8Imm(16), 
-            Armv8CPUReg.getArmv8FPReg(),  // x29
-            Armv8CPUReg.getArmv8RetReg(),  // x30/LR
+        AArch64LoadPair ldpInst = new AArch64LoadPair(
+            AArch64CPUReg.getAArch64SpReg(),
+            new AArch64Imm(16), 
+            AArch64CPUReg.getAArch64FPReg(),  // x29
+            AArch64CPUReg.getAArch64RetReg(),  // x30/LR
             false,  // 不是32位寄存器
             true    // 后索引模式
         );
         addInstr(ldpInst, insList, predefine);
         
         // 添加返回指令
-        Armv8Ret retInst = new Armv8Ret();
+        AArch64Ret retInst = new AArch64Ret();
         addInstr(retInst, insList, predefine);
         
         // 标记当前基本块包含返回指令
         if (!predefine) {
-            curArmv8Block.setHasReturnInstruction(true);
+            curAArch64Block.setHasReturnInstruction(true);
         }
         
         // 如果是预定义阶段，存储指令列表
@@ -1629,29 +1629,29 @@ public class ArmVisitor {
 
     private void parseStore(StoreInstruction ins, boolean predefine) {
         // 创建指令列表，如果是预定义阶段则为非空列表
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
         // 获取要存储的值和目标指针
         Value valueToStore = ins.getValue();
         Value pointer = ins.getPointer();
         
         // 处理待存储值，获取或创建包含值的寄存器
-        Armv8Reg valueReg;
+        AArch64Reg valueReg;
         
         if (valueToStore instanceof ConstantInt) {
             // 对于整数常量，创建一个临时寄存器并加载值
-            valueReg = new Armv8VirReg(false);
+            valueReg = new AArch64VirReg(false);
             long value = ((ConstantInt)valueToStore).getValue();
             // 检查是否需要使用大立即数加载
             if (value > 65535 || value < -65536) {
                 loadLargeImmediate(valueReg, value, insList, predefine);
             } else {
-                Armv8Move moveInst = new Armv8Move(valueReg, new Armv8Imm((int)value), false);
+                AArch64Move moveInst = new AArch64Move(valueReg, new AArch64Imm((int)value), false);
                 addInstr(moveInst, insList, predefine);
             }
         } 
         else if (valueToStore instanceof ConstantFloat) {
-            valueReg = new Armv8VirReg(true);
+            valueReg = new AArch64VirReg(true);
             // 处理浮点常量的存储
             double floatValue = ((ConstantFloat) valueToStore).getValue();
             loadFloatConstant(valueReg, floatValue, insList, predefine);
@@ -1663,37 +1663,37 @@ public class ArmVisitor {
             // 检查参数是否已分配寄存器
             if (!RegList.containsKey(valueToStore)) {
                 valueReg = valueToStore.getType() instanceof FloatType ? 
-                           new Armv8VirReg(true) : new Armv8VirReg(false);
+                           new AArch64VirReg(true) : new AArch64VirReg(false);
                 
                 // 检查参数是否在寄存器中
-                if (curArmv8Function.getRegArg(arg) != null) {
+                if (curAArch64Function.getRegArg(arg) != null) {
                     // 参数在寄存器中，直接使用该寄存器
-                    Armv8Reg argReg = curArmv8Function.getRegArg(arg);
-                    Armv8Move moveInst = new Armv8Move(valueReg, argReg, valueReg instanceof Armv8FPUReg);
+                    AArch64Reg argReg = curAArch64Function.getRegArg(arg);
+                    AArch64Move moveInst = new AArch64Move(valueReg, argReg, valueReg instanceof AArch64FPUReg);
                     addInstr(moveInst, insList, predefine);
-                } else if (curArmv8Function.getStackArg(arg) != null) {
+                } else if (curAArch64Function.getStackArg(arg) != null) {
                     // 参数在栈上，使用FP+偏移量加载
-                    long stackParamOffset = curArmv8Function.getStackArg(arg);
+                    long stackParamOffset = curAArch64Function.getStackArg(arg);
                     
                     // 使用通用的立即数检查机制
-                    Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
+                    AArch64Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
                     
                     // 根据偏移量类型创建适当的加载指令
-                    if (paramOffsetOp instanceof Armv8Reg) {
+                    if (paramOffsetOp instanceof AArch64Reg) {
                         // 如果偏移量被加载到寄存器，需要先计算地址
-                        Armv8VirReg addrReg = new Armv8VirReg(false);
-                        ArrayList<Armv8Operand> operands = new ArrayList<>();
-                        operands.add(Armv8CPUReg.getArmv8FPReg());
+                        AArch64VirReg addrReg = new AArch64VirReg(false);
+                        ArrayList<AArch64Operand> operands = new ArrayList<>();
+                        operands.add(AArch64CPUReg.getAArch64FPReg());
                         operands.add(paramOffsetOp);
-                        Armv8Binary addInst = new Armv8Binary(operands, addrReg, Armv8Binary.Armv8BinaryType.add);
+                        AArch64Binary addInst = new AArch64Binary(operands, addrReg, AArch64Binary.AArch64BinaryType.add);
                         addInstr(addInst, insList, predefine);
                         
                         // 然后从计算出的地址加载
-                        Armv8Load loadParamInst = new Armv8Load(addrReg, new Armv8Imm(0), valueReg);
+                        AArch64Load loadParamInst = new AArch64Load(addrReg, new AArch64Imm(0), valueReg);
                         addInstr(loadParamInst, insList, predefine);
                     } else {
                         // 如果偏移量是立即数，直接使用偏移量加载
-                        Armv8Load loadParamInst = new Armv8Load(Armv8CPUReg.getArmv8FPReg(), 
+                        AArch64Load loadParamInst = new AArch64Load(AArch64CPUReg.getAArch64FPReg(), 
                             paramOffsetOp, valueReg);
                         addInstr(loadParamInst, insList, predefine);
                     }
@@ -1712,13 +1712,13 @@ public class ArmVisitor {
                 } else if (valueToStore.getType() instanceof FloatType) {
                     // 处理浮点变量
                     // 分配一个浮点寄存器
-                    Armv8Reg floatReg = new Armv8VirReg(true);
+                    AArch64Reg floatReg = new AArch64VirReg(true);
                     
                     RegList.put(valueToStore, floatReg);
                 } else if (valueToStore.getType() instanceof IntegerType) {
                     // 处理整数变量
                     // 分配一个通用寄存器
-                    Armv8Reg cpuReg = new Armv8VirReg(false);
+                    AArch64Reg cpuReg = new AArch64VirReg(false);
                     RegList.put(valueToStore, cpuReg);
                 } else {
                     throw new RuntimeException("未处理的存储值类型: " + valueToStore);
@@ -1728,8 +1728,8 @@ public class ArmVisitor {
         }
         
         // 处理指针操作数
-        Armv8Reg baseReg = new Armv8VirReg(false);  // 默认分配一个寄存器
-        Armv8Operand offsetOp = new Armv8Imm(0); // 默认偏移量为0
+        AArch64Reg baseReg = new AArch64VirReg(false);  // 默认分配一个寄存器
+        AArch64Operand offsetOp = new AArch64Imm(0); // 默认偏移量为0
         
         // 处理各种类型的指针
         if (pointer instanceof GetElementPtrInstruction) {
@@ -1744,7 +1744,7 @@ public class ArmVisitor {
                 baseReg = RegList.get(pointer);
             } else if (ptrList.containsKey(pointer)) {
                 // 使用栈指针加上偏移量
-                baseReg = Armv8CPUReg.getArmv8SpReg();
+                baseReg = AArch64CPUReg.getAArch64SpReg();
                 // 检查偏移量是否在内存操作的立即数范围内
                 long offset = ptrList.get(pointer);
                 offsetOp = checkImmediate(offset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
@@ -1754,10 +1754,10 @@ public class ArmVisitor {
         } else if (pointer instanceof GlobalVariable) {
             // 对于全局变量，使用标签
             String globalName = removeLeadingAt(((GlobalVariable)pointer).getName());
-            Armv8Label label = new Armv8Label(globalName);
+            AArch64Label label = new AArch64Label(globalName);
             
             // 为全局变量地址分配寄存器
-            baseReg = new Armv8VirReg(false);
+            baseReg = new AArch64VirReg(false);
             
             // 创建加载地址指令
             loadGlobalAddress(baseReg, label, insList, predefine);
@@ -1768,7 +1768,7 @@ public class ArmVisitor {
             }
             
             // 使用栈指针加上偏移量
-            baseReg = Armv8CPUReg.getArmv8SpReg();
+            baseReg = AArch64CPUReg.getAArch64SpReg();
             long offset = ptrList.get(pointer);
             
             // 使用通用的立即数检查机制
@@ -1776,32 +1776,32 @@ public class ArmVisitor {
         } else if (pointer instanceof Argument) {
             // 处理函数参数，为其分配寄存器
             Argument arg = (Argument) pointer;
-            if (curArmv8Function.getRegArg(arg) != null) {
-                baseReg = curArmv8Function.getRegArg(arg);
-            } else if (curArmv8Function.getStackArg(arg) != null) {
-                baseReg = new Armv8VirReg(false);
-                long stackParamOffset = curArmv8Function.getStackArg(arg); // 前8个在寄存器中
+            if (curAArch64Function.getRegArg(arg) != null) {
+                baseReg = curAArch64Function.getRegArg(arg);
+            } else if (curAArch64Function.getStackArg(arg) != null) {
+                baseReg = new AArch64VirReg(false);
+                long stackParamOffset = curAArch64Function.getStackArg(arg); // 前8个在寄存器中
                 
                 // 创建加载指令：从FP+偏移量加载到临时寄存器
                 // 使用通用的立即数检查机制
-                Armv8Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
+                AArch64Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
                 
                 // 根据偏移量类型创建适当的加载指令
-                if (paramOffsetOp instanceof Armv8Reg) {
+                if (paramOffsetOp instanceof AArch64Reg) {
                     // 如果偏移量被加载到寄存器，需要先计算地址
-                    Armv8VirReg addrReg = new Armv8VirReg(false);
-                    ArrayList<Armv8Operand> operands = new ArrayList<>();
-                    operands.add(Armv8CPUReg.getArmv8FPReg());
+                    AArch64VirReg addrReg = new AArch64VirReg(false);
+                    ArrayList<AArch64Operand> operands = new ArrayList<>();
+                    operands.add(AArch64CPUReg.getAArch64FPReg());
                     operands.add(paramOffsetOp);
-                    Armv8Binary addInst = new Armv8Binary(operands, addrReg, Armv8Binary.Armv8BinaryType.add);
+                    AArch64Binary addInst = new AArch64Binary(operands, addrReg, AArch64Binary.AArch64BinaryType.add);
                     addInstr(addInst, insList, predefine);
                     
                     // 然后从计算出的地址加载
-                    Armv8Load loadParamInst = new Armv8Load(addrReg, new Armv8Imm(0), baseReg);
+                    AArch64Load loadParamInst = new AArch64Load(addrReg, new AArch64Imm(0), baseReg);
                     addInstr(loadParamInst, insList, predefine);
                 } else {
                     // 如果偏移量是立即数，直接使用偏移量加载
-                    Armv8Load loadParamInst = new Armv8Load(Armv8CPUReg.getArmv8FPReg(), 
+                    AArch64Load loadParamInst = new AArch64Load(AArch64CPUReg.getAArch64FPReg(), 
                         paramOffsetOp, baseReg);
                     addInstr(loadParamInst, insList, predefine);
                 }
@@ -1825,13 +1825,13 @@ public class ArmVisitor {
         }
         
         // 使用辅助方法处理存储操作
-        if (offsetOp instanceof Armv8Imm) {
+        if (offsetOp instanceof AArch64Imm) {
             // 立即数类型，可以使用辅助方法
             boolean isFloat = valueToStore.getType() instanceof FloatType;
-            handleLargeStackOffset(baseReg, ((Armv8Imm)offsetOp).getValue(), valueReg, false, isFloat, insList, predefine);
+            handleLargeStackOffset(baseReg, ((AArch64Imm)offsetOp).getValue(), valueReg, false, isFloat, insList, predefine);
         } else {
             // 其他类型，直接创建存储指令
-            Armv8Store storeInst = new Armv8Store(valueReg, baseReg, offsetOp);
+            AArch64Store storeInst = new AArch64Store(valueReg, baseReg, offsetOp);
             addInstr(storeInst, insList, predefine);
         }
         
@@ -1842,7 +1842,7 @@ public class ArmVisitor {
     }
 
     private void parseCompareInst(CompareInstruction ins, boolean predefine) {
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
         // 获取比较指令的操作数和比较类型
         Value left = ins.getLeft();
@@ -1851,21 +1851,21 @@ public class ArmVisitor {
         boolean isFloat = ins.isFloatCompare();
         
         // 为结果分配目标寄存器
-        Armv8Reg destReg = new Armv8VirReg(false);
+        AArch64Reg destReg = new AArch64VirReg(false);
         RegList.put(ins, destReg);
         
         // 处理左操作数
-        Armv8Operand leftOp;
+        AArch64Operand leftOp;
         if (left instanceof ConstantInt) {
             // 对于整数常量，创建临时寄存器并加载立即数
             // ARM要求CMP的第一个操作数必须是寄存器
             long value = ((ConstantInt) left).getValue();
-            Armv8Reg leftReg = new Armv8VirReg(false);
+            AArch64Reg leftReg = new AArch64VirReg(false);
             // 使用loadLargeImmediate处理可能的大立即数
             if (value > 65535 || value < -65536) {
                 loadLargeImmediate(leftReg, value, insList, predefine);
             } else {
-                Armv8Move moveInst = new Armv8Move(leftReg, new Armv8Imm(value), true);
+                AArch64Move moveInst = new AArch64Move(leftReg, new AArch64Imm(value), true);
                 addInstr(moveInst, insList, predefine);
             }
             leftOp = leftReg;
@@ -1874,7 +1874,7 @@ public class ArmVisitor {
             double floatValue = ((ConstantFloat) left).getValue();
             
             // 为浮点常量分配寄存器
-            Armv8Reg fpuReg = new Armv8VirReg(true);
+            AArch64Reg fpuReg = new AArch64VirReg(true);
             // 加载浮点常量到寄存器
             loadFloatConstant(fpuReg, floatValue, insList, predefine);
             
@@ -1884,13 +1884,13 @@ public class ArmVisitor {
             if (!RegList.containsKey(left)) {
                 if (left.getType() instanceof FloatType) {
                     // 浮点类型使用浮点寄存器
-                    Armv8Reg leftReg = new Armv8VirReg(true);
+                    AArch64Reg leftReg = new AArch64VirReg(true);
                     
                     RegList.put(left, leftReg);
                     leftOp = leftReg;
                 } else {
                     // 整数类型使用通用寄存器
-                    Armv8Reg leftReg = new Armv8VirReg(false);
+                    AArch64Reg leftReg = new AArch64VirReg(false);
                     RegList.put(left, leftReg);
                     leftOp = leftReg;
                 }
@@ -1900,31 +1900,31 @@ public class ArmVisitor {
         }
         
         // 处理右操作数
-        Armv8Operand rightOp;
+        AArch64Operand rightOp;
         if (right instanceof ConstantInt) {
             // 对于整数常量，检查是否超出ARMv8比较指令的立即数范围
             long value = ((ConstantInt) right).getValue();
             // ARMv8 cmp指令的立即数范围为0-4095
             if (value > 4095 || value < -4095) {
                 // 如果超出范围，先加载到寄存器，处理大立即数
-                Armv8Reg rightReg = new Armv8VirReg(false);
+                AArch64Reg rightReg = new AArch64VirReg(false);
                 if (value > 65535 || value < -65536) {
                     loadLargeImmediate(rightReg, value, insList, predefine);
                 } else {
-                    Armv8Move moveInst = new Armv8Move(rightReg, new Armv8Imm(value), true);
+                    AArch64Move moveInst = new AArch64Move(rightReg, new AArch64Imm(value), true);
                     addInstr(moveInst, insList, predefine);
                 }
                 rightOp = rightReg;
             } else {
                 // 在范围内，可以使用立即数
-                rightOp = new Armv8Imm(value);
+                rightOp = new AArch64Imm(value);
             }
         } else if (right instanceof ConstantFloat) {
             // 处理浮点常量
             double floatValue = ((ConstantFloat) right).getValue();
             
             // 为浮点常量分配寄存器
-            Armv8Reg fpuReg = new Armv8VirReg(true);
+            AArch64Reg fpuReg = new AArch64VirReg(true);
             // 加载浮点常量到寄存器
             loadFloatConstant(fpuReg, floatValue, insList, predefine);
             
@@ -1934,13 +1934,13 @@ public class ArmVisitor {
             if (!RegList.containsKey(right)) {
                 if (right.getType() instanceof FloatType) {
                     // 浮点类型使用浮点寄存器
-                    Armv8Reg rightReg = new Armv8VirReg(true);
+                    AArch64Reg rightReg = new AArch64VirReg(true);
                     
                     RegList.put(right, rightReg);
                     rightOp = rightReg;
                 } else {
                     // 整数类型使用通用寄存器
-                    Armv8Reg rightReg = new Armv8VirReg(false);
+                    AArch64Reg rightReg = new AArch64VirReg(false);
                     RegList.put(right, rightReg);
                     rightOp = rightReg;
                 }
@@ -1950,82 +1950,82 @@ public class ArmVisitor {
         }
         
         // 创建比较指令
-        Armv8Compare.CmpType cmpType;
+        AArch64Compare.CmpType cmpType;
         
         // 检查是否可以使用CMN指令优化（当比较一个负数常量时）
-        if (!isFloat && rightOp instanceof Armv8Imm) {
-            long value = ((Armv8Imm) rightOp).getValue();
+        if (!isFloat && rightOp instanceof AArch64Imm) {
+            long value = ((AArch64Imm) rightOp).getValue();
             if (value < 0) {
                 // 使用CMN指令，比较负值（相当于CMP reg, -imm）
-                cmpType = Armv8Compare.CmpType.cmn;
+                cmpType = AArch64Compare.CmpType.cmn;
                 // 将立即数改为正值
-                rightOp = new Armv8Imm(-value);
+                rightOp = new AArch64Imm(-value);
             } else {
-                cmpType = Armv8Compare.CmpType.cmp;
+                cmpType = AArch64Compare.CmpType.cmp;
             }
         } else if (isFloat) {
-            cmpType = Armv8Compare.CmpType.fcmp;
+            cmpType = AArch64Compare.CmpType.fcmp;
         } else {
-            cmpType = Armv8Compare.CmpType.cmp;
+            cmpType = AArch64Compare.CmpType.cmp;
         }
         
-        Armv8Compare compareInst = new Armv8Compare(leftOp, rightOp, cmpType);
+        AArch64Compare compareInst = new AArch64Compare(leftOp, rightOp, cmpType);
         addInstr(compareInst, insList, predefine);
         
         // 根据比较谓词设置条件寄存器
-        Armv8Tools.CondType condType;
+        AArch64Tools.CondType condType;
         switch (predicate) {
             case EQ:
-                condType = Armv8Tools.CondType.eq;
+                condType = AArch64Tools.CondType.eq;
                 break;
             case NE:
-                condType = Armv8Tools.CondType.ne;
+                condType = AArch64Tools.CondType.ne;
                 break;
             case SGT:
-                condType = isFloat ? Armv8Tools.CondType.gt : Armv8Tools.CondType.gt;
+                condType = isFloat ? AArch64Tools.CondType.gt : AArch64Tools.CondType.gt;
                 break;
             case SGE:
-                condType = isFloat ? Armv8Tools.CondType.ge : Armv8Tools.CondType.ge;
+                condType = isFloat ? AArch64Tools.CondType.ge : AArch64Tools.CondType.ge;
                 break;
             case SLT:
-                condType = isFloat ? Armv8Tools.CondType.lt : Armv8Tools.CondType.lt;
+                condType = isFloat ? AArch64Tools.CondType.lt : AArch64Tools.CondType.lt;
                 break;
             case SLE:
-                condType = isFloat ? Armv8Tools.CondType.le : Armv8Tools.CondType.le;
+                condType = isFloat ? AArch64Tools.CondType.le : AArch64Tools.CondType.le;
                 break;
             case UGT:
-                condType = isFloat ? Armv8Tools.CondType.hi : Armv8Tools.CondType.hi; // 浮点无序大于
+                condType = isFloat ? AArch64Tools.CondType.hi : AArch64Tools.CondType.hi; // 浮点无序大于
                 break;
             case UGE:
-                condType = isFloat ? Armv8Tools.CondType.cs : Armv8Tools.CondType.cs; // 浮点无序大于等于
+                condType = isFloat ? AArch64Tools.CondType.cs : AArch64Tools.CondType.cs; // 浮点无序大于等于
                 break;
             case ULT:
-                condType = isFloat ? Armv8Tools.CondType.cc : Armv8Tools.CondType.cc; // 浮点无序小于
+                condType = isFloat ? AArch64Tools.CondType.cc : AArch64Tools.CondType.cc; // 浮点无序小于
                 break;
             case ULE:
-                condType = isFloat ? Armv8Tools.CondType.ls : Armv8Tools.CondType.ls; // 浮点无序小于等于
+                condType = isFloat ? AArch64Tools.CondType.ls : AArch64Tools.CondType.ls; // 浮点无序小于等于
                 break;
             case UNE:
                 // 浮点无序不等于 (ARM中的vs, overflow set)
-                condType = Armv8Tools.CondType.vs;
+                condType = AArch64Tools.CondType.vs;
                 break;
             case ORD:
                 // 浮点有序 (ARM中的vc, overflow clear)
-                condType = Armv8Tools.CondType.vc;
+                condType = AArch64Tools.CondType.vc;
                 break;
             case UNO:
                 // 浮点无序 (ARM中的vs, overflow set)
-                condType = Armv8Tools.CondType.vs;
+                condType = AArch64Tools.CondType.vs;
                 break;
             default:
                 System.err.println("不支持的比较谓词: " + predicate);
-                condType = Armv8Tools.CondType.eq; // 默认为等于
+                condType = AArch64Tools.CondType.eq; // 默认为等于
                 break;
         }
         
         // 直接使用一条指令设置结果
         // 使用指定的条件码将结果设置为1或0
-        Armv8Cset csetInst = new Armv8Cset(destReg, condType);
+        AArch64Cset csetInst = new AArch64Cset(destReg, condType);
         addInstr(csetInst, insList, predefine);
         
         if (predefine) {
@@ -2034,14 +2034,14 @@ public class ArmVisitor {
     }
 
     private void parsePhiInst(PhiInstruction ins, boolean predefine) {
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
         // 为Phi结果分配目标寄存器
-        Armv8Reg destReg;
+        AArch64Reg destReg;
         if (ins.getType() instanceof FloatType) {
-            destReg = new Armv8VirReg(true);
+            destReg = new AArch64VirReg(true);
         } else {
-            destReg = new Armv8VirReg(false);
+            destReg = new AArch64VirReg(false);
         }
         RegList.put(ins, destReg);
         
@@ -2054,21 +2054,21 @@ public class ArmVisitor {
             Value incomingValue = entry.getValue();
             
             // 获取对应的ARM块
-            Armv8Block armv8IncomingBlock = (Armv8Block) LabelList.get(incomingBlock);
+            AArch64Block armv8IncomingBlock = (AArch64Block) LabelList.get(incomingBlock);
             if (armv8IncomingBlock == null) {
                 System.err.println("警告: 找不到Phi指令输入块的对应ARM块: " + incomingBlock.getName());
                 continue;
             }
             
             // 为输入值创建源操作数
-            Armv8Operand srcOp;
+            AArch64Operand srcOp;
             if (incomingValue instanceof ConstantInt) {
                 // 常量值，创建立即数
                 long value = ((ConstantInt) incomingValue).getValue();
-                srcOp = new Armv8Imm(value);
+                srcOp = new AArch64Imm(value);
             } else if (incomingValue instanceof ConstantFloat) {
                 double floatValue = ((ConstantFloat) incomingValue).getValue();
-                Armv8Reg fpuReg = new Armv8VirReg(true);
+                AArch64Reg fpuReg = new AArch64VirReg(true);
                 loadFloatConstant(fpuReg, floatValue, insList, predefine);
                 srcOp = fpuReg;
             }
@@ -2080,7 +2080,7 @@ public class ArmVisitor {
                         parseInstruction((Instruction) incomingValue, true);
                     } else {
                         // 为未分配寄存器的值分配一个新寄存器
-                        Armv8Reg valueReg = new Armv8VirReg(false);
+                        AArch64Reg valueReg = new AArch64VirReg(false);
                         RegList.put(incomingValue, valueReg);
                     }
                 }
@@ -2094,23 +2094,23 @@ public class ArmVisitor {
             }
             
             // 创建移动指令
-            Armv8Move moveInst;
-            if (srcOp instanceof Armv8Imm) {
-                moveInst = new Armv8Move(destReg, srcOp, true);
+            AArch64Move moveInst;
+            if (srcOp instanceof AArch64Imm) {
+                moveInst = new AArch64Move(destReg, srcOp, true);
             } else {
-                moveInst = new Armv8Move(destReg, (Armv8Reg) srcOp, false);
+                moveInst = new AArch64Move(destReg, (AArch64Reg) srcOp, false);
             }
             
             // 为前驱块添加phi解析指令
             if (!predefine) {
                 // 如果不是预定义阶段，将指令直接添加到前驱块的末尾(在跳转指令之前)
-                Armv8Instruction lastInst = armv8IncomingBlock.getLastInstruction();
-                if (lastInst != null && (lastInst instanceof Armv8Branch || lastInst instanceof Armv8Jump)) {
+                AArch64Instruction lastInst = armv8IncomingBlock.getLastInstruction();
+                if (lastInst != null && (lastInst instanceof AArch64Branch || lastInst instanceof AArch64Jump)) {
                     // 在跳转指令前插入移动指令
                     armv8IncomingBlock.insertBeforeInst(lastInst, moveInst);
                 } else {
                     // 没有跳转指令，直接添加到块末尾
-                    armv8IncomingBlock.addArmv8Instruction(moveInst);
+                    armv8IncomingBlock.addAArch64Instruction(moveInst);
                 }
             } else {
                 // 预定义阶段，只将指令添加到列表中
@@ -2124,32 +2124,32 @@ public class ArmVisitor {
     }
 
     private void parseUnaryInst(UnaryInstruction ins, boolean predefine) {
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
         // 获取操作码和操作数
         OpCode opCode = ins.getOpCode();
         Value operand = ins.getOperand();
         
         // 为结果分配目标寄存器
-        Armv8Reg destReg;
+        AArch64Reg destReg;
         if (operand instanceof ConstantInt) {
-            destReg = new Armv8VirReg(false);
+            destReg = new AArch64VirReg(false);
         } else if (operand instanceof ConstantFloat) {
-            destReg = new Armv8VirReg(true);
+            destReg = new AArch64VirReg(true);
         } else {
-            destReg = new Armv8VirReg(false);
+            destReg = new AArch64VirReg(false);
         }
         RegList.put(ins, destReg);
         
         // 处理操作数
-        Armv8Operand srcOp;
+        AArch64Operand srcOp;
         if (operand instanceof ConstantInt) {
             // 对于常量，创建立即数操作数
             long value = ((ConstantInt) operand).getValue();
-            srcOp = new Armv8Imm(value);  // 显式转换为int
+            srcOp = new AArch64Imm(value);  // 显式转换为int
         } else if (operand instanceof ConstantFloat) {
             double floatValue = ((ConstantFloat) operand).getValue();
-            Armv8Reg fpuReg = new Armv8VirReg(true);
+            AArch64Reg fpuReg = new AArch64VirReg(true);
             loadFloatConstant(fpuReg, floatValue, insList, predefine);
             srcOp = fpuReg;
         } else {
@@ -2158,7 +2158,7 @@ public class ArmVisitor {
                 if (operand instanceof Instruction) {
                     parseInstruction((Instruction) operand, true);
                 } else {
-                    Armv8Reg srcReg = new Armv8VirReg(false);
+                    AArch64Reg srcReg = new AArch64VirReg(false);
                     RegList.put(operand, srcReg);
                 }
             }
@@ -2168,15 +2168,15 @@ public class ArmVisitor {
         
         switch (opCode) {
             case NEG: // 取负操作
-                if (srcOp instanceof Armv8Imm) {
+                if (srcOp instanceof AArch64Imm) {
                     // 如果是立即数，可以直接计算负值
-                    long value = ((Armv8Imm) srcOp).getValue();
-                    Armv8Move moveInst = new Armv8Move(destReg, new Armv8Imm(-value), true);
+                    long value = ((AArch64Imm) srcOp).getValue();
+                    AArch64Move moveInst = new AArch64Move(destReg, new AArch64Imm(-value), true);
                     addInstr(moveInst, insList, predefine);
                 } else {
                     // 如果是寄存器，使用NEG指令
-                    Armv8Reg srcReg = (Armv8Reg) srcOp;
-                    Armv8Unary negInst = new Armv8Unary(srcReg, destReg, Armv8Unary.Armv8UnaryType.neg);
+                    AArch64Reg srcReg = (AArch64Reg) srcOp;
+                    AArch64Unary negInst = new AArch64Unary(srcReg, destReg, AArch64Unary.AArch64UnaryType.neg);
                     addInstr(negInst, insList, predefine);
                 }
                 break;
@@ -2192,13 +2192,13 @@ public class ArmVisitor {
     }
 
     private void parseMoveInst(MoveInstruction ins, boolean predefine) {
-        ArrayList<Armv8Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
         // 获取源值
         Value source = ins.getSource();
         
         // 为目标分配寄存器 - 关键修复：处理PHI消除后的重复名称
-        Armv8Reg destReg;
+        AArch64Reg destReg;
         
         // 检查是否已经有同名的寄存器映射（来自PHI消除）
         // 如果有，使用现有的寄存器；否则创建新的
@@ -2206,7 +2206,7 @@ public class ArmVisitor {
         
         // 查找是否已经有同名的Value映射到寄存器
         Value existingValue = null;
-        for (Map.Entry<Value, Armv8Reg> entry : RegList.entrySet()) {
+        for (Map.Entry<Value, AArch64Reg> entry : RegList.entrySet()) {
             if (entry.getKey().getName().equals(destName)) {
                 existingValue = entry.getKey();
                 break;
@@ -2219,9 +2219,9 @@ public class ArmVisitor {
         } else {
             // 创建新的寄存器
             if (ins.getType() instanceof FloatType) {
-                destReg = new Armv8VirReg(true);
+                destReg = new AArch64VirReg(true);
             } else {
-                destReg = new Armv8VirReg(false);
+                destReg = new AArch64VirReg(false);
             }
         }
         
@@ -2242,24 +2242,24 @@ public class ArmVisitor {
         }
         
         // 处理源操作数
-        Armv8Operand srcOp;
+        AArch64Operand srcOp;
         if (source instanceof ConstantInt) {
             long value = ((ConstantInt) source).getValue();
-            srcOp = new Armv8Imm(value);
+            srcOp = new AArch64Imm(value);
         } else if (source instanceof ConstantFloat) {
             double floatValue = ((ConstantFloat) source).getValue();
-            Armv8Reg fpuReg = new Armv8VirReg(true);
+            AArch64Reg fpuReg = new AArch64VirReg(true);
             loadFloatConstant(fpuReg, floatValue, insList, predefine);
             srcOp = fpuReg;
         } else {
             // 从RegList获取源寄存器
             if (!RegList.containsKey(source)) {
                 if (source.getType() instanceof FloatType) {
-                    Armv8Reg srcReg = new Armv8VirReg(true);
+                    AArch64Reg srcReg = new AArch64VirReg(true);
                     RegList.put(source, srcReg);
                     srcOp = srcReg;
                 } else {
-                    Armv8Reg srcReg = new Armv8VirReg(false);
+                    AArch64Reg srcReg = new AArch64VirReg(false);
                     RegList.put(source, srcReg);
                     srcOp = srcReg;
                 }
@@ -2269,11 +2269,11 @@ public class ArmVisitor {
         }
         
         // 创建移动指令
-        Armv8Move moveInst;
-        if (srcOp instanceof Armv8Imm) {
-            moveInst = new Armv8Move(destReg, srcOp, true);
+        AArch64Move moveInst;
+        if (srcOp instanceof AArch64Imm) {
+            moveInst = new AArch64Move(destReg, srcOp, true);
         } else {
-            moveInst = new Armv8Move(destReg, (Armv8Reg) srcOp, false);
+            moveInst = new AArch64Move(destReg, (AArch64Reg) srcOp, false);
         }
         
         addInstr(moveInst, insList, predefine);
@@ -2283,11 +2283,11 @@ public class ArmVisitor {
         }
     }
 
-    private void addInstr(Armv8Instruction ins, ArrayList<Armv8Instruction> insList, boolean predefine) {
+    private void addInstr(AArch64Instruction ins, ArrayList<AArch64Instruction> insList, boolean predefine) {
         if (predefine) {
             insList.add(ins);
         } else {
-            curArmv8Block.addArmv8Instruction(ins);
+            curAArch64Block.addAArch64Instruction(ins);
         }
     }
 
@@ -2301,36 +2301,36 @@ public class ArmVisitor {
         }
     }
 
-    public Armv8Module getArmv8Module() {
+    public AArch64Module getAArch64Module() {
         return armv8Module;
     }
 
 
     // 加载大立即数到寄存器的方法
-    private void loadLargeImmediate(Armv8Reg destReg, long value, ArrayList<Armv8Instruction> insList, boolean predefine) {
+    private void loadLargeImmediate(AArch64Reg destReg, long value, ArrayList<AArch64Instruction> insList, boolean predefine) {
         // 使用位运算加载64位大立即数
         // 首先加载低16位
         long bits = value;
-        Armv8Move movzInst = new Armv8Move(destReg, new Armv8Imm(bits & 0xFFFF), true, Armv8Move.MoveType.MOVZ);
+        AArch64Move movzInst = new AArch64Move(destReg, new AArch64Imm(bits & 0xFFFF), true, AArch64Move.MoveType.MOVZ);
         addInstr(movzInst, insList, predefine);
         // 然后加载高位（如果需要）
         // 检查第二个16位（bits[31:16]）
         if (((bits >> 16) & 0xFFFF) != 0) {
-            Armv8Move movkInst = new Armv8Move(destReg, new Armv8Imm((bits >> 16) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+            AArch64Move movkInst = new AArch64Move(destReg, new AArch64Imm((bits >> 16) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
             movkInst.setShift(16);
             addInstr(movkInst, insList, predefine);
         }
         
         // 检查第三个16位（bits[47:32]）
         if (((bits >> 32) & 0xFFFF) != 0) {
-            Armv8Move movkInst = new Armv8Move(destReg, new Armv8Imm((bits >> 32) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+            AArch64Move movkInst = new AArch64Move(destReg, new AArch64Imm((bits >> 32) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
             movkInst.setShift(32);
             addInstr(movkInst, insList, predefine);
         }
         
         // 检查第四个16位（bits[63:48]）
         if (((bits >> 48) & 0xFFFF) != 0) {
-            Armv8Move movkInst = new Armv8Move(destReg, new Armv8Imm((bits >> 48) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+            AArch64Move movkInst = new AArch64Move(destReg, new AArch64Imm((bits >> 48) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
             movkInst.setShift(48);
             addInstr(movkInst, insList, predefine);
         }
@@ -2343,16 +2343,16 @@ public class ArmVisitor {
      * @param insList 指令列表
      * @param predefine 是否是预定义阶段
      */
-    private void loadGlobalAddress(Armv8Reg destReg, Armv8Label label, ArrayList<Armv8Instruction> insList, boolean predefine) {
+    private void loadGlobalAddress(AArch64Reg destReg, AArch64Label label, ArrayList<AArch64Instruction> insList, boolean predefine) {
         // 使用ADRP获取页地址
-        Armv8Adrp adrpInst = new Armv8Adrp(destReg, label);
+        AArch64Adrp adrpInst = new AArch64Adrp(destReg, label);
         addInstr(adrpInst, insList, predefine);
         
         // 使用ADD加上页内偏移，创建一个特殊的标签来表示:lo12:偏移
-        ArrayList<Armv8Operand> addOperands = new ArrayList<>();
+        ArrayList<AArch64Operand> addOperands = new ArrayList<>();
         addOperands.add(destReg);
-        addOperands.add(new Armv8Label(":lo12:" + label.getLabelName()));
-        Armv8Binary addInst = new Armv8Binary(addOperands, destReg, Armv8Binary.Armv8BinaryType.add);
+        addOperands.add(new AArch64Label(":lo12:" + label.getLabelName()));
+        AArch64Binary addInst = new AArch64Binary(addOperands, destReg, AArch64Binary.AArch64BinaryType.add);
         addInstr(addInst, insList, predefine);
     }
     
@@ -2363,35 +2363,35 @@ public class ArmVisitor {
      * @param insList 指令列表
      * @param predefine 是否是预定义阶段
      */
-    private void loadFloatConstant(Armv8Reg destReg, double value, ArrayList<Armv8Instruction> insList, boolean predefine) {
+    private void loadFloatConstant(AArch64Reg destReg, double value, ArrayList<AArch64Instruction> insList, boolean predefine) {
         // 先将浮点数转换为原始二进制表示
         long bits = Double.doubleToRawLongBits(value);
         
         // 分配一个虚拟寄存器用于存放位模式 (整数类型)
-        Armv8VirReg tempReg = new Armv8VirReg(false);
+        AArch64VirReg tempReg = new AArch64VirReg(false);
         
         // 使用MOVZ和MOVK指令加载64位浮点值的位模式到通用寄存器
         // 加载低16位
-        Armv8Move movzInst = new Armv8Move(tempReg, new Armv8Imm(bits & 0xFFFF), true, Armv8Move.MoveType.MOVZ);
+        AArch64Move movzInst = new AArch64Move(tempReg, new AArch64Imm(bits & 0xFFFF), true, AArch64Move.MoveType.MOVZ);
         addInstr(movzInst, insList, predefine);
         
         // 加载第二个16位块
-        Armv8Move movk1Inst = new Armv8Move(tempReg, new Armv8Imm((bits >> 16) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+        AArch64Move movk1Inst = new AArch64Move(tempReg, new AArch64Imm((bits >> 16) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
         movk1Inst.setShift(16);
         addInstr(movk1Inst, insList, predefine);
         
         // 加载第三个16位块
-        Armv8Move movk2Inst = new Armv8Move(tempReg, new Armv8Imm((bits >> 32) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+        AArch64Move movk2Inst = new AArch64Move(tempReg, new AArch64Imm((bits >> 32) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
         movk2Inst.setShift(32);
         addInstr(movk2Inst, insList, predefine);
         
         // 加载最高16位
-        Armv8Move movk3Inst = new Armv8Move(tempReg, new Armv8Imm((bits >> 48) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+        AArch64Move movk3Inst = new AArch64Move(tempReg, new AArch64Imm((bits >> 48) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
         movk3Inst.setShift(48);
         addInstr(movk3Inst, insList, predefine);
         
         // 使用FMOV指令将通用寄存器的位模式移动到浮点寄存器
-        Armv8Fmov fmovInst = new Armv8Fmov(destReg, tempReg);
+        AArch64Fmov fmovInst = new AArch64Fmov(destReg, tempReg);
         addInstr(fmovInst, insList, predefine);
     }
 
@@ -2404,14 +2404,14 @@ public class ArmVisitor {
      * @param insList 指令列表
      * @param predefine 是否是预定义阶段
      */
-    private void createMaddInstruction(Armv8Reg destReg, Armv8Reg addReg, Armv8Reg mulReg1, Armv8Reg mulReg2, 
-                                     ArrayList<Armv8Instruction> insList, boolean predefine) {
-        ArrayList<Armv8Operand> operands = new ArrayList<>();
+    private void createMaddInstruction(AArch64Reg destReg, AArch64Reg addReg, AArch64Reg mulReg1, AArch64Reg mulReg2, 
+                                     ArrayList<AArch64Instruction> insList, boolean predefine) {
+        ArrayList<AArch64Operand> operands = new ArrayList<>();
         operands.add(addReg);   // 第一个操作数是加数
         operands.add(mulReg1);  // 第二个操作数是被乘数1
         operands.add(mulReg2);  // 第三个操作数是被乘数2
         
-        Armv8Binary maddInst = new Armv8Binary(operands, destReg, Armv8Binary.Armv8BinaryType.madd);
+        AArch64Binary maddInst = new AArch64Binary(operands, destReg, AArch64Binary.AArch64BinaryType.madd);
         addInstr(maddInst, insList, predefine);
     }
 
@@ -2419,13 +2419,13 @@ public class ArmVisitor {
      * 确保正确获取函数参数
      * 在ARM调用约定中，前8个整型参数在x0-x7中，前8个浮点参数在v0-v7中
      */
-    private Armv8Reg ensureArgumentArmv8Reg(Argument arg, ArrayList<Armv8Instruction> insList, boolean predefine) {
+    private AArch64Reg ensureArgumentAArch64Reg(Argument arg, ArrayList<AArch64Instruction> insList, boolean predefine) {
         if (RegList.containsKey(arg)) {
             return RegList.get(arg);
         }
         
         // 检查参数是否在寄存器中
-        Armv8Reg argReg = curArmv8Function.getRegArg(arg);
+        AArch64Reg argReg = curAArch64Function.getRegArg(arg);
         if (argReg != null) {
             // 参数在寄存器中，直接使用
             RegList.put(arg, argReg);
@@ -2433,32 +2433,32 @@ public class ArmVisitor {
         }
         
         // 检查参数是否在栈上
-        Long stackOffset = curArmv8Function.getStackArg(arg);
+        Long stackOffset = curAArch64Function.getStackArg(arg);
         if (stackOffset != null) {
             // 参数在栈上，需要加载到寄存器
-            Armv8VirReg tempReg = arg.getType() instanceof FloatType ? 
-                new Armv8VirReg(true) : new Armv8VirReg(false);
+            AArch64VirReg tempReg = arg.getType() instanceof FloatType ? 
+                new AArch64VirReg(true) : new AArch64VirReg(false);
                 
             // 从FP相对位置加载参数值，检查偏移量是否超出范围
-            Armv8Operand offsetOp = checkImmediate(stackOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
+            AArch64Operand offsetOp = checkImmediate(stackOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
             
-            if (offsetOp instanceof Armv8Reg) {
+            if (offsetOp instanceof AArch64Reg) {
                 // 偏移量被加载到寄存器，需要先计算地址
-                Armv8VirReg addrReg = new Armv8VirReg(false);
-                ArrayList<Armv8Operand> addOperands = new ArrayList<>();
-                addOperands.add(Armv8CPUReg.getArmv8FPReg());
+                AArch64VirReg addrReg = new AArch64VirReg(false);
+                ArrayList<AArch64Operand> addOperands = new ArrayList<>();
+                addOperands.add(AArch64CPUReg.getAArch64FPReg());
                 addOperands.add(offsetOp);
-                Armv8Binary addInst = new Armv8Binary(addOperands, addrReg, Armv8Binary.Armv8BinaryType.add);
+                AArch64Binary addInst = new AArch64Binary(addOperands, addrReg, AArch64Binary.AArch64BinaryType.add);
                 addInstr(addInst, insList, predefine);
                 
                 // 使用计算的地址进行加载
-                Armv8Load loadInst = new Armv8Load(addrReg, new Armv8Imm(0), tempReg);
+                AArch64Load loadInst = new AArch64Load(addrReg, new AArch64Imm(0), tempReg);
                 addInstr(loadInst, insList, predefine);
             } else {
                 // 偏移量在范围内，直接使用
-                Armv8Load loadInst = new Armv8Load(
-                    Armv8CPUReg.getArmv8FPReg(), 
-                    (Armv8Imm)offsetOp, 
+                AArch64Load loadInst = new AArch64Load(
+                    AArch64CPUReg.getAArch64FPReg(), 
+                    (AArch64Imm)offsetOp, 
                     tempReg
                 );
                 addInstr(loadInst, insList, predefine);
@@ -2477,38 +2477,38 @@ public class ArmVisitor {
     /**
      * 处理余数运算 (a % b = a - (a / b) * b)
      */
-    private void handleRemOperation(Armv8Operand leftOp, Armv8Operand rightOp, Armv8Reg destReg,
-                                  ArrayList<Armv8Instruction> insList, boolean predefine) {
+    private void handleRemOperation(AArch64Operand leftOp, AArch64Operand rightOp, AArch64Reg destReg,
+                                  ArrayList<AArch64Instruction> insList, boolean predefine) {
         // 确保右操作数是寄存器
-        Armv8Reg rightReg;
-        if (rightOp instanceof Armv8Imm) {
-            rightReg = new Armv8VirReg(false);
-            Armv8Move moveInst = new Armv8Move(rightReg, rightOp, true);
+        AArch64Reg rightReg;
+        if (rightOp instanceof AArch64Imm) {
+            rightReg = new AArch64VirReg(false);
+            AArch64Move moveInst = new AArch64Move(rightReg, rightOp, true);
             addInstr(moveInst, insList, predefine);
         } else {
-            rightReg = (Armv8Reg) rightOp;
+            rightReg = (AArch64Reg) rightOp;
         }
         
         // 1. 除法运算: destReg = leftOp / rightReg
-        ArrayList<Armv8Operand> divOperands = new ArrayList<>();
+        ArrayList<AArch64Operand> divOperands = new ArrayList<>();
         divOperands.add(leftOp);
         divOperands.add(rightReg);
-        Armv8Binary divInst = new Armv8Binary(divOperands, destReg, Armv8Binary.Armv8BinaryType.sdiv);
+        AArch64Binary divInst = new AArch64Binary(divOperands, destReg, AArch64Binary.AArch64BinaryType.sdiv);
         addInstr(divInst, insList, predefine);
         
         // 2. 乘法运算: tempReg = destReg * rightReg
-        Armv8VirReg tempReg = new Armv8VirReg(false);
-        ArrayList<Armv8Operand> mulOperands = new ArrayList<>();
+        AArch64VirReg tempReg = new AArch64VirReg(false);
+        ArrayList<AArch64Operand> mulOperands = new ArrayList<>();
         mulOperands.add(destReg);
         mulOperands.add(rightReg);
-        Armv8Binary mulInst = new Armv8Binary(mulOperands, tempReg, Armv8Binary.Armv8BinaryType.mul);
+        AArch64Binary mulInst = new AArch64Binary(mulOperands, tempReg, AArch64Binary.AArch64BinaryType.mul);
         addInstr(mulInst, insList, predefine);
         
         // 3. 减法运算: destReg = leftOp - tempReg
-        ArrayList<Armv8Operand> subOperands = new ArrayList<>();
+        ArrayList<AArch64Operand> subOperands = new ArrayList<>();
         subOperands.add(leftOp);
         subOperands.add(tempReg);
-        Armv8Binary subInst = new Armv8Binary(subOperands, destReg, Armv8Binary.Armv8BinaryType.sub);
+        AArch64Binary subInst = new AArch64Binary(subOperands, destReg, AArch64Binary.AArch64BinaryType.sub);
         addInstr(subInst, insList, predefine);
     }
 
@@ -2518,16 +2518,16 @@ public class ArmVisitor {
      * @param instrType 指令类型，决定立即数范围
      * @param insList 指令列表
      * @param predefine 是否为预定义阶段
-     * @return 如果在范围内返回Armv8Imm，否则返回包含该值的寄存器
+     * @return 如果在范围内返回AArch64Imm，否则返回包含该值的寄存器
      */
-    private Armv8Operand checkImmediate(long value, ImmediateRange instrType, ArrayList<Armv8Instruction> insList, boolean predefine) {
+    private AArch64Operand checkImmediate(long value, ImmediateRange instrType, ArrayList<AArch64Instruction> insList, boolean predefine) {
         // 检查立即数是否在范围内
         if (instrType.isInRange(value)) {
             // 在范围内，直接返回立即数
-            return new Armv8Imm(value);
+            return new AArch64Imm(value);
         } else {
             // 超出范围，加载到寄存器
-            Armv8VirReg tempReg = new Armv8VirReg(false);
+            AArch64VirReg tempReg = new AArch64VirReg(false);
             
             // 如果是MOV指令且值很大，使用特殊的大立即数加载方法
             if (instrType == ImmediateRange.MOV && (value > 65535 || value < -65536)) {
@@ -2538,7 +2538,7 @@ public class ArmVisitor {
                 if (value > 65535 || value < -65536) {
                     loadLargeImmediate(tempReg, value, insList, predefine);
                 } else {
-                    Armv8Move moveInst = new Armv8Move(tempReg, new Armv8Imm(value), true);
+                    AArch64Move moveInst = new AArch64Move(tempReg, new AArch64Imm(value), true);
                     addInstr(moveInst, insList, predefine);
                 }
             }
@@ -2598,7 +2598,7 @@ public class ArmVisitor {
         public long getMinValue() { return minValue; }
     }
 
-    private Armv8Operand processOperand(Value operand, ArrayList<Armv8Instruction> insList, 
+    private AArch64Operand processOperand(Value operand, ArrayList<AArch64Instruction> insList, 
                                        boolean predefine, boolean isFloat, boolean requiresReg, ImmediateRange immRange) {
         // 处理常量
         if (operand instanceof ConstantInt) {
@@ -2606,11 +2606,11 @@ public class ArmVisitor {
             // 检查是否需要寄存器形式
             if (requiresReg) {
                 // 如果需要寄存器，加载到寄存器，处理大立即数
-                Armv8VirReg tempReg = new Armv8VirReg(false);
+                AArch64VirReg tempReg = new AArch64VirReg(false);
                 if (value > 65535 || value < -65536) {
                     loadLargeImmediate(tempReg, value, insList, predefine);
                 } else {
-                    Armv8Move moveInst = new Armv8Move(tempReg, new Armv8Imm(value), true);
+                    AArch64Move moveInst = new AArch64Move(tempReg, new AArch64Imm(value), true);
                     addInstr(moveInst, insList, predefine);
                 }
                 return tempReg;
@@ -2622,19 +2622,19 @@ public class ArmVisitor {
         else if (operand instanceof ConstantFloat) {
             // 浮点常量总是需要加载到寄存器
             double floatValue = ((ConstantFloat) operand).getValue();
-            Armv8VirReg fReg = new Armv8VirReg(true);
+            AArch64VirReg fReg = new AArch64VirReg(true);
             loadFloatConstant(fReg, floatValue, insList, predefine);
             return fReg;
         } 
         else if (operand instanceof Argument) {
             // 处理函数参数 - 使用辅助方法确保正确获取参数值
             Argument arg = (Argument) operand;
-            Armv8Reg paramReg = ensureArgumentArmv8Reg(arg, insList, predefine);
+            AArch64Reg paramReg = ensureArgumentAArch64Reg(arg, insList, predefine);
             if (paramReg != null) {
                 return paramReg;
             } else {
                 System.err.println("警告: 无法获取参数 " + arg);
-                return new Armv8Imm(0); // 返回默认值
+                return new AArch64Imm(0); // 返回默认值
             }
         } 
         else if (operand instanceof Instruction) {
@@ -2646,7 +2646,7 @@ public class ArmVisitor {
                 return RegList.get(operand);
             } else {
                 System.err.println("警告: 无法获取指令结果寄存器: " + operand);
-                return new Armv8Imm(0);
+                return new AArch64Imm(0);
             }
         } 
         else if (RegList.containsKey(operand)) {
@@ -2656,12 +2656,12 @@ public class ArmVisitor {
         else {
             // 其他情况，返回0
             System.err.println("警告: 无法处理的操作数: " + operand);
-            return new Armv8Imm(0);
+            return new AArch64Imm(0);
         }
     }
 
 
-    private Armv8Operand processOperand(Value operand, ArrayList<Armv8Instruction> insList, 
+    private AArch64Operand processOperand(Value operand, ArrayList<AArch64Instruction> insList, 
                                        boolean predefine, boolean isFloat, boolean requiresReg) {
         // 使用默认的立即数范围
         return processOperand(operand, insList, predefine, isFloat, requiresReg, ImmediateRange.DEFAULT);
@@ -2671,19 +2671,19 @@ public class ArmVisitor {
     /**
      * 安全地创建内存操作数，如果偏移量超出范围则使用寄存器
      */
-    private Armv8Operand createSafeMemoryOperand(long offset, ArrayList<Armv8Instruction> insList, boolean predefine) {
+    private AArch64Operand createSafeMemoryOperand(long offset, ArrayList<AArch64Instruction> insList, boolean predefine) {
         // 检查是否在有符号偏移范围内（-256到255）
         if (ImmediateRange.MEMORY_OFFSET_SIGNED.isInRange(offset)) {
-            return new Armv8Imm(offset);
+            return new AArch64Imm(offset);
         }
         
         // 检查是否在无符号偏移范围内（0到32760，且是8的倍数）
         if (ImmediateRange.MEMORY_OFFSET_UNSIGNED.isInRange(offset)) {
-            return new Armv8Imm(offset);
+            return new AArch64Imm(offset);
         }
         
         // 超出范围，需要加载到寄存器
-        Armv8VirReg tempReg = new Armv8VirReg(false);
+        AArch64VirReg tempReg = new AArch64VirReg(false);
         loadLargeImmediate(tempReg, offset, insList, predefine);
         return tempReg;
     }
@@ -2691,42 +2691,42 @@ public class ArmVisitor {
     /**
      * 安全地创建内存访问指令，处理大偏移量
      */
-    private void createSafeMemoryInstruction(Armv8Reg baseReg, long offset, Armv8Reg valueReg, 
-                                           boolean isLoad, ArrayList<Armv8Instruction> insList, boolean predefine) {
-        Armv8Operand offsetOp = createSafeMemoryOperand(offset, insList, predefine);
+    private void createSafeMemoryInstruction(AArch64Reg baseReg, long offset, AArch64Reg valueReg, 
+                                           boolean isLoad, ArrayList<AArch64Instruction> insList, boolean predefine) {
+        AArch64Operand offsetOp = createSafeMemoryOperand(offset, insList, predefine);
         
-        if (offsetOp instanceof Armv8Reg) {
+        if (offsetOp instanceof AArch64Reg) {
             // 如果偏移量被加载到寄存器，需要先计算地址
-            Armv8VirReg addrReg = new Armv8VirReg(false);
-            ArrayList<Armv8Operand> addOperands = new ArrayList<>();
+            AArch64VirReg addrReg = new AArch64VirReg(false);
+            ArrayList<AArch64Operand> addOperands = new ArrayList<>();
             addOperands.add(baseReg);
             addOperands.add(offsetOp);
-            Armv8Binary addInst = new Armv8Binary(addOperands, addrReg, Armv8Binary.Armv8BinaryType.add);
+            AArch64Binary addInst = new AArch64Binary(addOperands, addrReg, AArch64Binary.AArch64BinaryType.add);
             addInstr(addInst, insList, predefine);
             
             // 然后使用地址寄存器加零偏移量进行加载或存储
             if (isLoad) {
-                Armv8Load loadInst = new Armv8Load(addrReg, new Armv8Imm(0), valueReg);
+                AArch64Load loadInst = new AArch64Load(addrReg, new AArch64Imm(0), valueReg);
                 addInstr(loadInst, insList, predefine);
             } else {
-                Armv8Store storeInst = new Armv8Store(valueReg, addrReg, new Armv8Imm(0));
+                AArch64Store storeInst = new AArch64Store(valueReg, addrReg, new AArch64Imm(0));
                 addInstr(storeInst, insList, predefine);
             }
         } else {
             // 在范围内直接使用偏移量
             if (isLoad) {
-                Armv8Load loadInst = new Armv8Load(baseReg, (Armv8Imm)offsetOp, valueReg);
+                AArch64Load loadInst = new AArch64Load(baseReg, (AArch64Imm)offsetOp, valueReg);
                 addInstr(loadInst, insList, predefine);
             } else {
-                Armv8Store storeInst = new Armv8Store(valueReg, baseReg, (Armv8Imm)offsetOp);
+                AArch64Store storeInst = new AArch64Store(valueReg, baseReg, (AArch64Imm)offsetOp);
                 addInstr(storeInst, insList, predefine);
             }
         }
     }
 
-    private void handleLargeStackOffset(Armv8Reg baseReg, long offset, Armv8Reg valueReg, 
+    private void handleLargeStackOffset(AArch64Reg baseReg, long offset, AArch64Reg valueReg, 
                                       boolean isLoad, boolean isFloat, 
-                                      ArrayList<Armv8Instruction> insList, boolean predefine) {
+                                      ArrayList<AArch64Instruction> insList, boolean predefine) {
         createSafeMemoryInstruction(baseReg, offset, valueReg, isLoad, insList, predefine);
     }
 } 

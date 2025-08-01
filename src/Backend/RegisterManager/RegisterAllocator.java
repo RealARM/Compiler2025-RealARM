@@ -1,7 +1,7 @@
 package Backend.RegisterManager;
 
-import Backend.Structure.Armv8Block;
-import Backend.Structure.Armv8Function;
+import Backend.Structure.AArch64Block;
+import Backend.Structure.AArch64Function;
 import Backend.Utils.LivenessAnalyzer;
 import Backend.Utils.Pair;
 import Backend.Value.Base.*;
@@ -19,39 +19,39 @@ import java.util.*;
  */
 public class RegisterAllocator {
     
-    private final Armv8Function currentFunction;
-    private LinkedHashMap<Armv8Block, LivenessAnalyzer.LivenessInfo> livenessMap;
+    private final AArch64Function currentFunction;
+    private LinkedHashMap<AArch64Block, LivenessAnalyzer.LivenessInfo> livenessMap;
     
     // 工作列表
-    private LinkedHashSet<Armv8Operand> simplifyList; // 低度数且非move相关的节点
-    private LinkedHashSet<Armv8Operand> freezeList;   // 低度数且move相关的节点
-    private LinkedHashSet<Armv8Operand> spillList;    // 高度数的节点
-    private LinkedHashSet<Armv8Operand> spilledRegs;  // 需要溢出的节点
-    private LinkedHashSet<Armv8Operand> coalescedRegs; // 已合并的节点
-    private LinkedHashSet<Armv8Reg> coloredRegs;      // 已着色的节点
-    private Stack<Armv8Operand> eliminationStack;     // 消除栈
+    private LinkedHashSet<AArch64Operand> simplifyList; // 低度数且非move相关的节点
+    private LinkedHashSet<AArch64Operand> freezeList;   // 低度数且move相关的节点
+    private LinkedHashSet<AArch64Operand> spillList;    // 高度数的节点
+    private LinkedHashSet<AArch64Operand> spilledRegs;  // 需要溢出的节点
+    private LinkedHashSet<AArch64Operand> coalescedRegs; // 已合并的节点
+    private LinkedHashSet<AArch64Reg> coloredRegs;      // 已着色的节点
+    private Stack<AArch64Operand> eliminationStack;     // 消除栈
     
     // move指令相关
-    private LinkedHashSet<Armv8Instruction> coalescedMoves;   // 已合并的move
-    private LinkedHashSet<Armv8Instruction> constrainedMoves; // 受约束的move
-    private LinkedHashSet<Armv8Instruction> frozenMoves;     // 冻结的move
-    private LinkedHashSet<Armv8Instruction> workingMoves;    // 工作中的move
-    private LinkedHashSet<Armv8Instruction> activeMoves;     // 活跃的move
+    private LinkedHashSet<AArch64Instruction> coalescedMoves;   // 已合并的move
+    private LinkedHashSet<AArch64Instruction> constrainedMoves; // 受约束的move
+    private LinkedHashSet<AArch64Instruction> frozenMoves;     // 冻结的move
+    private LinkedHashSet<AArch64Instruction> workingMoves;    // 工作中的move
+    private LinkedHashSet<AArch64Instruction> activeMoves;     // 活跃的move
     
     // 图结构
-    private LinkedHashSet<Pair<Armv8Reg, Armv8Reg>> conflictSet;         // 冲突边集合
-    private LinkedHashMap<Armv8Operand, LinkedHashSet<Armv8Operand>> neighborList; // 邻接表
-    private LinkedHashMap<Armv8Operand, Integer> degreeMap;              // 度数映射
-    private LinkedHashMap<Armv8Operand, LinkedHashSet<Armv8Move>> moveMap; // move映射
-    private LinkedHashMap<Armv8Operand, Armv8Operand> aliasMap;          // 别名映射
-    private LinkedHashMap<Armv8Reg, Integer> colorMap;                   // 颜色映射
-    private LinkedHashSet<Armv8VirReg> allVirtualRegs;                   // 所有虚拟寄存器
+    private LinkedHashSet<Pair<AArch64Reg, AArch64Reg>> conflictSet;         // 冲突边集合
+    private LinkedHashMap<AArch64Operand, LinkedHashSet<AArch64Operand>> neighborList; // 邻接表
+    private LinkedHashMap<AArch64Operand, Integer> degreeMap;              // 度数映射
+    private LinkedHashMap<AArch64Operand, LinkedHashSet<AArch64Move>> moveMap; // move映射
+    private LinkedHashMap<AArch64Operand, AArch64Operand> aliasMap;          // 别名映射
+    private LinkedHashMap<AArch64Reg, Integer> colorMap;                   // 颜色映射
+    private LinkedHashSet<AArch64VirReg> allVirtualRegs;                   // 所有虚拟寄存器
     
     // 常量定义
     private final int CPU_COLOR_COUNT = 8;   // 整型寄存器颜色数 (x8-x15)
     private final int FPU_COLOR_COUNT = 24;  // 浮点寄存器颜色数 (v8-v31)
     
-    public RegisterAllocator(Armv8Function function) {
+    public RegisterAllocator(AArch64Function function) {
         this.currentFunction = function;
     }
     
@@ -151,11 +151,11 @@ public class RegisterAllocator {
     }
     
     private void collectVirtualRegisters(boolean isFloat) {
-        for (Armv8Block block : currentFunction.getBlocks()) {
-            for (Armv8Instruction inst : block.getInstructions()) {
+        for (AArch64Block block : currentFunction.getBlocks()) {
+            for (AArch64Instruction inst : block.getInstructions()) {
                 // 收集定义的虚拟寄存器
-                if (inst.getDefReg() instanceof Armv8VirReg) {
-                    Armv8VirReg virReg = (Armv8VirReg) inst.getDefReg();
+                if (inst.getDefReg() instanceof AArch64VirReg) {
+                    AArch64VirReg virReg = (AArch64VirReg) inst.getDefReg();
                     if (virReg.isFloat() == isFloat) {
                         allVirtualRegs.add(virReg);
                         ensureNodeExists(virReg);
@@ -163,9 +163,9 @@ public class RegisterAllocator {
                 }
                 
                 // 收集使用的虚拟寄存器
-                for (Armv8Operand operand : inst.getOperands()) {
-                    if (operand instanceof Armv8VirReg) {
-                        Armv8VirReg virReg = (Armv8VirReg) operand;
+                for (AArch64Operand operand : inst.getOperands()) {
+                    if (operand instanceof AArch64VirReg) {
+                        AArch64VirReg virReg = (AArch64VirReg) operand;
                         if (virReg.isFloat() == isFloat) {
                             allVirtualRegs.add(virReg);
                             ensureNodeExists(virReg);
@@ -179,36 +179,36 @@ public class RegisterAllocator {
     }
     
     private void constructInterferenceGraph(boolean isFloat) {
-        for (Armv8Block block : currentFunction.getBlocks()) {
+        for (AArch64Block block : currentFunction.getBlocks()) {
             LivenessAnalyzer.LivenessInfo blockLiveness = livenessMap.get(block);
             if (blockLiveness == null) continue;
             
-            LinkedHashSet<Armv8Reg> currentLive = new LinkedHashSet<>();
+            LinkedHashSet<AArch64Reg> currentLive = new LinkedHashSet<>();
             // 只处理当前类型的寄存器
-            for (Armv8Reg reg : blockLiveness.getLiveOut()) {
-                if (reg instanceof Armv8VirReg && ((Armv8VirReg) reg).isFloat() == isFloat) {
+            for (AArch64Reg reg : blockLiveness.getLiveOut()) {
+                if (reg instanceof AArch64VirReg && ((AArch64VirReg) reg).isFloat() == isFloat) {
                     currentLive.add(reg);
                 }
             }
             
             // 反向遍历指令
-            List<Armv8Instruction> instructions = new ArrayList<>(block.getInstructions());
+            List<AArch64Instruction> instructions = new ArrayList<>(block.getInstructions());
             Collections.reverse(instructions);
             
-            for (Armv8Instruction inst : instructions) {
+            for (AArch64Instruction inst : instructions) {
                 // 处理move指令的特殊情况
-                if (inst instanceof Armv8Move) {
-                    Armv8Move moveInst = (Armv8Move) inst;
+                if (inst instanceof AArch64Move) {
+                    AArch64Move moveInst = (AArch64Move) inst;
                     if (moveInst.getOperands().size() > 0 && 
-                        moveInst.getOperands().get(0) instanceof Armv8Reg &&
-                        moveInst.getDefReg() instanceof Armv8Reg) {
+                        moveInst.getOperands().get(0) instanceof AArch64Reg &&
+                        moveInst.getDefReg() instanceof AArch64Reg) {
                         
-                        Armv8Reg src = (Armv8Reg) moveInst.getOperands().get(0);
-                        Armv8Reg dst = moveInst.getDefReg();
+                        AArch64Reg src = (AArch64Reg) moveInst.getOperands().get(0);
+                        AArch64Reg dst = moveInst.getDefReg();
                         
-                        if (src instanceof Armv8VirReg && dst instanceof Armv8VirReg &&
-                            ((Armv8VirReg) src).isFloat() == isFloat &&
-                            ((Armv8VirReg) dst).isFloat() == isFloat) {
+                        if (src instanceof AArch64VirReg && dst instanceof AArch64VirReg &&
+                            ((AArch64VirReg) src).isFloat() == isFloat &&
+                            ((AArch64VirReg) dst).isFloat() == isFloat) {
                             currentLive.remove(src);
                             addToMoveList(src, moveInst);
                             addToMoveList(dst, moveInst);
@@ -218,12 +218,12 @@ public class RegisterAllocator {
                 }
                 
                 // 为定义的寄存器添加干扰
-                if (inst.getDefReg() instanceof Armv8VirReg) {
-                    Armv8VirReg defReg = (Armv8VirReg) inst.getDefReg();
+                if (inst.getDefReg() instanceof AArch64VirReg) {
+                    AArch64VirReg defReg = (AArch64VirReg) inst.getDefReg();
                     if (defReg.isFloat() == isFloat) {
                         ensureNodeExists(defReg);
                         
-                        for (Armv8Reg liveReg : currentLive) {
+                        for (AArch64Reg liveReg : currentLive) {
                             if (!liveReg.equals(defReg)) {
                                 addConflictEdge(defReg, liveReg);
                             }
@@ -234,9 +234,9 @@ public class RegisterAllocator {
                 }
                 
                 // 添加使用的寄存器到活跃集合
-                for (Armv8Operand operand : inst.getOperands()) {
-                    if (operand instanceof Armv8VirReg) {
-                        Armv8VirReg virReg = (Armv8VirReg) operand;
+                for (AArch64Operand operand : inst.getOperands()) {
+                    if (operand instanceof AArch64VirReg) {
+                        AArch64VirReg virReg = (AArch64VirReg) operand;
                         if (virReg.isFloat() == isFloat) {
                             ensureNodeExists(virReg);
                             currentLive.add(virReg);
@@ -249,7 +249,7 @@ public class RegisterAllocator {
         System.out.println("干扰图构建完成，冲突边数: " + conflictSet.size());
     }
     
-    private void ensureNodeExists(Armv8Reg reg) {
+    private void ensureNodeExists(AArch64Reg reg) {
         if (!neighborList.containsKey(reg)) {
             neighborList.put(reg, new LinkedHashSet<>());
             degreeMap.put(reg, 0);
@@ -258,7 +258,7 @@ public class RegisterAllocator {
         }
     }
     
-    private void addToMoveList(Armv8Reg reg, Armv8Move moveInst) {
+    private void addToMoveList(AArch64Reg reg, AArch64Move moveInst) {
         ensureNodeExists(reg);
         if (!moveMap.containsKey(reg)) {
             moveMap.put(reg, new LinkedHashSet<>());
@@ -266,11 +266,11 @@ public class RegisterAllocator {
         moveMap.get(reg).add(moveInst);
     }
     
-    private void addConflictEdge(Armv8Reg u, Armv8Reg v) {
+    private void addConflictEdge(AArch64Reg u, AArch64Reg v) {
         if (u.equals(v)) return;
         
-        Pair<Armv8Reg, Armv8Reg> edge1 = new Pair<>(u, v);
-        Pair<Armv8Reg, Armv8Reg> edge2 = new Pair<>(v, u);
+        Pair<AArch64Reg, AArch64Reg> edge1 = new Pair<>(u, v);
+        Pair<AArch64Reg, AArch64Reg> edge2 = new Pair<>(v, u);
         
         if (!conflictSet.contains(edge1) && !conflictSet.contains(edge2)) {
             conflictSet.add(edge1);
@@ -286,8 +286,8 @@ public class RegisterAllocator {
     }
     
     private void buildWorkLists(int colorLimit) {
-        for (Armv8Operand operand : neighborList.keySet()) {
-            if (operand instanceof Armv8VirReg) {
+        for (AArch64Operand operand : neighborList.keySet()) {
+            if (operand instanceof AArch64VirReg) {
                 int degree = degreeMap.get(operand);
                 if (degree >= colorLimit) {
                     spillList.add(operand);
@@ -301,34 +301,34 @@ public class RegisterAllocator {
     }
     
     private void performSimplify() {
-        Armv8Operand node = simplifyList.iterator().next();
+        AArch64Operand node = simplifyList.iterator().next();
         simplifyList.remove(node);
         eliminationStack.push(node);
         
-        for (Armv8Operand neighbor : getAdjacentNodes(node)) {
+        for (AArch64Operand neighbor : getAdjacentNodes(node)) {
             decreaseDegree(neighbor);
         }
     }
     
     private void performCoalesce() {
-        Armv8Instruction moveInst = workingMoves.iterator().next();
+        AArch64Instruction moveInst = workingMoves.iterator().next();
         workingMoves.remove(moveInst);
         
-        if (!(moveInst instanceof Armv8Move)) return;
-        Armv8Move move = (Armv8Move) moveInst;
+        if (!(moveInst instanceof AArch64Move)) return;
+        AArch64Move move = (AArch64Move) moveInst;
         
-        if (move.getOperands().size() == 0 || !(move.getOperands().get(0) instanceof Armv8Reg)) {
+        if (move.getOperands().size() == 0 || !(move.getOperands().get(0) instanceof AArch64Reg)) {
             return;
         }
         
-        Armv8Reg x = (Armv8Reg) move.getOperands().get(0);
-        Armv8Reg y = move.getDefReg();
+        AArch64Reg x = (AArch64Reg) move.getOperands().get(0);
+        AArch64Reg y = move.getDefReg();
         
-        x = (Armv8Reg) getActualAlias(x);
-        y = (Armv8Reg) getActualAlias(y);
+        x = (AArch64Reg) getActualAlias(x);
+        y = (AArch64Reg) getActualAlias(y);
         
-        Armv8Reg u, v;
-        if (y instanceof Armv8PhyReg) {
+        AArch64Reg u, v;
+        if (y instanceof AArch64PhyReg) {
             u = y;
             v = x;
         } else {
@@ -339,7 +339,7 @@ public class RegisterAllocator {
         if (u.equals(v)) {
             coalescedMoves.add(moveInst);
             addToWorkList(u);
-        } else if (v instanceof Armv8PhyReg || hasConflict(u, v)) {
+        } else if (v instanceof AArch64PhyReg || hasConflict(u, v)) {
             constrainedMoves.add(moveInst);
             addToWorkList(u);
             addToWorkList(v);
@@ -350,14 +350,14 @@ public class RegisterAllocator {
     }
     
     private void performFreeze() {
-        Armv8Operand node = freezeList.iterator().next();
+        AArch64Operand node = freezeList.iterator().next();
         freezeList.remove(node);
         simplifyList.add(node);
         freezeNodeMoves(node);
     }
     
     private void selectForSpill() {
-        Armv8Operand spillCandidate = chooseSpillCandidate();
+        AArch64Operand spillCandidate = chooseSpillCandidate();
         spillList.remove(spillCandidate);
         simplifyList.add(spillCandidate);
         freezeNodeMoves(spillCandidate);
@@ -370,14 +370,14 @@ public class RegisterAllocator {
         }
         
         while (!eliminationStack.isEmpty()) {
-            Armv8Operand node = eliminationStack.pop();
+            AArch64Operand node = eliminationStack.pop();
             
-            if (node instanceof Armv8VirReg) {
+            if (node instanceof AArch64VirReg) {
                 Set<Integer> forbiddenColors = new HashSet<>();
                 
-                for (Armv8Operand neighbor : neighborList.get(node)) {
-                    Armv8Operand actualNeighbor = getActualAlias(neighbor);
-                    if (coloredRegs.contains(actualNeighbor) || actualNeighbor instanceof Armv8PhyReg) {
+                for (AArch64Operand neighbor : neighborList.get(node)) {
+                    AArch64Operand actualNeighbor = getActualAlias(neighbor);
+                    if (coloredRegs.contains(actualNeighbor) || actualNeighbor instanceof AArch64PhyReg) {
                         Integer color = colorMap.get(actualNeighbor);
                         if (color != null) {
                             forbiddenColors.add(color);
@@ -393,18 +393,18 @@ public class RegisterAllocator {
                     System.out.println("寄存器 " + node + " 溢出");
                 } else {
                     int chosenColor = okColors.iterator().next();
-                    colorMap.put((Armv8Reg) node, chosenColor);
-                    coloredRegs.add((Armv8Reg) node);
+                    colorMap.put((AArch64Reg) node, chosenColor);
+                    coloredRegs.add((AArch64Reg) node);
                     System.out.println("为寄存器 " + node + " 分配颜色 " + chosenColor);
                 }
             }
         }
         
         // 为合并的节点分配颜色
-        for (Armv8Operand node : coalescedRegs) {
-            Armv8Operand alias = getActualAlias(node);
+        for (AArch64Operand node : coalescedRegs) {
+            AArch64Operand alias = getActualAlias(node);
             if (colorMap.containsKey(alias)) {
-                colorMap.put((Armv8Reg) node, colorMap.get(alias));
+                colorMap.put((AArch64Reg) node, colorMap.get(alias));
                 System.out.println("合并节点 " + node + " 继承颜色 " + colorMap.get(alias));
             }
         }
@@ -417,13 +417,13 @@ public class RegisterAllocator {
         System.out.println("开始重写程序...");
         int replaceCount = 0;
         
-        for (Armv8Block block : currentFunction.getBlocks()) {
-            for (Armv8Instruction inst : block.getInstructions()) {
+        for (AArch64Block block : currentFunction.getBlocks()) {
+            for (AArch64Instruction inst : block.getInstructions()) {
                 // 替换定义寄存器
-                if (inst.getDefReg() instanceof Armv8VirReg) {
-                    Armv8VirReg virReg = (Armv8VirReg) inst.getDefReg();
+                if (inst.getDefReg() instanceof AArch64VirReg) {
+                    AArch64VirReg virReg = (AArch64VirReg) inst.getDefReg();
                     if (virReg.isFloat() == isFloat && colorMap.containsKey(virReg)) {
-                        Armv8PhyReg phyReg = getPhysicalRegisterFromColor(virReg, colorMap.get(virReg));
+                        AArch64PhyReg phyReg = getPhysicalRegisterFromColor(virReg, colorMap.get(virReg));
                         if (phyReg != null) {
                             inst.replaceDefReg(phyReg);
                             replaceCount++;
@@ -432,13 +432,13 @@ public class RegisterAllocator {
                 }
                 
                 // 替换操作数寄存器
-                List<Armv8Operand> operands = inst.getOperands();
+                List<AArch64Operand> operands = inst.getOperands();
                 for (int i = 0; i < operands.size(); i++) {
-                    Armv8Operand operand = operands.get(i);
-                    if (operand instanceof Armv8VirReg) {
-                        Armv8VirReg virReg = (Armv8VirReg) operand;
+                    AArch64Operand operand = operands.get(i);
+                    if (operand instanceof AArch64VirReg) {
+                        AArch64VirReg virReg = (AArch64VirReg) operand;
                         if (virReg.isFloat() == isFloat && colorMap.containsKey(virReg)) {
-                            Armv8PhyReg phyReg = getPhysicalRegisterFromColor(virReg, colorMap.get(virReg));
+                            AArch64PhyReg phyReg = getPhysicalRegisterFromColor(virReg, colorMap.get(virReg));
                             if (phyReg != null) {
                                 inst.replaceOperands(virReg, phyReg);
                                 replaceCount++;
@@ -455,10 +455,10 @@ public class RegisterAllocator {
     private void handleSpillRegisters(boolean isFloat) {
         System.out.println("处理溢出寄存器，数量: " + spilledRegs.size());
         
-        for (Armv8Operand spilledOperand : spilledRegs) {
-            if (!(spilledOperand instanceof Armv8VirReg)) continue;
+        for (AArch64Operand spilledOperand : spilledRegs) {
+            if (!(spilledOperand instanceof AArch64VirReg)) continue;
             
-            Armv8VirReg spilledReg = (Armv8VirReg) spilledOperand;
+            AArch64VirReg spilledReg = (AArch64VirReg) spilledOperand;
             if (spilledReg.isFloat() != isFloat) continue;
             
             long stackOffset = currentFunction.getStackSize();
@@ -471,17 +471,17 @@ public class RegisterAllocator {
         System.out.println("溢出处理完成");
     }
     
-    private void rewriteSpilledRegisterUsage(Armv8VirReg spilledReg, long offset) {
-        for (Armv8Block block : currentFunction.getBlocks()) {
-            List<Armv8Instruction> instructions = new ArrayList<>(block.getInstructions());
+    private void rewriteSpilledRegisterUsage(AArch64VirReg spilledReg, long offset) {
+        for (AArch64Block block : currentFunction.getBlocks()) {
+            List<AArch64Instruction> instructions = new ArrayList<>(block.getInstructions());
             
             for (int i = 0; i < instructions.size(); i++) {
-                Armv8Instruction inst = instructions.get(i);
+                AArch64Instruction inst = instructions.get(i);
                 boolean hasSpilledUse = false;
                 boolean hasSpilledDef = false;
                 
                 // 检查使用
-                for (Armv8Operand operand : inst.getOperands()) {
+                for (AArch64Operand operand : inst.getOperands()) {
                     if (operand.equals(spilledReg)) {
                         hasSpilledUse = true;
                         break;
@@ -496,28 +496,28 @@ public class RegisterAllocator {
                 if (hasSpilledUse || hasSpilledDef) {
                     if (hasSpilledUse) {
                         // 插入加载指令
-                        Armv8VirReg tempReg = new Armv8VirReg(spilledReg.isFloat());
+                        AArch64VirReg tempReg = new AArch64VirReg(spilledReg.isFloat());
                         if (offset >= -256 && offset <= 255) {
                             // 在有符号偏移范围内
-                            Armv8Load loadInst = new Armv8Load(Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(offset), tempReg);
+                            AArch64Load loadInst = new AArch64Load(AArch64CPUReg.getAArch64SpReg(), new AArch64Imm(offset), tempReg);
                             block.insertBeforeInst(inst, loadInst);
                         } else if (offset >= 0 && offset <= 32760 && (offset % 8 == 0)) {
                             // 在无符号偏移范围内
-                            Armv8Load loadInst = new Armv8Load(Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(offset), tempReg);
+                            AArch64Load loadInst = new AArch64Load(AArch64CPUReg.getAArch64SpReg(), new AArch64Imm(offset), tempReg);
                             block.insertBeforeInst(inst, loadInst);
                         } else {
                             // 超出范围，分解为ADD+LOAD
-                            Armv8VirReg addrReg = new Armv8VirReg(false);
+                            AArch64VirReg addrReg = new AArch64VirReg(false);
                             // 加载偏移量到寄存器
                             RegisterAllocatorHelper.loadLargeImmToReg(block, inst, addrReg, offset, false);
                             // 计算地址
-                            ArrayList<Armv8Operand> addOps = new ArrayList<>();
-                            addOps.add(Armv8CPUReg.getArmv8SpReg());
+                            ArrayList<AArch64Operand> addOps = new ArrayList<>();
+                            addOps.add(AArch64CPUReg.getAArch64SpReg());
                             addOps.add(addrReg);
-                            Armv8Binary addInst = new Armv8Binary(addOps, addrReg, Armv8Binary.Armv8BinaryType.add);
+                            AArch64Binary addInst = new AArch64Binary(addOps, addrReg, AArch64Binary.AArch64BinaryType.add);
                             block.insertBeforeInst(inst, addInst);
                             // 使用零偏移加载
-                            Armv8Load loadInst = new Armv8Load(addrReg, new Armv8Imm(0), tempReg);
+                            AArch64Load loadInst = new AArch64Load(addrReg, new AArch64Imm(0), tempReg);
                             block.insertBeforeInst(inst, loadInst);
                         }
                         inst.replaceOperands(spilledReg, tempReg);
@@ -525,30 +525,30 @@ public class RegisterAllocator {
                     
                     if (hasSpilledDef) {
                         // 创建临时寄存器并插入存储指令
-                        Armv8VirReg tempReg = new Armv8VirReg(spilledReg.isFloat());
+                        AArch64VirReg tempReg = new AArch64VirReg(spilledReg.isFloat());
                         inst.replaceDefReg(tempReg);
                         
                         if (offset >= -256 && offset <= 255) {
                             // 在有符号偏移范围内
-                            Armv8Store storeInst = new Armv8Store(tempReg, Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(offset));
+                            AArch64Store storeInst = new AArch64Store(tempReg, AArch64CPUReg.getAArch64SpReg(), new AArch64Imm(offset));
                             RegisterAllocatorHelper.insertAfterInstruction(block, inst, storeInst);
                         } else if (offset >= 0 && offset <= 32760 && (offset % 8 == 0)) {
                             // 在无符号偏移范围内
-                            Armv8Store storeInst = new Armv8Store(tempReg, Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(offset));
+                            AArch64Store storeInst = new AArch64Store(tempReg, AArch64CPUReg.getAArch64SpReg(), new AArch64Imm(offset));
                             RegisterAllocatorHelper.insertAfterInstruction(block, inst, storeInst);
                         } else {
                             // 超出范围，分解为ADD+STORE
-                            Armv8VirReg addrReg = new Armv8VirReg(false);
+                            AArch64VirReg addrReg = new AArch64VirReg(false);
                             // 加载偏移量到寄存器
                             RegisterAllocatorHelper.loadLargeImmToReg(block, inst, addrReg, offset, true);
                             // 计算地址
-                            ArrayList<Armv8Operand> addOps = new ArrayList<>();
-                            addOps.add(Armv8CPUReg.getArmv8SpReg());
+                            ArrayList<AArch64Operand> addOps = new ArrayList<>();
+                            addOps.add(AArch64CPUReg.getAArch64SpReg());
                             addOps.add(addrReg);
-                            Armv8Binary addInst = new Armv8Binary(addOps, addrReg, Armv8Binary.Armv8BinaryType.add);
+                            AArch64Binary addInst = new AArch64Binary(addOps, addrReg, AArch64Binary.AArch64BinaryType.add);
                             RegisterAllocatorHelper.insertAfterInstruction(block, inst, addInst);
                             // 使用零偏移存储
-                            Armv8Store storeInst = new Armv8Store(tempReg, addrReg, new Armv8Imm(0));
+                            AArch64Store storeInst = new AArch64Store(tempReg, addrReg, new AArch64Imm(0));
                             RegisterAllocatorHelper.insertAfterInstruction(block, inst, storeInst);
                         }
                     }
@@ -559,14 +559,14 @@ public class RegisterAllocator {
     
     // 辅助方法
     
-    private boolean isMoveRelated(Armv8Operand operand) {
+    private boolean isMoveRelated(AArch64Operand operand) {
         return !getNodeMoveInstructions(operand).isEmpty();
     }
     
-    private LinkedHashSet<Armv8Instruction> getNodeMoveInstructions(Armv8Operand operand) {
-        LinkedHashSet<Armv8Instruction> moves = new LinkedHashSet<>();
+    private LinkedHashSet<AArch64Instruction> getNodeMoveInstructions(AArch64Operand operand) {
+        LinkedHashSet<AArch64Instruction> moves = new LinkedHashSet<>();
         if (moveMap.containsKey(operand)) {
-            for (Armv8Move move : moveMap.get(operand)) {
+            for (AArch64Move move : moveMap.get(operand)) {
                 if (activeMoves.contains(move) || workingMoves.contains(move)) {
                     moves.add(move);
                 }
@@ -575,10 +575,10 @@ public class RegisterAllocator {
         return moves;
     }
     
-    private LinkedHashSet<Armv8Operand> getAdjacentNodes(Armv8Operand operand) {
-        LinkedHashSet<Armv8Operand> result = new LinkedHashSet<>();
+    private LinkedHashSet<AArch64Operand> getAdjacentNodes(AArch64Operand operand) {
+        LinkedHashSet<AArch64Operand> result = new LinkedHashSet<>();
         if (neighborList.containsKey(operand)) {
-            for (Armv8Operand neighbor : neighborList.get(operand)) {
+            for (AArch64Operand neighbor : neighborList.get(operand)) {
                 if (!eliminationStack.contains(neighbor) && !coalescedRegs.contains(neighbor)) {
                     result.add(neighbor);
                 }
@@ -587,41 +587,41 @@ public class RegisterAllocator {
         return result;
     }
     
-    private void decreaseDegree(Armv8Operand operand) {
-        if (!(operand instanceof Armv8VirReg)) return;
+    private void decreaseDegree(AArch64Operand operand) {
+        if (!(operand instanceof AArch64VirReg)) return;
         
         int currentDegree = degreeMap.get(operand);
         degreeMap.put(operand, currentDegree - 1);
     }
     
-    private Armv8Operand getActualAlias(Armv8Operand operand) {
+    private AArch64Operand getActualAlias(AArch64Operand operand) {
         if (coalescedRegs.contains(operand)) {
             return getActualAlias(aliasMap.get(operand));
         }
         return operand;
     }
     
-    private void addToWorkList(Armv8Reg reg) {
+    private void addToWorkList(AArch64Reg reg) {
         // 简化的实现
     }
     
-    private boolean hasConflict(Armv8Reg u, Armv8Reg v) {
+    private boolean hasConflict(AArch64Reg u, AArch64Reg v) {
         return conflictSet.contains(new Pair<>(u, v)) || conflictSet.contains(new Pair<>(v, u));
     }
     
-    private void freezeNodeMoves(Armv8Operand u) {
-        for (Armv8Instruction moveInst : new LinkedHashSet<>(getNodeMoveInstructions(u))) {
+    private void freezeNodeMoves(AArch64Operand u) {
+        for (AArch64Instruction moveInst : new LinkedHashSet<>(getNodeMoveInstructions(u))) {
             activeMoves.remove(moveInst);
             frozenMoves.add(moveInst);
         }
     }
     
-    private Armv8Operand chooseSpillCandidate() {
+    private AArch64Operand chooseSpillCandidate() {
         // 简单的溢出选择策略：选择度数最高的
-        Armv8Operand candidate = null;
+        AArch64Operand candidate = null;
         int maxDegree = -1;
         
-        for (Armv8Operand operand : spillList) {
+        for (AArch64Operand operand : spillList) {
             if (degreeMap.containsKey(operand) && degreeMap.get(operand) > maxDegree) {
                 maxDegree = degreeMap.get(operand);
                 candidate = operand;
@@ -631,16 +631,16 @@ public class RegisterAllocator {
         return candidate != null ? candidate : spillList.iterator().next();
     }
     
-    private Armv8PhyReg getPhysicalRegisterFromColor(Armv8VirReg virReg, int color) {
+    private AArch64PhyReg getPhysicalRegisterFromColor(AArch64VirReg virReg, int color) {
         if (virReg.isFloat()) {
             // 浮点寄存器: v8-v31
             if (color >= 0 && color < FPU_COLOR_COUNT) {
-                return Armv8FPUReg.getArmv8FloatReg(color + 8);
+                return AArch64FPUReg.getAArch64FloatReg(color + 8);
             }
         } else {
             // 整型寄存器: x8-x15
             if (color >= 0 && color < CPU_COLOR_COUNT) {
-                return Armv8CPUReg.getArmv8CPUReg(color + 19);
+                return AArch64CPUReg.getAArch64CPUReg(color + 19);
             }
         }
         
