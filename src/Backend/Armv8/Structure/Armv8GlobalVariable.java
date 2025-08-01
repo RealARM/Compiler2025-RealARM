@@ -1,7 +1,7 @@
 package Backend.Armv8.Structure;
 
 import Backend.Armv8.Operand.Armv8Label;
-import IR.Type.Type;
+import MiddleEnd.IR.Type.Type;
 
 import java.util.ArrayList;
 

@@ -1,22 +1,15 @@
-import Frontend.SysYLexer;
-import Frontend.SysYParser;
-import Frontend.SyntaxTree;
-import Frontend.TokenStream;
-import Frontend.SysYToken;
-import Frontend.SysYTokenType;
-import IR.IRBuilder;
-import IR.IRPrinter;
-import IR.Module;
-import IR.Pass.PassManager;
-import IR.Visitor.IRVisitor;
+import Frontend.Lexer.*;
+import Frontend.Parser.*;
+import MiddleEnd.IR.IRPrinter;
+import MiddleEnd.IR.Module;
+import MiddleEnd.Optimization.Core.OptimizeManager;
+import MiddleEnd.IR.Visitor.IRVisitor;
 import Backend.Armv8.Armv8Visitor;
 
 import java.io.FileReader;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
-import java.util.HashMap;
-import java.util.Map;
 
 /**
  * 编译器入口类
@@ -158,12 +151,8 @@ public class Compiler {
     private static void runOptimizations(Module irModule, int optimizationLevel, boolean debug) {
         System.out.println("\n正在运行优化 (级别 O" + optimizationLevel + ")...");
         
-        // 获取PassManager实例
-        PassManager passManager = PassManager.getInstance();
-        passManager.setDebug(debug);
-        
-        // 根据优化级别运行优化
-        passManager.optimize(irModule, optimizationLevel);
+        // 获取优化管理器实例
+        OptimizeManager.getInstance().runAllOptimizers(irModule);
         
         System.out.println("优化完成。");
     }

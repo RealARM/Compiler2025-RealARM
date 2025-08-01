@@ -3,13 +3,15 @@ package Backend.Armv8.Structure;
 import java.util.*;
 
 import Backend.Armv8.Armv8Visitor;
+import Backend.Armv8.Instruction.Armv8Binary;
 import Backend.Armv8.Instruction.Armv8Fmov;
 import Backend.Armv8.Instruction.Armv8Move;
 import Backend.Armv8.Instruction.Armv8Load;
 import Backend.Armv8.Instruction.Armv8Store;
 import Backend.Armv8.Operand.*;
-import IR.Type.FloatType;
-import IR.Value.*;
+import MiddleEnd.IR.Type.*;
+import MiddleEnd.IR.Value.*;
+import MiddleEnd.IR.Value.Instructions.*;
 
 public class Armv8Function {
     private String name;
@@ -85,17 +87,97 @@ public class Armv8Function {
         this.stackSpace.addOffset(8 * (paraReg2Stack.size() + 32));
     }
 
+    /**
+     * 安全地创建内存访问指令，处理大偏移量
+     */
+    private void createSafeMemoryInstruction(Armv8Block block, Armv8Reg baseReg, long offset, Armv8Reg valueReg, boolean isLoad) {
+        // 检查偏移量是否在ARMv8内存指令的范围内
+        // ARMv8 LDR/STR指令支持：
+        // 1. 9位有符号偏移：-256到255
+        // 2. 12位无符号偏移：0到32760，且必须是8的倍数
+        
+        if (offset >= -256 && offset <= 255) {
+            // 使用有符号偏移
+            if (isLoad) {
+                block.addArmv8Instruction(new Armv8Load(baseReg, new Armv8Imm(offset), valueReg));
+            } else {
+                block.addArmv8Instruction(new Armv8Store(valueReg, baseReg, new Armv8Imm(offset)));
+            }
+        } else if (offset >= 0 && offset <= 32760 && (offset % 8 == 0)) {
+            // 使用无符号偏移
+            if (isLoad) {
+                block.addArmv8Instruction(new Armv8Load(baseReg, new Armv8Imm(offset), valueReg));
+            } else {
+                block.addArmv8Instruction(new Armv8Store(valueReg, baseReg, new Armv8Imm(offset)));
+            }
+        } else {
+            // 偏移量超出范围，需要分解为ADD指令 + 零偏移访问
+            Armv8VirReg tempAddrReg = new Armv8VirReg(false);
+            
+            // 加载大立即数到临时寄存器
+            loadLargeImmediate(block, tempAddrReg, offset);
+            
+            // 计算地址：tempAddrReg = baseReg + offset
+            ArrayList<Armv8Operand> addOperands = new ArrayList<>();
+            addOperands.add(baseReg);
+            addOperands.add(tempAddrReg);
+            Armv8Binary addInst = new Armv8Binary(addOperands, tempAddrReg, Armv8Binary.Armv8BinaryType.add);
+            block.addArmv8Instruction(addInst);
+            
+            // 使用计算得到的地址进行内存访问
+            if (isLoad) {
+                block.addArmv8Instruction(new Armv8Load(tempAddrReg, new Armv8Imm(0), valueReg));
+            } else {
+                block.addArmv8Instruction(new Armv8Store(valueReg, tempAddrReg, new Armv8Imm(0)));
+            }
+        }
+    }
+
+    /**
+     * 加载大立即数到寄存器
+     */
+    private void loadLargeImmediate(Armv8Block block, Armv8Reg destReg, long value) {
+        long bits = value;
+        
+        // 使用MOVZ指令加载第一个16位
+        Armv8Move movzInst = new Armv8Move(destReg, new Armv8Imm(bits & 0xFFFF), true, Armv8Move.MoveType.MOVZ);
+        block.addArmv8Instruction(movzInst);
+        
+        // 检查第二个16位（bits[31:16]）
+        if (((bits >> 16) & 0xFFFF) != 0) {
+            Armv8Move movkInst = new Armv8Move(destReg, new Armv8Imm((bits >> 16) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+            movkInst.setShift(16);
+            block.addArmv8Instruction(movkInst);
+        }
+        
+        // 检查第三个16位（bits[47:32]）
+        if (((bits >> 32) & 0xFFFF) != 0) {
+            Armv8Move movkInst = new Armv8Move(destReg, new Armv8Imm((bits >> 32) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+            movkInst.setShift(32);
+            block.addArmv8Instruction(movkInst);
+        }
+        
+        // 检查第四个16位（bits[63:48]）
+        if (((bits >> 48) & 0xFFFF) != 0) {
+            Armv8Move movkInst = new Armv8Move(destReg, new Armv8Imm((bits >> 48) & 0xFFFF), true, Armv8Move.MoveType.MOVK);
+            movkInst.setShift(48);
+            block.addArmv8Instruction(movkInst);
+        }
+    }
+
     public void saveCallerRegs(Armv8Block block) {
         for(int i = 0; i < paraReg2Stack.size(); i++) {
             Armv8Reg reg = paraReg2Stack.get(i);
-            block.addArmv8Instruction(new Armv8Store(reg, Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(i*8)));
+            long offset = i * 8L;
+            createSafeMemoryInstruction(block, Armv8CPUReg.getArmv8SpReg(), offset, reg, false);
         }
     }
 
     public void loadCallerRegs(Armv8Block block) {
         for(int i = 0; i < paraReg2Stack.size(); i++) {
             Armv8Reg reg = paraReg2Stack.get(i);
-            block.addArmv8Instruction(new Armv8Load(Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(i*8), reg));
+            long offset = i * 8L;
+            createSafeMemoryInstruction(block, Armv8CPUReg.getArmv8SpReg(), offset, reg, true);
         }
     }
 
@@ -103,12 +185,14 @@ public class Armv8Function {
         int size = paraReg2Stack.size();
         for(int i = 0; i < 8; i++) {
             Armv8Reg reg = Armv8CPUReg.getArmv8CPUReg(i + 8);
-            block.addArmv8Instruction(new Armv8Store(reg, Armv8CPUReg.getArmv8SpReg(), new Armv8Imm((i + size) * 8)));
+            long offset = (i + size) * 8L;
+            createSafeMemoryInstruction(block, Armv8CPUReg.getArmv8SpReg(), offset, reg, false);
         } 
 
         for (int i = 0; i < 24; i++) {
             Armv8Reg reg = Armv8FPUReg.getArmv8FloatReg(i + 8);
-            block.addArmv8Instruction(new Armv8Store(reg, Armv8CPUReg.getArmv8SpReg(), new Armv8Imm((i + size + 8) * 8)));
+            long offset = (i + size + 8) * 8L;
+            createSafeMemoryInstruction(block, Armv8CPUReg.getArmv8SpReg(), offset, reg, false);
         }
     }
 
@@ -116,12 +200,14 @@ public class Armv8Function {
         int size = paraReg2Stack.size();
         for(int i = 0; i < 8; i++) {
             Armv8Reg reg = Armv8CPUReg.getArmv8CPUReg(i + 8);
-            block.addArmv8Instruction(new Armv8Load(Armv8CPUReg.getArmv8SpReg(), new Armv8Imm((i + size) * 8), reg));
+            long offset = (i + size) * 8L;
+            createSafeMemoryInstruction(block, Armv8CPUReg.getArmv8SpReg(), offset, reg, true);
         } 
 
         for (int i = 0; i < 24; i++) {
             Armv8Reg reg = Armv8FPUReg.getArmv8FloatReg(i + 8);
-            block.addArmv8Instruction(new Armv8Load(Armv8CPUReg.getArmv8SpReg(), new Armv8Imm((i + size + 8) * 8), reg));
+            long offset = (i + size + 8) * 8L;
+            createSafeMemoryInstruction(block, Armv8CPUReg.getArmv8SpReg(), offset, reg, true);
         }
     }
 
