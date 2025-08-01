@@ -20,7 +20,7 @@ public class Armv8Function {
     private Long stackSize = 0L;
     private Armv8Stack stackSpace = new Armv8Stack();
     private LinkedHashMap<Value, Long> stack = new LinkedHashMap<>();
-    private ArrayList<Armv8Reg> paraReg2Stack = new ArrayList<>();
+    private ArrayList<Armv8Reg> callerReg = new ArrayList<>();
 
     private HashMap<Value, Armv8Reg> RegArgList = new HashMap<>();
     private HashMap<Value, Long> stackArgList = new HashMap<>();
@@ -70,7 +70,7 @@ public class Armv8Function {
                 }
 
                 //将参数寄存器加入保护行列
-                paraReg2Stack.add(argReg);
+                callerReg.add(argReg);
                 // 直接建立映射关系，无需复制
                 addRegArg(arg, argReg);
                 Armv8Visitor.getRegList().put(arg, argReg);
@@ -83,8 +83,8 @@ public class Armv8Function {
         }
 
         // 保护空间，保存参数寄存器和返回地址
-        this.stackSize += 8 * (paraReg2Stack.size() + 32);
-        this.stackSpace.addOffset(8 * (paraReg2Stack.size() + 32));
+        this.stackSize += 8 * (callerReg.size() + 32);
+        this.stackSpace.addOffset(8 * (callerReg.size() + 32));
     }
 
     /**
@@ -166,25 +166,25 @@ public class Armv8Function {
     }
 
     public void saveCallerRegs(Armv8Block block) {
-        for(int i = 0; i < paraReg2Stack.size(); i++) {
-            Armv8Reg reg = paraReg2Stack.get(i);
+        for(int i = 0; i < callerReg.size(); i++) {
+            Armv8Reg reg = callerReg.get(i);
             long offset = i * 8L;
             createSafeMemoryInstruction(block, Armv8CPUReg.getArmv8SpReg(), offset, reg, false);
         }
     }
 
     public void loadCallerRegs(Armv8Block block) {
-        for(int i = 0; i < paraReg2Stack.size(); i++) {
-            Armv8Reg reg = paraReg2Stack.get(i);
+        for(int i = 0; i < callerReg.size(); i++) {
+            Armv8Reg reg = callerReg.get(i);
             long offset = i * 8L;
             createSafeMemoryInstruction(block, Armv8CPUReg.getArmv8SpReg(), offset, reg, true);
         }
     }
 
     public void saveCalleeRegs(Armv8Block block) {
-        int size = paraReg2Stack.size();
+        int size = callerReg.size();
         for(int i = 0; i < 8; i++) {
-            Armv8Reg reg = Armv8CPUReg.getArmv8CPUReg(i + 8);
+            Armv8Reg reg = Armv8CPUReg.getArmv8CPUReg(i + 19);
             long offset = (i + size) * 8L;
             createSafeMemoryInstruction(block, Armv8CPUReg.getArmv8SpReg(), offset, reg, false);
         } 
@@ -197,9 +197,9 @@ public class Armv8Function {
     }
 
     public void loadCalleeRegs(Armv8Block block) {
-        int size = paraReg2Stack.size();
+        int size = callerReg.size();
         for(int i = 0; i < 8; i++) {
-            Armv8Reg reg = Armv8CPUReg.getArmv8CPUReg(i + 8);
+            Armv8Reg reg = Armv8CPUReg.getArmv8CPUReg(i + 19);
             long offset = (i + size) * 8L;
             createSafeMemoryInstruction(block, Armv8CPUReg.getArmv8SpReg(), offset, reg, true);
         } 

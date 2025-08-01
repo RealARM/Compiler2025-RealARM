@@ -632,7 +632,7 @@ public class RegisterAllocator {
         } else {
             // 整型寄存器: x8-x15
             if (color >= 0 && color < CPU_COLOR_COUNT) {
-                return Armv8CPUReg.getArmv8CPUReg(color + 8);
+                return Armv8CPUReg.getArmv8CPUReg(color + 19);
             }
         }
         
