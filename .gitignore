@@ -32,10 +32,11 @@
 /2
 /functional
 /h_functional
-/logs
 /ARM-性能
-/.vscode
 *.class
-*.jar
-*.py
 *.ll
+*.jar
+/logs
+*.s
+*.py
+/.vscode

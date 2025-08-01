@@ -489,12 +489,29 @@ public class RegisterAllocator {
                     if (hasSpilledUse) {
                         // 插入加载指令
                         Armv8VirReg tempReg = new Armv8VirReg(spilledReg.isFloat());
-                        Armv8Load loadInst = new Armv8Load(
-                            Armv8CPUReg.getArmv8SpReg(),
-                            new Armv8Imm(offset),
-                            tempReg
-                        );
-                        block.insertBeforeInst(inst, loadInst);
+                        if (offset >= -256 && offset <= 255) {
+                            // 在有符号偏移范围内
+                            Armv8Load loadInst = new Armv8Load(Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(offset), tempReg);
+                            block.insertBeforeInst(inst, loadInst);
+                        } else if (offset >= 0 && offset <= 32760 && (offset % 8 == 0)) {
+                            // 在无符号偏移范围内
+                            Armv8Load loadInst = new Armv8Load(Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(offset), tempReg);
+                            block.insertBeforeInst(inst, loadInst);
+                        } else {
+                            // 超出范围，分解为ADD+LOAD
+                            Armv8VirReg addrReg = new Armv8VirReg(false);
+                            // 加载偏移量到寄存器
+                            RegisterAllocatorHelper.loadLargeImmToReg(block, inst, addrReg, offset, false);
+                            // 计算地址
+                            ArrayList<Armv8Operand> addOps = new ArrayList<>();
+                            addOps.add(Armv8CPUReg.getArmv8SpReg());
+                            addOps.add(addrReg);
+                            Armv8Binary addInst = new Armv8Binary(addOps, addrReg, Armv8Binary.Armv8BinaryType.add);
+                            block.insertBeforeInst(inst, addInst);
+                            // 使用零偏移加载
+                            Armv8Load loadInst = new Armv8Load(addrReg, new Armv8Imm(0), tempReg);
+                            block.insertBeforeInst(inst, loadInst);
+                        }
                         inst.replaceOperands(spilledReg, tempReg);
                     }
                     
@@ -503,18 +520,28 @@ public class RegisterAllocator {
                         Armv8VirReg tempReg = new Armv8VirReg(spilledReg.isFloat());
                         inst.replaceDefReg(tempReg);
                         
-                        Armv8Store storeInst = new Armv8Store(
-                            tempReg,
-                            Armv8CPUReg.getArmv8SpReg(),
-                            new Armv8Imm(offset)
-                        );
-                        
-                        int instIndex = block.getInstructions().indexOf(inst);
-                        if (instIndex != -1 && instIndex + 1 < block.getInstructions().size()) {
-                            Armv8Instruction nextInst = block.getInstructions().get(instIndex + 1);
-                            block.insertBeforeInst(nextInst, storeInst);
+                        if (offset >= -256 && offset <= 255) {
+                            // 在有符号偏移范围内
+                            Armv8Store storeInst = new Armv8Store(tempReg, Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(offset));
+                            RegisterAllocatorHelper.insertAfterInstruction(block, inst, storeInst);
+                        } else if (offset >= 0 && offset <= 32760 && (offset % 8 == 0)) {
+                            // 在无符号偏移范围内
+                            Armv8Store storeInst = new Armv8Store(tempReg, Armv8CPUReg.getArmv8SpReg(), new Armv8Imm(offset));
+                            RegisterAllocatorHelper.insertAfterInstruction(block, inst, storeInst);
                         } else {
-                            block.addArmv8Instruction(storeInst);
+                            // 超出范围，分解为ADD+STORE
+                            Armv8VirReg addrReg = new Armv8VirReg(false);
+                            // 加载偏移量到寄存器
+                            RegisterAllocatorHelper.loadLargeImmToReg(block, inst, addrReg, offset, true);
+                            // 计算地址
+                            ArrayList<Armv8Operand> addOps = new ArrayList<>();
+                            addOps.add(Armv8CPUReg.getArmv8SpReg());
+                            addOps.add(addrReg);
+                            Armv8Binary addInst = new Armv8Binary(addOps, addrReg, Armv8Binary.Armv8BinaryType.add);
+                            RegisterAllocatorHelper.insertAfterInstruction(block, inst, addInst);
+                            // 使用零偏移存储
+                            Armv8Store storeInst = new Armv8Store(tempReg, addrReg, new Armv8Imm(0));
+                            RegisterAllocatorHelper.insertAfterInstruction(block, inst, storeInst);
                         }
                     }
                 }

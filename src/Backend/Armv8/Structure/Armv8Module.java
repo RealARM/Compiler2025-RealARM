@@ -3,6 +3,8 @@ package Backend.Armv8.Structure;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 
+import Backend.Armv8.tools.Armv8MyLib;  
+
 public class Armv8Module {
     private final ArrayList<Armv8GlobalVariable> dataGlobalVariables = new ArrayList<>();
     private final ArrayList<Armv8GlobalVariable> bssGlobalVariables = new ArrayList<>();
@@ -64,11 +66,20 @@ public class Armv8Module {
         //         break;
         //     }
         // }
-        sb.append(Armv8Function.generateMemsetFunction());
+        
+
         for(Armv8Function function:functions.values()){
             // if(!(function.getName().equals("main")))
             sb.append(function.dump());
         }
+        sb.append("\n\n\n\n\n\n");
+        sb.append(Armv8MyLib.generateMemsetFunction());
+        sb.append(Armv8MyLib.generateGetarray64Function());
+        sb.append(Armv8MyLib.generatePutarray64Function());
+        sb.append(Armv8MyLib.generateGetfarray64Function());
+        sb.append(Armv8MyLib.generatePutfarray64Function());
+
+    
         return sb.toString();
     }
 } 

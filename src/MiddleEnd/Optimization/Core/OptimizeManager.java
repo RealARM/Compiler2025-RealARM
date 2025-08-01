@@ -105,7 +105,7 @@ public class OptimizeManager {
         addModuleOptimizer(new DCE());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        // addModuleOptimizer(new RemovePhiPass());
+        addModuleOptimizer(new RemovePhiPass());
     }
     
     /**
