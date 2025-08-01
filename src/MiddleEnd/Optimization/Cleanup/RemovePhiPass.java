@@ -13,7 +13,7 @@ import MiddleEnd.Optimization.Core.Optimizer;
 import java.util.*;
 
 /**
- * PHI指令消除优化Pass
+ * PHI指令消除
  * 将SSA形式中的PHI指令转换为普通的Move指令
  * 使用拓扑排序和破环算法处理循环依赖
  */
@@ -30,10 +30,9 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
     public boolean run(Module module) {
         boolean changed = false;
         
-        // 对每个函数进行PHI消除
         for (Function function : module.functions()) {
             if (module.libFunctions().contains(function)) {
-                continue; // 跳过库函数
+                continue;
             }
             
             if (runOnFunction(function)) {
@@ -44,15 +43,11 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
         return changed;
     }
     
-    /**
-     * 对单个函数进行PHI消除
-     */
     private boolean runOnFunction(Function function) {
         if (DEBUG) {
             System.out.println("RemovePhiPass: 处理函数 " + function.getName());
         }
         
-        // 步骤1：收集所有PHI指令
         List<PhiInstruction> allPhis = collectPhiInstructions(function);
         
         if (allPhis.isEmpty()) {
@@ -66,10 +61,8 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
             System.out.println("  总共找到 " + allPhis.size() + " 个PHI指令");
         }
         
-        // 步骤2：为每个PHI指令生成对应的Move指令，并立即替换引用
         processPhiInstructions(function, allPhis);
         
-        // 步骤5：删除所有PHI指令
         removePhiInstructions(allPhis);
         
         if (DEBUG) {
@@ -79,9 +72,6 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
         return true;
     }
     
-    /**
-     * 收集函数中的所有PHI指令
-     */
     private List<PhiInstruction> collectPhiInstructions(Function function) {
         List<PhiInstruction> allPhis = new ArrayList<>();
         
@@ -99,26 +89,20 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
         return allPhis;
     }
     
-    /**
-     * 处理PHI指令：使用正确的PHI消除算法
-     */
     private void processPhiInstructions(Function function, List<PhiInstruction> allPhis) {
         if (DEBUG) {
             System.out.println("  开始处理PHI指令...");
         }
         
-        // 步骤1：为每个PHI指令创建代表性的Move指令并插入
         Map<PhiInstruction, MoveInstruction> phiToRepresentativeMove = new HashMap<>();
         Map<BasicBlock, List<Instruction>> waitAddedMoves = new LinkedHashMap<>();
         
-        // 初始化每个基本块的Move指令列表
         for (PhiInstruction phi : allPhis) {
             for (BasicBlock bb : phi.getIncomingBlocks()) {
                 waitAddedMoves.computeIfAbsent(bb, k -> new ArrayList<>());
             }
         }
         
-        // 为每个PHI指令生成Move指令
         for (PhiInstruction phi : allPhis) {
             if (DEBUG) {
                 System.out.println("  处理PHI: " + phi.getName() + " 有 " + phi.getIncomingBlocks().size() + " 个输入");
@@ -127,11 +111,9 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
             for (BasicBlock incomingBlock : phi.getIncomingBlocks()) {
                 Value incomingValue = phi.getIncomingValue(incomingBlock);
                 
-                // 创建Move指令：phi_var = mov incoming_value
                 MoveInstruction move = new MoveInstruction(phi.getName(), phi.getType(), incomingValue);
                 waitAddedMoves.get(incomingBlock).add(move);
                 
-                // 将第一个Move指令作为该PHI的代表性Move指令
                 if (!phiToRepresentativeMove.containsKey(phi)) {
                     phiToRepresentativeMove.put(phi, move);
                 }
@@ -142,7 +124,6 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
             }
         }
         
-        // 步骤2：插入Move指令，使用循环依赖处理
         for (Map.Entry<BasicBlock, List<Instruction>> entry : waitAddedMoves.entrySet()) {
             BasicBlock bb = entry.getKey();
             List<Instruction> moves = entry.getValue();
@@ -152,12 +133,10 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
                     System.out.println("  在 " + bb.getName() + " 中插入 " + moves.size() + " 个Move指令");
                 }
                 
-                // 使用工具类处理循环依赖
                 PhiEliminationUtils.insertMovesWithCycleResolution(bb, moves, DEBUG);
             }
         }
         
-        // 步骤3：更新所有对PHI指令的引用，指向代表性的Move指令
         updatePhiReferences(function, phiToRepresentativeMove);
         
         if (DEBUG) {
@@ -165,9 +144,6 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
         }
     }
     
-    /**
-     * 替换对特定PHI指令的所有引用
-     */
     private void replacePhiUsages(Function function, PhiInstruction phi, MoveInstruction replacement) {
         if (DEBUG) {
             System.out.println("    替换对 " + phi.getName() + " 的引用为 " + replacement.getName());
@@ -179,7 +155,6 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
                     continue;
                 }
                 
-                // 检查指令的所有操作数
                 for (int i = 0; i < inst.getOperands().size(); i++) {
                     Value operand = inst.getOperand(i);
                     if (operand == phi) {
@@ -193,21 +168,16 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
         }
     }
     
-    /**
-     * 为每个PHI指令生成对应的Move指令
-     */
     private Map<BasicBlock, List<Instruction>> generateMoveInstructions(List<PhiInstruction> allPhis, 
                                                                        Map<PhiInstruction, MoveInstruction> phiToMoveMap) {
         Map<BasicBlock, List<Instruction>> waitAddedMoves = new LinkedHashMap<>();
         
-        // 初始化每个基本块的Move指令列表
         for (PhiInstruction phi : allPhis) {
             for (BasicBlock bb : phi.getIncomingBlocks()) {
                 waitAddedMoves.computeIfAbsent(bb, k -> new ArrayList<>());
             }
         }
         
-        // 为每个PHI指令生成Move指令
         for (PhiInstruction phi : allPhis) {
             if (DEBUG) {
                 System.out.println("  处理PHI: " + phi.getName() + " 有 " + phi.getIncomingBlocks().size() + " 个输入");
@@ -216,11 +186,9 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
             for (BasicBlock incomingBlock : phi.getIncomingBlocks()) {
                 Value incomingValue = phi.getIncomingValue(incomingBlock);
                 
-                // 创建Move指令：phi_var = mov incoming_value
                 MoveInstruction move = new MoveInstruction(phi.getName(), phi.getType(), incomingValue);
                 waitAddedMoves.get(incomingBlock).add(move);
                 
-                // 记录PHI到Move的映射（使用第一个Move指令作为代表）
                 if (!phiToMoveMap.containsKey(phi)) {
                     phiToMoveMap.put(phi, move);
                 }
@@ -234,9 +202,6 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
         return waitAddedMoves;
     }
     
-    /**
-     * 在各个基本块中插入Move指令
-     */
     private void insertMoveInstructions(Map<BasicBlock, List<Instruction>> waitAddedMoves) {
         for (Map.Entry<BasicBlock, List<Instruction>> entry : waitAddedMoves.entrySet()) {
             BasicBlock bb = entry.getKey();
@@ -247,15 +212,11 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
                     System.out.println("  在 " + bb.getName() + " 中插入 " + moves.size() + " 个Move指令");
                 }
                 
-                // 使用工具类处理循环依赖
                 PhiEliminationUtils.insertMovesWithCycleResolution(bb, moves, DEBUG);
             }
         }
     }
     
-    /**
-     * 更新所有对PHI指令的引用，将它们指向代表性的Move指令
-     */
     private void updatePhiReferences(Function function, Map<PhiInstruction, MoveInstruction> phiToMoveMap) {
         if (DEBUG) {
             System.out.println("  开始更新PHI引用...");
@@ -263,19 +224,15 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
         
         int replacementCount = 0;
         
-        // 遍历所有基本块和指令
         for (BasicBlock bb : function.getBasicBlocks()) {
             for (Instruction inst : bb.getInstructions()) {
-                // 跳过PHI指令本身，但不跳过Move指令！
                 if (inst instanceof PhiInstruction) {
                     continue;
                 }
                 
-                // 检查指令的所有操作数
                 for (int i = 0; i < inst.getOperands().size(); i++) {
                     Value operand = inst.getOperand(i);
                     
-                    // 如果操作数是PHI指令，则替换为代表性的Move指令
                     if (phiToMoveMap.containsKey(operand)) {
                         MoveInstruction representativeMove = phiToMoveMap.get(operand);
                         
@@ -295,9 +252,6 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
         }
     }
     
-    /**
-     * 删除所有PHI指令
-     */
     private void removePhiInstructions(List<PhiInstruction> allPhis) {
         for (PhiInstruction phi : allPhis) {
             if (DEBUG) {

@@ -14,18 +14,11 @@ import MiddleEnd.IR.Value.Instructions.*;
  */
 public class ConstantExpressionEvaluator {
     
-    /**
-     * 评估常量表达式
-     * @param expr 待评估的表达式
-     * @return 计算结果，如果不是常量表达式则返回null
-     */
     public static Constant evaluate(Value expr) {
-        // 如果已经是常量，直接返回
         if (expr instanceof Constant) {
             return (Constant) expr;
         }
         
-        // 处理变量引用 (主要用于全局常量引用)
         if (expr instanceof GlobalVariable gv) {
             if (gv.isConstant() && gv.hasInitializer()) {
                 Value initializer = gv.getInitializer();
@@ -36,25 +29,20 @@ public class ConstantExpressionEvaluator {
             return null;
         }
         
-        // 处理二元表达式
         if (expr instanceof BinaryInstruction binaryInst) {
             Value left = binaryInst.getOperand(0);
             Value right = binaryInst.getOperand(1);
             
-            // 递归评估操作数
             Constant leftConst = evaluate(left);
             Constant rightConst = evaluate(right);
             
-            // 如果操作数不是常量，则整个表达式不是常量
             if (leftConst == null || rightConst == null) {
                 return null;
             }
             
-            // 计算常量表达式
             return calculateConstantExpr(leftConst, rightConst, binaryInst.getOpCode());
         }
         
-        // 处理一元表达式（如负号）
         if (expr instanceof UnaryInstruction unaryInst) {
             Value operand = unaryInst.getOperand(0);
             Constant operandConst = evaluate(operand);
@@ -63,7 +51,6 @@ public class ConstantExpressionEvaluator {
                 return null;
             }
             
-            // 处理负号
             if (unaryInst.getOpCode() == OpCode.NEG) {
                 if (operandConst instanceof ConstantInt) {
                     return new ConstantInt(-((ConstantInt) operandConst).getValue());
@@ -73,7 +60,6 @@ public class ConstantExpressionEvaluator {
             }
         }
         
-        // 处理类型转换指令
         if (expr instanceof ConversionInstruction convInst) {
             Value operand = convInst.getOperand(0);
             Constant operandConst = evaluate(operand);
@@ -84,25 +70,18 @@ public class ConstantExpressionEvaluator {
             
             Type targetType = convInst.getType();
             
-            // 整数转浮点数
             if (convInst.getConversionType() == OpCode.SITOFP && operandConst instanceof ConstantInt) {
                 return new ConstantFloat((double) ((ConstantInt) operandConst).getValue());
-            }
-            // 浮点数转整数
+            }       
             else if (convInst.getConversionType() == OpCode.FPTOSI && operandConst instanceof ConstantFloat) {
                 return new ConstantInt((int) ((ConstantFloat) operandConst).getValue());
             }
         }
         
-        // 其他情况，不是常量表达式
         return null;
     }
     
-    /**
-     * 计算常量表达式结果
-     */
     private static Constant calculateConstantExpr(Constant left, Constant right, OpCode op) {
-        // 整数常量计算
         if (left instanceof ConstantInt && right instanceof ConstantInt) {
             int leftVal = ((ConstantInt) left).getValue();
             int rightVal = ((ConstantInt) right).getValue();
@@ -151,7 +130,6 @@ public class ConstantExpressionEvaluator {
             }
         }
         
-        // 浮点常量计算
         if (left instanceof ConstantFloat && right instanceof ConstantFloat) {
             double leftVal = ((ConstantFloat) left).getValue();
             double rightVal = ((ConstantFloat) right).getValue();
@@ -188,7 +166,6 @@ public class ConstantExpressionEvaluator {
             }
         }
         
-        // 混合类型计算（整数和浮点）
         if (left instanceof ConstantInt && right instanceof ConstantFloat) {
             double leftVal = ((ConstantInt) left).getValue();
             double rightVal = ((ConstantFloat) right).getValue();
@@ -237,12 +214,9 @@ public class ConstantExpressionEvaluator {
             }
         }
         
-        return null; // 无法计算
+        return null;
     }
 
-    /**
-     * 将值提升为浮点类型（如果是整数）
-     */
     private static Value promoteToFloat(Value value) {
         if (value.getType() instanceof IntegerType && value instanceof ConstantInt) {
             return new ConstantFloat((double) ((ConstantInt) value).getValue());
