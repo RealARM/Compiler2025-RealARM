@@ -3,18 +3,10 @@ package Frontend.Parser;
 import java.util.List;
 import java.util.ArrayList;
 
-/**
- * SysY 语言的抽象语法树（AST）节点定义。
- */
 public class SyntaxTree {
 
-    /* -------------------- 基础接口 -------------------- */
-
-    /** 所有 AST 节点的公共接口 */
     public interface Node {
     }
-
-    /** 编译单元（完整程序） */
     public static class CompilationUnit implements Node {
         private final List<TopLevelDef> defs;
 
@@ -32,13 +24,10 @@ public class SyntaxTree {
         }
     }
 
-    /** 顶层定义：变量声明或函数定义 */
     public interface TopLevelDef extends Node {
     }
 
-    /* -------------------- 声明相关 -------------------- */
-
-    /** 变量声明（含常量）。在语句块中也可作为Stmt出现 */
+    // 变量声明（含常量）
     public static class VarDecl implements TopLevelDef, Stmt {
         public final boolean isConst;
         public final String baseType; // int / float
@@ -51,11 +40,10 @@ public class SyntaxTree {
         }
     }
 
-    /** 单个变量定义（可能带初始化和数组维度） */
     public static class VarDef {
         public final String ident;
-        public final List<Integer> dims; // 维度长度常量表达式，这里先用整数占位
-        public final Expr init; // 初始化表达式，暂可为空
+        public final List<Integer> dims; // 数组维度
+        public final Expr init; // 初始化表达式
 
         public VarDef(String ident, List<Integer> dims, Expr init) {
             this.ident = ident;
@@ -64,10 +52,8 @@ public class SyntaxTree {
         }
     }
 
-    /* -------------------- 函数相关 -------------------- */
-
     public static class FuncDef implements TopLevelDef {
-        public final String retType; // void/int/float
+        public final String retType;
         public final String name;
         public final List<Param> params;
         public final Block body;
@@ -80,12 +66,11 @@ public class SyntaxTree {
         }
     }
 
-    /** 函数参数 */
     public static class Param {
-        public final String type; // int/float
+        public final String type;
         public final String name;
         public final boolean isArray;
-        public final List<Expr> dimensions; // 数组各维度（除第一维）的长度表达式
+        public final List<Expr> dimensions; // 数组维度
 
         public Param(String type, String name, boolean isArray) {
             this(type, name, isArray, new ArrayList<>());
@@ -98,8 +83,6 @@ public class SyntaxTree {
             this.dimensions = dimensions;
         }
     }
-
-    /* -------------------- 语句与表达式（简化） -------------------- */
 
     public interface Stmt extends Node {
     }
@@ -114,10 +97,8 @@ public class SyntaxTree {
 
     public interface Expr extends Node {
     }
-
-    /* -------------------- 新增表达式节点 -------------------- */
     public static class LiteralExpr implements Expr {
-        public final Object value; // Integer, Float, String
+        public final Object value;
         public LiteralExpr(Object value) {
             this.value = value;
         }
@@ -159,9 +140,7 @@ public class SyntaxTree {
         }
     }
 
-    /**
-     * 数组访问表达式，如 a[1][2]
-     */
+    // 数组访问表达式
     public static class ArrayAccessExpr implements Expr {
         public final String arrayName;
         public final List<Expr> indices;
@@ -172,9 +151,7 @@ public class SyntaxTree {
         }
     }
 
-    /**
-     * 数组初始化表达式，例如 {1, 2, 3} 或 {{1, 2}, {3, 4}}
-     */
+    // 数组初始化表达式
     public static class ArrayInitExpr implements Expr {
         public final List<Expr> elements;
         
@@ -183,15 +160,15 @@ public class SyntaxTree {
         }
     }
 
-    /* -------------------- 新增语句节点 -------------------- */
+
     public static class ExprStmt implements Stmt {
         public final Expr expr;
         public ExprStmt(Expr expr) { this.expr = expr; }
     }
 
     public static class AssignStmt implements Stmt {
-        public final Expr target;  // 左值表达式
-        public final Expr value;   // 右值表达式
+        public final Expr target;
+        public final Expr value;
         public AssignStmt(Expr target, Expr value) { 
             this.target = target; 
             this.value = value; 
@@ -199,7 +176,7 @@ public class SyntaxTree {
     }
 
     public static class ReturnStmt implements Stmt {
-        public final Expr value; // 可能为空
+        public final Expr value;
         public ReturnStmt(Expr value) { this.value = value; }
     }
 
@@ -209,7 +186,7 @@ public class SyntaxTree {
     public static class IfStmt implements Stmt {
         public final Expr cond;
         public final Stmt thenBranch;
-        public final Stmt elseBranch; // 可能为空
+        public final Stmt elseBranch;
         public IfStmt(Expr cond, Stmt thenBranch, Stmt elseBranch) {
             this.cond = cond;
             this.thenBranch = thenBranch;
@@ -223,20 +200,12 @@ public class SyntaxTree {
         public WhileStmt(Expr cond, Stmt body) { this.cond = cond; this.body = body; }
     }
 
-    // ==================== Pretty Print Support ====================
-    /**
-     * 将该语法树节点转换为易读的字符串表示，默认从缩进 0 开始。
-     */
+
     public static String toTreeString(Node node) {
         return toTreeString(node, 0);
     }
 
-    /**
-     * 递归地将节点转换为字符串。
-     * @param node   语法树节点
-     * @param indent 当前缩进
-     * @return       可读字符串
-     */
+
     private static String toTreeString(Node node, int indent) {
         if (node == null) {
             return "null";
@@ -340,7 +309,7 @@ public class SyntaxTree {
         return ind + node.getClass().getSimpleName();
     }
 
-    // -------------------- Expression helper --------------------
+
     private static String exprToString(Expr expr) {
         return exprToString(expr, 0);
     }
@@ -385,10 +354,8 @@ public class SyntaxTree {
         return ind + sb.toString();
     }
 
-    // 为主要节点覆写 toString，方便打印
     @Override
     public String toString() {
-        // 该方法在 SyntaxTree 本身被调用时不应触发，实际输出依赖 CompilationUnit
         return "";
     }
 } 

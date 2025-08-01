@@ -6,9 +6,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/**
- * SysY语言的词法分析器
- */
 public class SysYLexer {
     private final PushbackReader reader;
     private int line = 1;
@@ -16,11 +13,9 @@ public class SysYLexer {
     private char currentChar;
     private boolean reachedEOF = false;
     
-    // 关键字映射表
     private static final Map<String, SysYTokenType> KEYWORDS = new HashMap<>();
     
     static {
-        // 初始化关键字映射
         KEYWORDS.put("const", SysYTokenType.CONST);
         KEYWORDS.put("int", SysYTokenType.INT);
         KEYWORDS.put("float", SysYTokenType.FLOAT);
@@ -33,23 +28,14 @@ public class SysYLexer {
         KEYWORDS.put("return", SysYTokenType.RETURN);
     }
     
-    /**
-     * 构造词法分析器
-     */
     public SysYLexer(Reader input) {
         this.reader = new PushbackReader(input);
     }
     
-    /**
-     * 从文件构造词法分析器
-     */
     public SysYLexer(String filePath) throws FileNotFoundException {
         this(new FileReader(filePath));
     }
     
-    /**
-     * 读取下一个字符
-     */
     private void readChar() throws IOException {
         int read = reader.read();
         if (read == -1) {
@@ -60,36 +46,26 @@ public class SysYLexer {
         currentChar = (char) read;
         column++;
         
-        // 处理换行
         if (currentChar == '\n') {
             line++;
             column = 0;
         }
     }
     
-    /**
-     * 回退一个字符
-     */
     private void unreadChar() throws IOException {
         if (!reachedEOF) {
             reader.unread(currentChar);
             column--;
             
-            // 注意：不处理换行回退的情况，因为在实际使用中很少需要
+
         }
     }
     
-    /**
-     * 获取所有词法单元
-     */
     public TokenStream tokenize() throws IOException {
         TokenStream tokens = new TokenStream();
         SysYToken token;
         
-        // 读取第一个字符
         readChar();
-        
-        // 循环读取所有词法单元
         while (!reachedEOF) {
             token = nextToken();
             if (token != null) {
@@ -97,58 +73,46 @@ public class SysYLexer {
             }
         }
         
-        // 添加EOF标记
         tokens.add(new SysYToken(SysYTokenType.EOF, "", line, column));
         return tokens;
     }
     
-    /**
-     * 识别下一个词法单元
-     */
     private SysYToken nextToken() throws IOException {
-        // 跳过空白字符
         skipWhitespace();
         
         if (reachedEOF) {
             return null;
         }
         
-        // 跳过注释
         if (currentChar == '/') {
             readChar();
             if (currentChar == '/') {
                 skipSingleLineComment();
-                return nextToken(); // 递归调用以获取注释后的下一个词法单元
+                return nextToken();
             } else if (currentChar == '*') {
                 skipMultiLineComment();
-                return nextToken(); // 递归调用以获取注释后的下一个词法单元
+                return nextToken();
             } else {
-                // 这是除法运算符 '/'
                 unreadChar();
                 currentChar = '/';
             }
         }
         
-        // 记录当前的行和列，用于创建Token
         int startLine = line;
         int startColumn = column;
         
-        // 识别标识符和关键字
         if (isAlpha(currentChar) || currentChar == '_') {
             return scanIdentifier(startLine, startColumn);
         }
         
-        // 识别数字常量
         if (isDigit(currentChar) || (currentChar == '.' && peek() != null && isDigit(peek()))) {
             return scanNumber(startLine, startColumn);
         }
         
-        // 识别字符串常量
         if (currentChar == '"') {
             return scanString(startLine, startColumn);
         }
 
-        // 识别运算符和分隔符
         switch (currentChar) {
             case '+':
                 readChar();
@@ -164,8 +128,7 @@ public class SysYLexer {
                 return new SysYToken(SysYTokenType.MODULO, "%", startLine, startColumn);
             case '!':
                 if (peek() != null && peek() == '=') {
-                    // !=
-                    char next = peek(); // 读取后续字符
+                    char next = peek();
                     readChar();
                     readChar();
                     return new SysYToken(SysYTokenType.NOT_EQUAL, "!=", startLine, startColumn);
@@ -175,18 +138,18 @@ public class SysYLexer {
                 }
             case '&':
                 if (peek() != null && peek() == '&') {
-                    readChar(); // 当前 &
-                    readChar(); // 第二个 &
+                    readChar();
+                    readChar();
                     return new SysYToken(SysYTokenType.LOGICAL_AND, "&&", startLine, startColumn);
                 }
-                break; // SysY没有单独的&运算符
+                break;
             case '|':
                 if (peek() != null && peek() == '|') {
                     readChar();
                     readChar();
                     return new SysYToken(SysYTokenType.LOGICAL_OR, "||", startLine, startColumn);
                 }
-                break; // SysY没有单独的|运算符
+                break;
             case '<':
                 if (peek() != null && peek() == '=') {
                     readChar();
@@ -239,12 +202,10 @@ public class SysYLexer {
                 readChar();
                 return new SysYToken(SysYTokenType.RIGHT_BRACE, "}", startLine, startColumn);
             case '/':
-                // 此处的/若能到这里，说明它不是注释开头
                 readChar();
                 return new SysYToken(SysYTokenType.DIVIDE, "/", startLine, startColumn);
         }
 
-        // 如果代码执行到这里，说明遇到了未知字符
         throw new IOException("Unexpected character '" + currentChar + "' at line " + line + ", column " + column);
     }
     
