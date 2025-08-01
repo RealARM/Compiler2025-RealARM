@@ -1368,8 +1368,21 @@ public class Armv8Visitor {
                     
                     // 如果偏移非零，添加到当前地址
                     if (offset != 0) {
-                        Armv8Binary addInst = new Armv8Binary(destReg, destReg, new Armv8Imm((int)offset), Armv8Binary.Armv8BinaryType.add);
-                        addInstr(addInst, insList, predefine);
+                        // 使用checkImmediate检查偏移量是否在ADD指令的立即数范围内
+                        Armv8Operand offsetOp = checkImmediate(offset, ImmediateRange.ADD_SUB, insList, predefine);
+                        
+                        if (offsetOp instanceof Armv8Imm) {
+                            // 偏移量在范围内，使用立即数形式
+                            Armv8Binary addInst = new Armv8Binary(destReg, destReg, (Armv8Imm)offsetOp, Armv8Binary.Armv8BinaryType.add);
+                            addInstr(addInst, insList, predefine);
+                        } else {
+                            // 偏移量被加载到寄存器，使用寄存器形式
+                            ArrayList<Armv8Operand> addOperands = new ArrayList<>();
+                            addOperands.add(destReg);
+                            addOperands.add(offsetOp);
+                            Armv8Binary addInst = new Armv8Binary(addOperands, destReg, Armv8Binary.Armv8BinaryType.add);
+                            addInstr(addInst, insList, predefine);
+                        }
                     }
                 } else {
                     // 对于变量索引，需要计算 索引*元素大小
@@ -1396,9 +1409,13 @@ public class Armv8Visitor {
                             addInstr(lslInst, insList, predefine);
                         } else {
                             // 否则使用乘法操作
-                            // 首先加载元素大小到临时寄存器
-                            Armv8Move moveElemSizeInst = new Armv8Move(tempReg, new Armv8Imm(elementSize), false);
-                            addInstr(moveElemSizeInst, insList, predefine);
+                            // 首先加载元素大小到临时寄存器，检查是否需要使用大立即数加载
+                            if (elementSize > 65535 || elementSize < -65536) {
+                                loadLargeImmediate(tempReg, elementSize, insList, predefine);
+                            } else {
+                                Armv8Move moveElemSizeInst = new Armv8Move(tempReg, new Armv8Imm(elementSize), false);
+                                addInstr(moveElemSizeInst, insList, predefine);
+                            }
                             
                             // 执行乘法计算
                             ArrayList<Armv8Operand> mulOperands = new ArrayList<>();
@@ -1568,8 +1585,14 @@ public class Armv8Visitor {
         if (valueToStore instanceof ConstantInt) {
             // 对于整数常量，创建一个临时寄存器并加载值
             valueReg = new Armv8VirReg(false);
-            Armv8Move moveInst = new Armv8Move(valueReg, new Armv8Imm((int)((ConstantInt)valueToStore).getValue()), false);
-            addInstr(moveInst, insList, predefine);
+            long value = ((ConstantInt)valueToStore).getValue();
+            // 检查是否需要使用大立即数加载
+            if (value > 65535 || value < -65536) {
+                loadLargeImmediate(valueReg, value, insList, predefine);
+            } else {
+                Armv8Move moveInst = new Armv8Move(valueReg, new Armv8Imm((int)value), false);
+                addInstr(moveInst, insList, predefine);
+            }
         } 
         else if (valueToStore instanceof ConstantFloat) {
             valueReg = new Armv8VirReg(true);
@@ -1666,7 +1689,9 @@ public class Armv8Visitor {
             } else if (ptrList.containsKey(pointer)) {
                 // 使用栈指针加上偏移量
                 baseReg = Armv8CPUReg.getArmv8SpReg();
-                offsetOp = new Armv8Imm(ptrList.get(pointer));
+                // 检查偏移量是否在内存操作的立即数范围内
+                long offset = ptrList.get(pointer);
+                offsetOp = checkImmediate(offset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
             } else {
                 throw new RuntimeException("无法获取GEP指令的地址: " + pointer);
             }
@@ -2358,13 +2383,30 @@ public class Armv8Visitor {
             Armv8VirReg tempReg = arg.getType() instanceof FloatType ? 
                 new Armv8VirReg(true) : new Armv8VirReg(false);
                 
-            // 从FP相对位置加载参数值
-            Armv8Load loadInst = new Armv8Load(
-                Armv8CPUReg.getArmv8FPReg(), 
-                new Armv8Imm(stackOffset), 
-                tempReg
-            );
-            addInstr(loadInst, insList, predefine);
+            // 从FP相对位置加载参数值，检查偏移量是否超出范围
+            Armv8Operand offsetOp = checkImmediate(stackOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
+            
+            if (offsetOp instanceof Armv8Reg) {
+                // 偏移量被加载到寄存器，需要先计算地址
+                Armv8VirReg addrReg = new Armv8VirReg(false);
+                ArrayList<Armv8Operand> addOperands = new ArrayList<>();
+                addOperands.add(Armv8CPUReg.getArmv8FPReg());
+                addOperands.add(offsetOp);
+                Armv8Binary addInst = new Armv8Binary(addOperands, addrReg, Armv8Binary.Armv8BinaryType.add);
+                addInstr(addInst, insList, predefine);
+                
+                // 使用计算的地址进行加载
+                Armv8Load loadInst = new Armv8Load(addrReg, new Armv8Imm(0), tempReg);
+                addInstr(loadInst, insList, predefine);
+            } else {
+                // 偏移量在范围内，直接使用
+                Armv8Load loadInst = new Armv8Load(
+                    Armv8CPUReg.getArmv8FPReg(), 
+                    (Armv8Imm)offsetOp, 
+                    tempReg
+                );
+                addInstr(loadInst, insList, predefine);
+            }
             
             // 记录映射
             RegList.put(arg, tempReg);
