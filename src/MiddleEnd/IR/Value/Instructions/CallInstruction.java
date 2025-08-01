@@ -9,15 +9,9 @@ import MiddleEnd.IR.Value.Value;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * 函数调用指令
- */
 public class CallInstruction extends Instruction {
     private final Function callee;
     
-    /**
-     * 创建一个函数调用指令
-     */
     public CallInstruction(Function callee, List<Value> arguments, String name) {
         super(callee.getReturnType() instanceof VoidType && name == null ? "" : name, callee.getReturnType());
         this.callee = callee;
@@ -29,16 +23,10 @@ public class CallInstruction extends Instruction {
         }
     }
     
-    /**
-     * 获取被调用的函数
-     */
     public Function getCallee() {
         return callee;
     }
     
-    /**
-     * 获取参数列表
-     */
     public List<Value> getArguments() {
         List<Value> args = new ArrayList<>();
         for (int i = 1; i < getOperandCount(); i++) {
@@ -47,23 +35,14 @@ public class CallInstruction extends Instruction {
         return args;
     }
     
-    /**
-     * 获取参数数量
-     */
     public int getArgumentCount() {
         return getOperandCount() - 1;
     }
     
-    /**
-     * 获取指定索引的参数
-     */
     public Value getArgument(int index) {
         return getOperand(index + 1);
     }
     
-    /**
-     * 判断是否为void返回类型的调用
-     */
     public boolean isVoidCall() {
         return getType() instanceof VoidType;
     }
