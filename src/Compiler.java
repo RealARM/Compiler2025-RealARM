@@ -4,7 +4,7 @@ import MiddleEnd.IR.IRPrinter;
 import MiddleEnd.IR.Module;
 import MiddleEnd.Optimization.Core.OptimizeManager;
 import MiddleEnd.IR.Visitor.IRVisitor;
-import Backend.Armv8.Armv8Visitor;
+import Backend.ArmVisitor;
 
 import java.io.FileReader;
 import java.io.FileOutputStream;
@@ -127,7 +127,7 @@ public class Compiler {
             System.out.println("\n开始生成ARM汇编代码...");
             
             // 创建ARM代码生成器
-            Armv8Visitor armv8CodeGen = new Armv8Visitor(irModule);
+            ArmVisitor armv8CodeGen = new ArmVisitor(irModule);
             
             // 运行代码生成
             armv8CodeGen.run();
