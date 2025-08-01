@@ -12,182 +12,289 @@ import Backend.Value.Operand.Register.AArch64Reg;
 import java.util.*;
 
 /**
- * 活跃性分析器
- * 用于分析每个基本块中变量的活跃性信息
+ * 变量活跃性分析器
+ * 基于数据流分析的变量生存期计算器
+ * 支持控制流图的前向和后向数据流分析
  */
 public class LivenessAnalyzer {
     
     /**
-     * 活跃性信息
-     * 包含每个基本块的定义(def)、使用(use)、活跃入口(liveIn)、活跃出口(liveOut)信息
+     * 基本块活跃性数据
      */
     public static class LivenessInfo {
-        private final LinkedHashSet<AArch64Reg> defSet = new LinkedHashSet<>();    // 在此块中定义的寄存器
-        private final LinkedHashSet<AArch64Reg> useSet = new LinkedHashSet<>();    // 在此块中使用的寄存器
-        private final LinkedHashSet<AArch64Reg> liveIn = new LinkedHashSet<>();    // 活跃入口
-        private final LinkedHashSet<AArch64Reg> liveOut = new LinkedHashSet<>();   // 活跃出口
+        private final LinkedHashSet<AArch64Reg> definitionsInBlock = new LinkedHashSet<>();     // 块内定义的变量
+        private final LinkedHashSet<AArch64Reg> referencesInBlock = new LinkedHashSet<>();      // 块内引用的变量
+        private final LinkedHashSet<AArch64Reg> entryLiveVariables = new LinkedHashSet<>();     // 块入口活跃变量
+        private final LinkedHashSet<AArch64Reg> exitLiveVariables = new LinkedHashSet<>();      // 块出口活跃变量
 
-        public LinkedHashSet<AArch64Reg> getDefSet() { return defSet; }
-        public LinkedHashSet<AArch64Reg> getUseSet() { return useSet; }
-        public LinkedHashSet<AArch64Reg> getLiveIn() { return liveIn; }
-        public LinkedHashSet<AArch64Reg> getLiveOut() { return liveOut; }
+        public LinkedHashSet<AArch64Reg> getDefSet() { return definitionsInBlock; }
+        public LinkedHashSet<AArch64Reg> getUseSet() { return referencesInBlock; }
+        public LinkedHashSet<AArch64Reg> getLiveIn() { return entryLiveVariables; }
+        public LinkedHashSet<AArch64Reg> getLiveOut() { return exitLiveVariables; }
         
-        public void setLiveOut(LinkedHashSet<AArch64Reg> newLiveOut) {
-            liveOut.clear();
-            liveOut.addAll(newLiveOut);
+        public void setLiveOut(LinkedHashSet<AArch64Reg> newExitLiveVars) {
+            exitLiveVariables.clear();
+            exitLiveVariables.addAll(newExitLiveVars);
         }
         
-        public void addDef(AArch64Reg reg) {
-            if (reg != null && !(reg instanceof AArch64PhyReg)) {
-                defSet.add(reg);
+        public void recordDefinition(AArch64Reg register) {
+            if (register != null && isVirtualRegister(register)) {
+                definitionsInBlock.add(register);
             }
         }
         
-        public void addUse(AArch64Reg reg) {
-            if (reg != null && !(reg instanceof AArch64PhyReg)) {
-                useSet.add(reg);
+        public void recordReference(AArch64Reg register) {
+            if (register != null && isVirtualRegister(register)) {
+                referencesInBlock.add(register);
             }
+        }
+        
+        private boolean isVirtualRegister(AArch64Reg register) {
+            return !(register instanceof AArch64PhyReg);
         }
     }
     
     /**
-     * 对整个函数进行活跃性分析
-     * @param function 要分析的函数
-     * @return 每个基本块的活跃性信息映射
+     * 活跃性分析器上下文
+     */
+    private static class AnalysisContext {
+        private final AArch64Function targetFunction;
+        private final LinkedHashMap<AArch64Block, LivenessInfo> blockLivenessData;
+        
+        AnalysisContext(AArch64Function function) {
+            this.targetFunction = function;
+            this.blockLivenessData = new LinkedHashMap<>();
+            initializeBlockData();
+        }
+        
+        private void initializeBlockData() {
+            for (AArch64Block block : targetFunction.getBlocks()) {
+                blockLivenessData.put(block, new LivenessInfo());
+            }
+        }
+        
+        LinkedHashMap<AArch64Block, LivenessInfo> getResults() {
+            return blockLivenessData;
+        }
+    }
+    
+    /**
+     * 执行变量活跃性分析
+     * @param function 目标函数
+     * @return 每个基本块的活跃性数据映射
      */
     public static LinkedHashMap<AArch64Block, LivenessInfo> analyzeLiveness(AArch64Function function) {
-        LinkedHashMap<AArch64Block, LivenessInfo> livenessMap = new LinkedHashMap<>();
+        AnalysisContext context = new AnalysisContext(function);
         
-        // 初始化每个基本块的活跃性信息
-        for (AArch64Block block : function.getBlocks()) {
-            livenessMap.put(block, new LivenessInfo());
-        }
+        // 阶段1：计算局部定义-引用集合
+        computeLocalDefinitionReferenceSets(context);
         
-        // 计算每个基本块的def和use集合
-        for (AArch64Block block : function.getBlocks()) {
-            computeDefUse(block, livenessMap.get(block));
-        }
+        // 阶段2：执行数据流固定点计算
+        performDataflowFixedPointComputation(context);
         
-        // 迭代计算活跃入口和活跃出口
-        boolean changed = true;
-        while (changed) {
-            changed = false;
-            
-            // 反向遍历基本块
-            for (int i = function.getBlocks().size() - 1; i >= 0; i--) {
-                AArch64Block block = function.getBlocks().get(i);
-                LivenessInfo info = livenessMap.get(block);
-                
-                // 计算新的liveOut = ∪(liveIn of successors)
-                LinkedHashSet<AArch64Reg> newLiveOut = new LinkedHashSet<>();
-                for (AArch64Block successor : block.getSuccs()) {
-                    newLiveOut.addAll(livenessMap.get(successor).getLiveIn());
-                }
-                
-                // 计算新的liveIn = use ∪ (liveOut - def)
-                LinkedHashSet<AArch64Reg> newLiveIn = new LinkedHashSet<>(info.getUseSet());
-                LinkedHashSet<AArch64Reg> temp = new LinkedHashSet<>(newLiveOut);
-                temp.removeAll(info.getDefSet());
-                newLiveIn.addAll(temp);
-                
-                // 检查是否有变化
-                if (!newLiveOut.equals(info.getLiveOut()) || !newLiveIn.equals(info.getLiveIn())) {
-                    changed = true;
-                    info.setLiveOut(newLiveOut);
-                    info.getLiveIn().clear();
-                    info.getLiveIn().addAll(newLiveIn);
-                }
-            }
-        }
-        
-        return livenessMap;
+        return context.getResults();
     }
     
     /**
-     * 计算单个基本块的def和use集合
+     * 计算每个基本块的局部定义和引用集合
      */
-    private static void computeDefUse(AArch64Block block, LivenessInfo info) {
-        LinkedHashSet<AArch64Reg> tempDef = new LinkedHashSet<>();
+    private static void computeLocalDefinitionReferenceSets(AnalysisContext context) {
+        for (AArch64Block block : context.targetFunction.getBlocks()) {
+            LivenessInfo blockData = context.blockLivenessData.get(block);
+            analyzeInstructionSequence(block, blockData);
+        }
+    }
+    
+    /**
+     * 执行数据流固定点迭代计算
+     */
+    private static void performDataflowFixedPointComputation(AnalysisContext context) {
+        boolean hasConverged = false;
+        
+        while (!hasConverged) {
+            hasConverged = true;
+            
+            // 反向遍历基本块进行后向数据流分析
+            List<AArch64Block> blocks = context.targetFunction.getBlocks();
+            for (int blockIndex = blocks.size() - 1; blockIndex >= 0; blockIndex--) {
+                AArch64Block currentBlock = blocks.get(blockIndex);
+                LivenessInfo currentBlockData = context.blockLivenessData.get(currentBlock);
+                
+                // 计算出口活跃变量集合：所有后继块入口活跃变量的并集
+                LinkedHashSet<AArch64Reg> newExitLiveVars = computeExitLiveVariables(
+                    currentBlock, context.blockLivenessData);
+                
+                // 计算入口活跃变量集合：use ∪ (liveOut - def)
+                LinkedHashSet<AArch64Reg> newEntryLiveVars = computeEntryLiveVariables(
+                    currentBlockData, newExitLiveVars);
+                
+                // 检查是否达到固定点
+                if (detectChangesInLivenessData(currentBlockData, newEntryLiveVars, newExitLiveVars)) {
+                    hasConverged = false;
+                    updateLivenessData(currentBlockData, newEntryLiveVars, newExitLiveVars);
+                }
+            }
+        }
+    }
+    
+    /**
+     * 计算基本块出口的活跃变量集合
+     */
+    private static LinkedHashSet<AArch64Reg> computeExitLiveVariables(
+            AArch64Block block, LinkedHashMap<AArch64Block, LivenessInfo> livenessData) {
+        LinkedHashSet<AArch64Reg> exitLiveVars = new LinkedHashSet<>();
+        
+        for (AArch64Block successorBlock : block.getSuccs()) {
+            LivenessInfo successorData = livenessData.get(successorBlock);
+            exitLiveVars.addAll(successorData.getLiveIn());
+        }
+        
+        return exitLiveVars;
+    }
+    
+    /**
+     * 计算基本块入口的活跃变量集合
+     */
+    private static LinkedHashSet<AArch64Reg> computeEntryLiveVariables(
+            LivenessInfo blockData, LinkedHashSet<AArch64Reg> exitLiveVars) {
+        LinkedHashSet<AArch64Reg> entryLiveVars = new LinkedHashSet<>(blockData.getUseSet());
+        LinkedHashSet<AArch64Reg> propagatedVars = new LinkedHashSet<>(exitLiveVars);
+        propagatedVars.removeAll(blockData.getDefSet());
+        entryLiveVars.addAll(propagatedVars);
+        
+        return entryLiveVars;
+    }
+    
+    /**
+     * 检测活跃性数据是否发生变化
+     */
+    private static boolean detectChangesInLivenessData(LivenessInfo blockData,
+            LinkedHashSet<AArch64Reg> newEntryVars, LinkedHashSet<AArch64Reg> newExitVars) {
+        return !newExitVars.equals(blockData.getLiveOut()) || 
+               !newEntryVars.equals(blockData.getLiveIn());
+    }
+    
+    /**
+     * 更新活跃性数据
+     */
+    private static void updateLivenessData(LivenessInfo blockData,
+            LinkedHashSet<AArch64Reg> newEntryVars, LinkedHashSet<AArch64Reg> newExitVars) {
+        blockData.setLiveOut(newExitVars);
+        blockData.getLiveIn().clear();
+        blockData.getLiveIn().addAll(newEntryVars);
+    }
+    
+    /**
+     * 分析指令序列以计算局部定义和引用集合
+     */
+    private static void analyzeInstructionSequence(AArch64Block block, LivenessInfo blockData) {
+        LinkedHashSet<AArch64Reg> localDefinitions = new LinkedHashSet<>();
         
         for (AArch64Instruction instruction : block.getInstructions()) {
-            // 处理指令使用的寄存器（在定义之前使用的寄存器）
-            for (AArch64Operand operand : instruction.getOperands()) {
-                if (operand instanceof AArch64Reg) {
-                    AArch64Reg reg = (AArch64Reg) operand;
-                    if (!tempDef.contains(reg)) {
-                        info.addUse(reg);
-                    }
+            // 处理指令的操作数引用（必须在定义之前处理）
+            processInstructionOperandReferences(instruction, blockData, localDefinitions);
+            
+            // 处理指令的定义
+            processInstructionDefinition(instruction, blockData, localDefinitions);
+            
+            // 处理特殊指令类型
+            handleSpecialInstructionTypes(instruction, blockData);
+        }
+    }
+    
+    /**
+     * 处理指令操作数引用
+     */
+    private static void processInstructionOperandReferences(AArch64Instruction instruction, 
+                                                          LivenessInfo blockData, 
+                                                          LinkedHashSet<AArch64Reg> localDefinitions) {
+        for (AArch64Operand operand : instruction.getOperands()) {
+            if (operand instanceof AArch64Reg) {
+                AArch64Reg register = (AArch64Reg) operand;
+                // 只有在当前块中未被定义的寄存器才算作引用
+                if (!localDefinitions.contains(register)) {
+                    blockData.recordReference(register);
                 }
             }
-            
-            // 处理指令定义的寄存器
-            AArch64Reg defReg = instruction.getDefReg();
-            if (defReg != null) {
-                info.addDef(defReg);
-                tempDef.add(defReg);
-            }
-            
-            // 特殊处理一些指令
-            if (instruction instanceof AArch64Call) {
-                // 函数调用会修改调用者保存寄存器
-                handleCallInstruction((AArch64Call) instruction, info);
-            } else if (instruction instanceof AArch64BlrCall) {
-                // 间接函数调用
-                handleBlrCallInstruction((AArch64BlrCall) instruction, info);
-            }
         }
     }
     
     /**
-     * 处理函数调用指令的特殊情况
-     * 函数调用会隐式定义调用者保存寄存器
+     * 处理指令定义
      */
-    private static void handleCallInstruction(AArch64Call callInst, LivenessInfo info) {
+    private static void processInstructionDefinition(AArch64Instruction instruction, 
+                                                    LivenessInfo blockData, 
+                                                    LinkedHashSet<AArch64Reg> localDefinitions) {
+        AArch64Reg definedRegister = instruction.getDefReg();
+        if (definedRegister != null) {
+            blockData.recordDefinition(definedRegister);
+            localDefinitions.add(definedRegister);
+        }
+    }
+    
+    /**
+     * 处理特殊指令类型
+     */
+    private static void handleSpecialInstructionTypes(AArch64Instruction instruction, LivenessInfo blockData) {
+        if (instruction instanceof AArch64Call) {
+            processDirectFunctionCall((AArch64Call) instruction, blockData);
+        } else if (instruction instanceof AArch64BlrCall) {
+            processIndirectFunctionCall((AArch64BlrCall) instruction, blockData);
+        }
+    }
+    
+    /**
+     * 处理直接函数调用指令
+     * 函数调用会隐式修改调用者保存寄存器
+     */
+    private static void processDirectFunctionCall(AArch64Call callInstruction, LivenessInfo blockData) {
         // 函数调用隐式定义返回值寄存器
-        if (callInst.getDefReg() != null) {
-            info.addDef(callInst.getDefReg());
+        if (callInstruction.getDefReg() != null) {
+            blockData.recordDefinition(callInstruction.getDefReg());
         }
         
-        // 添加调用中使用的寄存器
-        for (AArch64Reg usedReg : callInst.getUsedRegs()) {
-            info.addUse(usedReg);
+        // 添加调用中显式使用的寄存器
+        for (AArch64Reg usedRegister : callInstruction.getUsedRegs()) {
+            blockData.recordReference(usedRegister);
         }
     }
     
     /**
-     * 处理间接函数调用指令的特殊情况
+     * 处理间接函数调用指令
      */
-    private static void handleBlrCallInstruction(AArch64BlrCall blrCallInst, LivenessInfo info) {
+    private static void processIndirectFunctionCall(AArch64BlrCall blrCallInstruction, LivenessInfo blockData) {
         // 间接函数调用隐式定义返回值寄存器
-        if (blrCallInst.getDefReg() != null) {
-            info.addDef(blrCallInst.getDefReg());
+        if (blrCallInstruction.getDefReg() != null) {
+            blockData.recordDefinition(blrCallInstruction.getDefReg());
         }
         
-        // 添加调用中使用的寄存器
-        for (AArch64Reg usedReg : blrCallInst.getUsedRegs()) {
-            info.addUse(usedReg);
+        // 添加调用中显式使用的寄存器
+        for (AArch64Reg usedRegister : blrCallInstruction.getUsedRegs()) {
+            blockData.recordReference(usedRegister);
         }
     }
     
+    // === 公共实用方法 ===
+    
     /**
-     * 获取指令中所有使用的寄存器
+     * 提取指令中所有被引用的寄存器
      */
-    public static LinkedHashSet<AArch64Reg> getUsedRegisters(AArch64Instruction instruction) {
-        LinkedHashSet<AArch64Reg> usedRegs = new LinkedHashSet<>();
+    public static LinkedHashSet<AArch64Reg> extractReferencedRegisters(AArch64Instruction instruction) {
+        LinkedHashSet<AArch64Reg> referencedRegisters = new LinkedHashSet<>();
         
         for (AArch64Operand operand : instruction.getOperands()) {
             if (operand instanceof AArch64Reg) {
-                usedRegs.add((AArch64Reg) operand);
+                referencedRegisters.add((AArch64Reg) operand);
             }
         }
         
-        return usedRegs;
+        return referencedRegisters;
     }
     
     /**
-     * 获取指令定义的寄存器
+     * 提取指令定义的寄存器
      */
-    public static AArch64Reg getDefinedRegister(AArch64Instruction instruction) {
+    public static AArch64Reg extractDefinedRegister(AArch64Instruction instruction) {
         return instruction.getDefReg();
     }
 } 
