@@ -18,18 +18,55 @@ public class Compiler {
             System.exit(1);
         }
 
-        String sourcePath = args[0];
-        String targetPath = args.length > 1 ? args[1] : null;
-        String armOutputPath = args.length > 2 ? args[2] : "armv8_backend.s";
-
+        String sourcePath = null;
+        String outputPath = null;
+        boolean generateAsm = false;
+        int optimizationLevel = 0;
+        boolean debug = false;
+        
+        for (int i = 0; i < args.length; i++) {
+            String arg = args[i];
+            switch (arg) {
+                case "-S":
+                    generateAsm = true;
+                    break;
+                case "-o":
+                    if (i + 1 < args.length) {
+                        outputPath = args[++i];
+                    } else {
+                        System.err.println("错误: -o 选项需要指定输出文件");
+                        System.exit(1);
+                    }
+                    break;
+                case "-O1":
+                    optimizationLevel = 1;
+                    break;
+                case "-O0":
+                    optimizationLevel = 0;
+                    break;
+                default:
+                    if (!arg.startsWith("-")) {
+                        sourcePath = arg;
+                    } else {
+                        System.err.println("警告: 未知选项 " + arg);
+                    }
+                    break;
+            }
+        }
+        
+        if (sourcePath == null) {
+            System.err.println("错误: 请提供源文件路径");
+            System.exit(1);
+        }
         
         boolean lexOnly = false;
         boolean printAST = false;
         boolean generateIR = true;
-        boolean printIR = true;
-        boolean generateARM = true;
-        int optimizationLevel = 1;
-        boolean debug = true;
+        boolean printIR = false;
+        boolean generateARM = generateAsm;
+        optimizationLevel = 1;
+        String targetPath = generateAsm ? null : outputPath;
+        String armOutputPath = generateAsm ? outputPath : "armv8_backend.s";
         
         try {
             SysYLexer lexer = new SysYLexer(new FileReader(sourcePath));
@@ -61,11 +98,13 @@ public class Compiler {
             IRVisitor irVisitor = new IRVisitor();
             Module irModule = irVisitor.visitCompilationUnit(ast);
             
-            System.out.println("IR生成成功。");
-            System.out.println("模块包含:");
-            System.out.println("  - " + irModule.functions().size() + " 个函数");
-            System.out.println("  - " + irModule.globalVars().size() + " 个全局变量");
-            System.out.println("  - " + irModule.libFunctions().size() + " 个库函数");
+            if (debug) {
+                System.out.println("IR生成成功。");
+                System.out.println("模块包含:");
+                System.out.println("  - " + irModule.functions().size() + " 个函数");
+                System.out.println("  - " + irModule.globalVars().size() + " 个全局变量");
+                System.out.println("  - " + irModule.libFunctions().size() + " 个库函数");
+            }
             
             if (optimizationLevel > 0) {
                 runOptimizations(irModule, optimizationLevel, debug);
@@ -76,13 +115,17 @@ public class Compiler {
                 if (targetPath != null) {
                     try {
                         outputStream = new PrintStream(new FileOutputStream(targetPath));
-                        System.out.println("\nIR代码已输出到文件: " + targetPath);
+                        if (debug) {
+                            System.out.println("\nIR代码已输出到文件: " + targetPath);
+                        }
                     } catch (IOException e) {
                         System.err.println("无法创建输出文件: " + e.getMessage());
-                        System.out.println("将使用标准输出...");
+                        if (debug) {
+                            System.out.println("将使用标准输出...");
+                        }
                     }
-                } else {
-                System.out.println("\n生成的IR代码:");
+                } else if (debug) {
+                    System.out.println("\n生成的IR代码:");
                 }
                 
                 IRPrinter printer = new IRPrinter(outputStream);
@@ -105,17 +148,12 @@ public class Compiler {
     
     private static void generateARMCode(Module irModule, String outputPath) {
         try {
-            System.out.println("\n开始生成ARM汇编代码...");
-            
             AArch64Visitor armv8CodeGen = new AArch64Visitor(irModule);
             
             armv8CodeGen.run();
             
             if (outputPath != null) {
                 armv8CodeGen.dump(outputPath);
-                System.out.println("ARM汇编代码已输出到文件: " + outputPath);
-            } else {
-                System.out.println("ARM汇编代码生成完成，但未指定输出文件。");
             }
         } catch (Exception e) {
             System.err.println("ARM代码生成失败: " + e.getMessage());
@@ -124,10 +162,14 @@ public class Compiler {
     }
     
     private static void runOptimizations(Module irModule, int optimizationLevel, boolean debug) {
-        System.out.println("\n正在运行优化 (级别 O" + optimizationLevel + ")...");
+        if (debug) {
+            System.out.println("\n正在运行优化 (级别 O" + optimizationLevel + ")...");
+        }
         
         OptimizeManager.getInstance().runAllOptimizers(irModule);
         
-        System.out.println("优化完成。");
+        if (debug) {
+            System.out.println("优化完成。");
+        }
     }
 } 
