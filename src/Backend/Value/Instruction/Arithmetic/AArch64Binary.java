@@ -32,9 +32,9 @@ public class AArch64Binary extends AArch64Instruction {
 
     public AArch64Binary(AArch64Reg defReg, AArch64Reg srcReg, AArch64Imm imm, AArch64BinaryType type) {
         super(defReg, new ArrayList<AArch64Operand>() {{
-            add(srcReg);
-            add(imm);
-        }});
+                add(srcReg);
+                add(imm);
+            }});
         this.instType = type;
         this.shiftBit = 0;
         this.shiftType = AArch64ShiftType.LSL;

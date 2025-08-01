@@ -8,17 +8,16 @@ import MiddleEnd.IR.Value.Value;
  * 比较指令，用于比较两个值
  */
 public class CompareInstruction extends Instruction {
-    private final OpCode compareType; // 比较类型：icmp或fcmp
-    private final OpCode predicate;   // 比较谓词：eq, ne, sgt等
+    private final OpCode compareType;
+    private final OpCode predicate;
     
-    // 为比较指令名称添加计数器
     private static int nameCounter = 0;
     
     /**
      * 创建一个比较指令
      */
     public CompareInstruction(OpCode compareType, OpCode predicate, Value left, Value right) {
-        super(compareType.getName() + "_" + predicate.getName() + "_result_" + nameCounter++, IntegerType.I1); // 比较结果为1位整数（布尔值）
+        super(compareType.getName() + "_" + predicate.getName() + "_result_" + nameCounter++, IntegerType.I1);
         
         if (compareType != OpCode.ICMP && compareType != OpCode.FCMP) {
             throw new IllegalArgumentException("比较指令类型必须是icmp或fcmp");
@@ -27,7 +26,6 @@ public class CompareInstruction extends Instruction {
         this.compareType = compareType;
         this.predicate = predicate;
         
-        // 添加操作数
         addOperand(left);
         addOperand(right);
     }

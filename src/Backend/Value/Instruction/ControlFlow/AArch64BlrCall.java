@@ -8,10 +8,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashSet;
 
-/**
- * ARMv8间接分支链接指令
- * 用于调用寄存器中存储的函数地址
- */
 public class AArch64BlrCall extends AArch64Instruction {
     public LinkedHashSet<AArch64Reg> usedRegs = new LinkedHashSet<>();
     

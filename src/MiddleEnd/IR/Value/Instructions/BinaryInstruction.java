@@ -8,9 +8,8 @@ import MiddleEnd.IR.Value.Value;
  * 二元操作指令，如加、减、乘、除等
  */
 public class BinaryInstruction extends Instruction {
-    private final OpCode opCode; // 操作码，如add, sub, mul等
+    private final OpCode opCode;
     
-    // 为不同的指令名称添加计数器
     private static int nameCounter = 0;
     
     /**
@@ -20,7 +19,6 @@ public class BinaryInstruction extends Instruction {
         super(getInstructionName(opCode), resultType);
         this.opCode = opCode;
         
-        // 添加操作数
         addOperand(left);
         addOperand(right);
     }

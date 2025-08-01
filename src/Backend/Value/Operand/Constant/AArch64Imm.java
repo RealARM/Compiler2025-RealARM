@@ -3,13 +3,13 @@ package Backend.Value.Operand.Constant;
 import Backend.Value.Base.AArch64Operand;
 
 public class AArch64Imm extends AArch64Operand {
-    private final long value;  // 改为long类型
+    private final long value;
 
-    public AArch64Imm(long value) {  // 构造函数参数改为long
+    public AArch64Imm(long value) {
         this.value = value;
     }
 
-    public long getValue() {  // 返回类型改为long
+    public long getValue() {
         return this.value;
     }
 

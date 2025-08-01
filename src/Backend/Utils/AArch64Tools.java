@@ -54,16 +54,15 @@ public class AArch64Tools {
         le,  // <=
         gt,  // >
         ge,  // >=
-        nope,
-        // ARMv8还包括这些额外的条件
-        cs,  // 进位设置(无符号大于或等于)
-        cc,  // 进位清除(无符号小于)
-        mi,  // 负数(负)
-        pl,  // 正数(正或零)
+        cs,  // 无符号大于或等于
+        cc,  // 无符号小于
+        mi,  // 负数
+        pl,  // 正或零
         vs,  // 溢出设置
         vc,  // 溢出清除
         hi,  // 无符号高于
-        ls   // 无符号低于或相等
+        ls,  // 无符号低于或相等
+        nope,
     }
 
     public static String getCondString(CondType type) {

@@ -2,8 +2,6 @@ package Backend.Value.Base;
 
 import java.util.HashSet;
 
-import Backend.Value.Base.AArch64Instruction;
-
 public class AArch64Operand {
     private final HashSet<AArch64Instruction> users = new HashSet<>();
 

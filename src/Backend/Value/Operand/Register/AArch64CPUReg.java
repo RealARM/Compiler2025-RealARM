@@ -3,10 +3,9 @@ package Backend.Value.Operand.Register;
 import java.util.LinkedHashMap;
 
 public class AArch64CPUReg extends AArch64PhyReg {
-    // ARMv8有31个通用寄存器和零寄存器
     private static final LinkedHashMap<Integer, String> AArch64IntRegNames = new LinkedHashMap<>();
+    
     static {
-        // x0-x7用于参数传递和返回值
         AArch64IntRegNames.put(0, "x0");
         AArch64IntRegNames.put(1, "x1");
         AArch64IntRegNames.put(2, "x2");
@@ -62,6 +61,7 @@ public class AArch64CPUReg extends AArch64PhyReg {
     
     
     private static LinkedHashMap<Integer, AArch64CPUReg> armv8CPURegs = new LinkedHashMap<>();
+    
     static {
         for (int i = 0; i <= 32; i++) {
             armv8CPURegs.put(i, new AArch64CPUReg(i, AArch64IntRegNames.get(i)));
@@ -70,8 +70,8 @@ public class AArch64CPUReg extends AArch64PhyReg {
     
     public boolean canBeReorder(){
         // 被调用者保存寄存器和特殊寄存器不能被重排
-        if(index >= 19 && index <= 30) return false;
-        if(index == 31 || index == 32) return false; // SP和XZR
+        if (index >= 19 && index <= 30) return false;
+        if (index == 31 || index == 32) return false; // SP和XZR
         return true;
     }
     
@@ -83,19 +83,19 @@ public class AArch64CPUReg extends AArch64PhyReg {
         return armv8CPURegs.get(index);
     }
     public static AArch64CPUReg getAArch64RetReg() {
-        return armv8CPURegs.get(30); // 链接寄存器(x30)
+        return armv8CPURegs.get(30);
     }
 
     public static AArch64CPUReg getAArch64CPURetValueReg() {
-        return armv8CPURegs.get(0); // x0
+        return armv8CPURegs.get(0);
     }
 
     public static AArch64CPUReg getAArch64SpReg() {
-        return armv8CPURegs.get(31); // sp
+        return armv8CPURegs.get(31);
     }
 
     public static AArch64CPUReg getAArch64FPReg() {
-        return armv8CPURegs.get(29); // x29(帧指针)
+        return armv8CPURegs.get(29);
     }
 
     public static AArch64CPUReg getAArch64ArgReg(int argIntIndex) {
@@ -104,7 +104,7 @@ public class AArch64CPUReg extends AArch64PhyReg {
     }
 
     public static AArch64CPUReg getZeroReg() {
-        return armv8CPURegs.get(32); // xzr
+        return armv8CPURegs.get(32);
     }
 
     public int getIndex() {
@@ -115,23 +115,18 @@ public class AArch64CPUReg extends AArch64PhyReg {
         return this.name;
     }
 
-    // 默认使用64位寄存器
     @Override
     public String toString() {
         return this.name;
     }
 
-    // 获取寄存器的32位视图(w0-w30)
     public String get32BitName() {
-        if (index == 31) return "wsp"; // 32位SP是wsp
-        if (index == 32) return "wzr"; // 32位零寄存器是wzr
+        if (index == 31) return "wsp";
+        if (index == 32) return "wzr";
         return "w" + index;
     }
     
-    // 检查是否是64位寄存器(x寄存器)
     public boolean is64Bit() {
-        // 在AArch64中，所有的CPU寄存器名称如果以'x'开头则为64位
-        // 以'w'开头则为32位
         return this.name.startsWith("x") || this.name.equals("sp") || this.name.equals("xzr");
     }
 } 

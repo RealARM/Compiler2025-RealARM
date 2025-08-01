@@ -17,9 +17,6 @@ public class AArch64LoadPair extends AArch64Instruction {
         this.isPostIndex = false;
     }
     
-    /**
-     * 创建一个前索引或后索引模式的LDP指令
-     */
     public AArch64LoadPair(AArch64Reg baseReg, AArch64Imm offset, AArch64Reg defReg1, AArch64Reg defReg2, 
                        boolean isPreIndex, boolean isPostIndex) {
         super(defReg1, new ArrayList<>(Arrays.asList(baseReg, offset, defReg2)));

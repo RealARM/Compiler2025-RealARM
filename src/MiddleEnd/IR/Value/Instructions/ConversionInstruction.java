@@ -9,7 +9,7 @@ import MiddleEnd.IR.Value.Value;
  * 对应示例代码中的ConversionInst
  */
 public class ConversionInstruction extends Instruction {
-    private final OpCode conversionType; // 转换类型，如Ftoi, Itof, Zext等
+    private final OpCode conversionType;
     
     /**
      * 创建一个类型转换指令
@@ -18,7 +18,6 @@ public class ConversionInstruction extends Instruction {
         super(name, targetType);
         this.conversionType = conversionType;
         
-        // 添加源值作为操作数
         addOperand(source);
     }
     

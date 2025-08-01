@@ -3,66 +3,42 @@ package MiddleEnd.IR.Type;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * 表示函数类型
- */
 public class FunctionType extends Type {
-    private final Type returnType;         // 返回值类型
-    private final List<Type> paramTypes;   // 参数类型列表
+    private final Type returnType;         
+    private final List<Type> paramTypes;   
     
-    /**
-     * 创建一个只有返回值类型的函数类型
-     */
     public FunctionType(Type returnType) {
         this(returnType, new ArrayList<>());
     }
     
-    /**
-     * 创建一个有参数的函数类型
-     */
     public FunctionType(Type returnType, List<Type> paramTypes) {
         this.returnType = returnType;
         this.paramTypes = new ArrayList<>(paramTypes);
     }
     
-    /**
-     * 获取返回值类型
-     */
     public Type getReturnType() {
         return returnType;
     }
     
-    /**
-     * 获取参数类型列表
-     */
     public List<Type> getParamTypes() {
         return paramTypes;
     }
     
-    /**
-     * 添加参数类型
-     */
     public void addParamType(Type type) {
         paramTypes.add(type);
     }
     
-    /**
-     * 获取参数数量
-     */
     public int getParamCount() {
         return paramTypes.size();
     }
     
-    /**
-     * 获取指定索引的参数类型
-     */
     public Type getParamType(int index) {
         return paramTypes.get(index);
     }
     
     @Override
     public int getSize() {
-        return 0; // 函数类型不占用空间
+        return 0; 
     }
     
     @Override

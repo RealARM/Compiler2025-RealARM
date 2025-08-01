@@ -3,8 +3,8 @@ package Backend.Value.Operand.Register;
 import java.util.LinkedHashMap;
 
 public class AArch64FPUReg extends AArch64PhyReg {
-    // ARMv8有32个浮点/SIMD寄存器(v0-v31)
     private static final LinkedHashMap<Integer, String> AArch64FPURegNames = new LinkedHashMap<>();
+    
     static {
         // v0-v7用于参数传递和返回值
         AArch64FPURegNames.put(0, "v0");
@@ -44,6 +44,7 @@ public class AArch64FPUReg extends AArch64PhyReg {
     }
 
     private static LinkedHashMap<Integer, AArch64FPUReg> armv8FPURegs = new LinkedHashMap<>();
+    
     static {
         for (int i = 0; i <= 31; i++) {
             armv8FPURegs.put(i, new AArch64FPUReg(i, AArch64FPURegNames.get(i)));
@@ -53,7 +54,7 @@ public class AArch64FPUReg extends AArch64PhyReg {
     @Override
     public boolean canBeReorder() {
         // v8-v15在AArch64中是被调用者保存的
-        if(index >= 8 && index <= 15) {
+        if (index >= 8 && index <= 15) {
             return false;
         }
         return true;
@@ -73,7 +74,7 @@ public class AArch64FPUReg extends AArch64PhyReg {
     }
 
     public static AArch64FPUReg getAArch64FPURetValueReg() {
-        return armv8FPURegs.get(0); // v0用于返回值
+        return armv8FPURegs.get(0);
     }
 
     private int index;
@@ -93,24 +94,20 @@ public class AArch64FPUReg extends AArch64PhyReg {
         return this.name;
     }
 
-    // 获取单精度浮点视图
     public String getSingleName() {
         return "s" + index;
     }
 
-    // 获取双精度浮点视图
     public String getDoubleName() {
         return "d" + index;
     }
 
-    // 获取四字SIMD视图
     public String getQuadName() {
         return "q" + index;
     }
 
     @Override
     public String toString() {
-        // 全部使用64位
         return "d" + index;
     }
 } 

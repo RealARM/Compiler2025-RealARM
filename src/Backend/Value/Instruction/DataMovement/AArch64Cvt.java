@@ -15,20 +15,15 @@ public class AArch64Cvt extends AArch64Instruction {
     }
     
     public enum CvtType {
-        // 浮点转整数
         FCVTZS,  // 浮点转有符号整数，向零舍入
         FCVTMS,  // 浮点转有符号整数，向负无穷舍入
         FCVTPS,  // 浮点转有符号整数，向正无穷舍入
         FCVTNS,  // 浮点转有符号整数，向最接近舍入
-        
-        // 无符号版本
         FCVTZU,  // 浮点转无符号整数，向零舍入
         
-        // 整数转浮点
         SCVTF,   // 有符号整数转浮点
         UCVTF,   // 无符号整数转浮点
         
-        // 浮点精度转换
         FCVT_S2D, // 单精度到双精度转换 (fcvt d, s)
         FCVT_D2S  // 双精度到单精度转换 (fcvt s, d)
     }

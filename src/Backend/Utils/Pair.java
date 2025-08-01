@@ -2,11 +2,6 @@ package Backend.Utils;
 
 import java.util.Objects;
 
-/**
- * 通用的Pair类，用于存储两个相关的对象
- * @param <T> 第一个对象的类型
- * @param <U> 第二个对象的类型
- */
 public class Pair<T, U> {
     private final T first;
     private final U second;

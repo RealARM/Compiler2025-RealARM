@@ -21,19 +21,17 @@ public class GraphColoringEngine {
     }
     
     private static class NodeScheduler {
-        // 节点分类队列
-        private final LinkedHashSet<AArch64Operand> readyToSimplify;     // 可简化的节点
+
         private final LinkedHashSet<AArch64Operand> highDegreeQueue;     // 高度数节点队列
-        private final LinkedHashSet<AArch64Operand> mergedNodes;         // 已合并节点
-        private final LinkedHashSet<AArch64Reg> successfullyColored;     // 已着色节点
-        private final LinkedHashSet<AArch64Operand> moveConstrainedNodes; // move约束的节点
         private final Stack<AArch64Operand> eliminationStack;            // 消除栈
-        
-        // Move指令处理队列
         private final LinkedHashSet<AArch64Instruction> successfulMerges; // 成功合并的move
         private final LinkedHashSet<AArch64Instruction> blockedMoves;     // 冲突的move
         private final LinkedHashSet<AArch64Instruction> frozenMoves;      // 冻结的move
         private final LinkedHashSet<AArch64Instruction> pendingMoves;     // 待处理的move
+        private final LinkedHashSet<AArch64Operand> readyToSimplify;     // 可简化的节点
+        private final LinkedHashSet<AArch64Operand> mergedNodes;         // 已合并节点
+        private final LinkedHashSet<AArch64Reg> successfullyColored;     // 已着色节点
+        private final LinkedHashSet<AArch64Operand> moveConstrainedNodes; // move约束的节点
         
         public NodeScheduler() {
             readyToSimplify = new LinkedHashSet<>();

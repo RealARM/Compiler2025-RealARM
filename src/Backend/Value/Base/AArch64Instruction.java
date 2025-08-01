@@ -51,6 +51,5 @@ public class AArch64Instruction {
         return this.defReg;
     }
     
-    // This inner class helps indicate returns in code
     public static class AArch64Ret extends AArch64Instruction {}
 } 

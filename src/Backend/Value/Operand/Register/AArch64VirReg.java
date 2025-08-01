@@ -35,17 +35,14 @@ public class AArch64VirReg extends AArch64Reg {
         floatRegCounter = 0;
     }
     
-
     public static int getCurrentIntCounter() {
         return intRegCounter;
     }
     
-
     public static int getCurrentFloatCounter() {
         return floatRegCounter;
     }
     
-
     public boolean hasValidId() {
         if (isFloat) {
             return id >= 0 && id < floatRegCounter;

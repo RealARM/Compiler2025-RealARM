@@ -23,14 +23,13 @@ public class RegisterAllocationState {
     private LinkedHashMap<AArch64Block, LivenessAnalyzer.LivenessInfo> livenessInfo;
     
     private LinkedHashMap<AArch64Operand, LinkedHashSet<AArch64Operand>> adjacencyGraph; // 干扰图邻接表
-    private LinkedHashMap<AArch64Operand, Integer> nodeDegrees;                          // 节点度数
-    private LinkedHashMap<AArch64Operand, AArch64Operand> nodeAliases;                  // 节点别名(coalescing用)
+    private LinkedHashMap<AArch64Operand, AArch64Operand> nodeAliases;                  // 节点别名
     private LinkedHashMap<AArch64Reg, Integer> registerColors;                          // 最终颜色分配结果
-    
+    private LinkedHashMap<AArch64Operand, Integer> nodeDegrees;                          // 节点度数
+    private LinkedHashSet<AArch64Operand> spilledNodes;                                 // 需要溢出的节点
     private LinkedHashMap<AArch64Operand, LinkedHashSet<AArch64Move>> nodeMoveMap;      // 节点关联的move指令
     private LinkedHashSet<AArch64Instruction> activeMoveInstructions;                   // 活跃的move指令
-    
-    private LinkedHashSet<AArch64Operand> spilledNodes;                                 // 需要溢出的节点
+
 
     public RegisterAllocationState(AArch64Function function, boolean isFloatingPoint) {
         this.function = function;

@@ -9,9 +9,9 @@ import MiddleEnd.IR.Value.Value;
  * 分支指令，用于条件或无条件跳转
  */
 public class BranchInstruction extends Instruction implements TerminatorInstruction {
-    private final Value condition; // 条件表达式，可能为null表示无条件跳转
-    private final BasicBlock trueBlock; // 条件为真时跳转的基本块
-    private final BasicBlock falseBlock; // 条件为假时跳转的基本块，可能为null
+    private final Value condition;
+    private final BasicBlock trueBlock;
+    private final BasicBlock falseBlock;
     
     /**
      * 创建一个无条件跳转指令

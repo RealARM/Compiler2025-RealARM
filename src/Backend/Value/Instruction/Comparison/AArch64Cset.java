@@ -11,7 +11,7 @@ public class AArch64Cset extends AArch64Instruction {
     private AArch64Tools.CondType condType;
 
     public AArch64Cset(AArch64Reg destReg, AArch64Tools.CondType condType) {
-        super(destReg, new ArrayList<>());  // CSET has no operands, but we need an empty ArrayList
+        super(destReg, new ArrayList<>());
         this.destReg = destReg;
         this.condType = condType;
     }
@@ -29,7 +29,6 @@ public class AArch64Cset extends AArch64Instruction {
         StringBuilder sb = new StringBuilder();
         sb.append("cset ");
         
-        // 使用父类的getDefReg()方法，确保获取到寄存器分配后的物理寄存器
         sb.append(getDefReg().toString());
         
         sb.append(", ");

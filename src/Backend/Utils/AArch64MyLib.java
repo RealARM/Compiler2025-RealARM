@@ -6,6 +6,7 @@ import java.util.Map;
 public class AArch64MyLib {
     
     private static final Map<String, String> FUNCTION_64BIT_MAPPING = new HashMap<>();
+    
     static {
         FUNCTION_64BIT_MAPPING.put("getarray", "getarray64");
         FUNCTION_64BIT_MAPPING.put("putarray", "putarray64");
@@ -13,7 +14,9 @@ public class AArch64MyLib {
         FUNCTION_64BIT_MAPPING.put("putfarray", "putfarray64");
         FUNCTION_64BIT_MAPPING.put("memset", "memset");
     }
+
     private static final Map<String, Boolean> FUNCTION_64BIT_USAGE = new HashMap<>();
+    
     static {
         FUNCTION_64BIT_USAGE.put("getarray", false);
         FUNCTION_64BIT_USAGE.put("putarray", false);
@@ -36,11 +39,9 @@ public class AArch64MyLib {
         return FUNCTION_64BIT_MAPPING.containsKey(functionName);
     }
     
-    
     public static java.util.Set<String> getSupportedFunctions() {
         return FUNCTION_64BIT_MAPPING.keySet();
     }
-    
     
     public static String generateMemsetFunction() {
         if (FUNCTION_64BIT_USAGE.get("memset") == false) {
@@ -212,7 +213,6 @@ public class AArch64MyLib {
         sb.append("\tret\n");
         return sb.toString();
     }
-    
     
     public static String generatePutarray64Function() {
         if (FUNCTION_64BIT_USAGE.get("putarray") == false) {
@@ -612,9 +612,5 @@ public class AArch64MyLib {
         sb.append("\tret\n");
         return sb.toString();
     }
-    
-
-    
-    
     
 }

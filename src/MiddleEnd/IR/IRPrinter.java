@@ -8,9 +8,6 @@ import java.util.Map;
 import java.io.PrintStream;
 import java.util.List;
 
-/**
- * IR打印器，用于将IR以文本形式输出
- */
 public class IRPrinter {
     private PrintStream out;
     
@@ -18,32 +15,23 @@ public class IRPrinter {
         this.out = out;
     }
     
-    /**
-     * 打印整个IR模块
-     */
     public void printModule(Module module) {
-        // 打印全局变量
         for (GlobalVariable gv : module.globalVars()) {
             printGlobalVariable(gv);
             out.println();
         }
         
-        // 打印函数声明
         for (Function func : module.libFunctions()) {
             printFunctionDeclaration(func);
             out.println();
         }
         
-        // 打印函数定义
         for (Function func : module.functions()) {
             printFunction(func);
             out.println();
         }
     }
     
-    /**
-     * 打印全局变量
-     */
     private void printGlobalVariable(GlobalVariable gv) {
         out.print(gv.getName());
         out.print(" = ");
@@ -53,11 +41,9 @@ public class IRPrinter {
             out.print("global ");
         }
         
-        // 打印类型和初始值
         Type elementType = ((PointerType)gv.getType()).getElementType();
         
         if (gv.isArray()) {
-            // 处理数组类型
             out.print("[" + gv.getArraySize() + " x " + elementType + "]");
             
             if (gv.isZeroInitialized()) {
@@ -77,7 +63,6 @@ public class IRPrinter {
                 out.print(" undef");
             }
         } else if (gv.hasInitializer()) {
-            // 处理非数组类型
             Value initializer = gv.getInitializer();
             if (initializer instanceof Constant) {
                 out.print(elementType);
@@ -93,9 +78,6 @@ public class IRPrinter {
         }
     }
     
-    /**
-     * 打印常量值
-     */
     private void printConstant(Constant constant) {
         if (constant instanceof ConstantInt) {
             out.print(((ConstantInt) constant).getValue());
@@ -105,9 +87,6 @@ public class IRPrinter {
         }
     }
     
-    /**
-     * 打印函数声明
-     */
     private void printFunctionDeclaration(Function func) {
         out.print("declare ");
         out.print(func.getReturnType());
@@ -126,9 +105,6 @@ public class IRPrinter {
         out.print(")");
     }
     
-    /**
-     * 打印函数定义
-     */
     private void printFunction(Function func) {
         out.print("define ");
         out.print(func.getReturnType());
@@ -149,7 +125,6 @@ public class IRPrinter {
         
         out.println(") {");
         
-        // 打印基本块
         for (BasicBlock bb : func.getBasicBlocks()) {
             printBasicBlock(bb);
         }
@@ -157,26 +132,18 @@ public class IRPrinter {
         out.println("}");
     }
     
-    /**
-     * 打印基本块
-     */
     private void printBasicBlock(BasicBlock bb) {
         out.print(bb.getName());
         out.println(":");
         
-        // 检查基本块是否为空
         if (bb.getInstructions().isEmpty()) {
-            // 如果基本块为空，添加一个默认的无条件跳转或返回指令
             out.print("  ");
             
-            // 尝试获取下一个基本块
             BasicBlock nextBlock = getNextBasicBlock(bb);
             
             if (nextBlock != null) {
-                // 添加一个无条件跳转到下一个基本块
                 out.println("br label %" + nextBlock.getName());
             } else {
-                // 如果没有下一个基本块，添加一个默认返回指令
                 Function parentFunction = bb.getParentFunction();
                 Type returnType = parentFunction.getReturnType();
                 
@@ -187,13 +154,12 @@ public class IRPrinter {
                 } else if (returnType instanceof FloatType) {
                     out.println("ret float 0x0000000000000000");
                 } else {
-                    out.println("ret i32 0");  // 默认返回整数0
+                    out.println("ret i32 0");
                 }
             }
             return;
         }
         
-        // 打印指令
         for (Instruction inst : bb.getInstructions()) {
             out.print("  ");
             printInstruction(inst);
@@ -201,17 +167,12 @@ public class IRPrinter {
         }
     }
     
-    /**
-     * 获取基本块的下一个基本块
-     */
     private BasicBlock getNextBasicBlock(BasicBlock bb) {
-        // 首先尝试从后继中获取
         List<BasicBlock> successors = bb.getSuccessors();
         if (!successors.isEmpty()) {
             return successors.get(0);
         }
         
-        // 如果没有后继，尝试从函数的基本块列表中获取下一个
         Function function = bb.getParentFunction();
         List<BasicBlock> blocks = function.getBasicBlocks();
         
@@ -224,28 +185,21 @@ public class IRPrinter {
         return null;
     }
     
-    /**
-     * 打印变量名，为局部变量添加%前缀
-     */
     private String printValueName(Value value) {
         String name = value.getName();
         
-        // 全局变量和函数已经有@前缀，不需要添加%
         if (name.startsWith("@")) {
             return name;
         }
 
-        // 浮点常量用0x开头
         if (value instanceof ConstantFloat) {
             return "0x" + Long.toHexString(Double.doubleToLongBits((float)((ConstantFloat) value).getValue()));
         }
         
-        // 数字常量不需要前缀
         if (value instanceof Constant) {
             return name;
         }
         
-        // 局部变量添加%前缀
         if (!name.startsWith("%")) {
             return "%" + name;
         }
@@ -253,18 +207,13 @@ public class IRPrinter {
         return name;
     }
 
-    /**
-     * 打印指令
-     */
     private void printInstruction(Instruction inst) {
-        // 如果指令有结果值，打印赋值
         if (!(inst instanceof StoreInstruction || inst instanceof BranchInstruction || inst instanceof ReturnInstruction) &&
             !(inst instanceof CallInstruction && ((CallInstruction) inst).isVoidCall())) {
             out.print(printValueName(inst));
             out.print(" = ");
         }
         
-        // 根据指令类型打印
         if (inst instanceof BinaryInstruction) {
             printBinaryInstruction((BinaryInstruction) inst);
         } else if (inst instanceof LoadInstruction) {
@@ -294,16 +243,12 @@ public class IRPrinter {
         }
     }
     
-    /**
-     * 打印二元运算指令
-     */
     private void printBinaryInstruction(BinaryInstruction inst) {
         out.print(inst.getOpcodeName().toLowerCase());
         out.print(" ");
         out.print(inst.getType());
         out.print(" ");
         
-        // 特殊处理浮点常量
         if (inst.getLeft() instanceof ConstantFloat) {
             out.print(inst.getLeft());
         } else {
@@ -318,10 +263,7 @@ public class IRPrinter {
             out.print(printValueName(inst.getRight()));
         }
     }
-    
-    /**
-     * 打印加载指令
-     */
+
     private void printLoadInstruction(LoadInstruction inst) {
         out.print("load ");
         Value pointer = inst.getPointer();
@@ -333,15 +275,11 @@ public class IRPrinter {
         out.print(printValueName(pointer));
     }
     
-    /**
-     * 打印存储指令
-     */
     private void printStoreInstruction(StoreInstruction inst) {
         out.print(inst.getOpcodeName().toLowerCase());
         out.print(" ");
         out.print(inst.getValue().getType());
         out.print(" ");
-        // 对于浮点常量，需要特殊处理
         if (inst.getValue() instanceof ConstantFloat) {
             double value = ((ConstantFloat) inst.getValue()).getValue();
             out.print("0x" + Long.toHexString(Double.doubleToLongBits(value)));
@@ -368,9 +306,6 @@ public class IRPrinter {
         }
     }
     
-    /**
-     * 打印获取元素指针指令
-     */
     private void printGetElementPtrInstruction(GetElementPtrInstruction inst) {
         out.print("getelementptr ");
         Value pointer = inst.getPointer();
@@ -381,7 +316,6 @@ public class IRPrinter {
         out.print(" ");
         out.print(printValueName(pointer));
         
-        // 打印索引，这里简化处理，只考虑单个索引的情况
         if (inst.getOperandCount() > 1) {
             Value index = inst.getOperand(1);
             out.print(", ");
@@ -391,9 +325,6 @@ public class IRPrinter {
         }
     }
     
-    /**
-     * 打印函数调用指令
-     */
     private void printCallInstruction(CallInstruction inst) {
         out.print("call ");
         Function callee = (Function)inst.getOperand(0);
@@ -416,9 +347,6 @@ public class IRPrinter {
         out.print(")");
     }
     
-    /**
-     * 打印返回指令
-     */
     private void printReturnInstruction(ReturnInstruction inst) {
         out.print("ret ");
         if (inst.getOperandCount() > 0) {
@@ -431,9 +359,6 @@ public class IRPrinter {
         }
     }
     
-    /**
-     * 打印分支指令
-     */
     private void printBranchInstruction(BranchInstruction inst) {
         out.print("br ");
         if (inst.getOperandCount() > 1) {
@@ -451,15 +376,11 @@ public class IRPrinter {
         }
     }
     
-    /**
-     * 打印Phi指令
-     */
     private void printPhiInstruction(PhiInstruction inst) {
         out.print("phi ");
         out.print(inst.getType());
         out.print(" ");
         
-        // PhiInstruction的操作数是成对的，一个值对应一个基本块
         Map<BasicBlock, Value> incomingValues = ((PhiInstruction)inst).getIncomingValues();
         int i = 0;
         for (Map.Entry<BasicBlock, Value> entry : incomingValues.entrySet()) {
@@ -475,9 +396,6 @@ public class IRPrinter {
         }
     }
     
-    /**
-     * 打印转换指令
-     */
     private void printConversionInstruction(ConversionInstruction inst) {
         out.print(inst.getOpcodeName().toLowerCase());
         out.print(" ");
@@ -488,9 +406,6 @@ public class IRPrinter {
         out.print(inst.getType());
     }
     
-    /**
-     * 打印比较指令
-     */
     private void printCompareInstruction(CompareInstruction inst) {
         out.print(inst.getOpcodeName().toLowerCase());
         out.print(" ");
@@ -503,9 +418,6 @@ public class IRPrinter {
         out.print(printValueName(inst.getRight()));
     }
 
-    /**
-     * 打印Move指令
-     */
     private void printMoveInstruction(MoveInstruction inst) {
         out.print("mov ");
         out.print(inst.getType());
