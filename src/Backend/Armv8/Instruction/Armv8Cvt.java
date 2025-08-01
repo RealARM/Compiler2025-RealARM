@@ -41,7 +41,8 @@ public class Armv8Cvt extends Armv8Instruction {
         UCVTF,   // 无符号整数转浮点
         
         // 浮点精度转换
-        FCVT     // 浮点精度转换(单精度到双精度或反之)
+        FCVT_S2D, // 单精度到双精度转换 (fcvt d, s)
+        FCVT_D2S  // 双精度到单精度转换 (fcvt s, d)
     }
     
     /**
@@ -55,7 +56,13 @@ public class Armv8Cvt extends Armv8Instruction {
      * 将枚举转换为字符串表示
      */
     private String getConversionTypeString() {
-        return conversionType.name().toLowerCase();
+        switch (conversionType) {
+            case FCVT_S2D:
+            case FCVT_D2S:
+                return "fcvt";  // 两种FCVT类型都使用fcvt指令名
+            default:
+                return conversionType.name().toLowerCase();
+        }
     }
     
     @Override
@@ -92,6 +99,32 @@ public class Armv8Cvt extends Armv8Instruction {
                     srcRegStr = srcReg.toString();
                 }
                 dstRegStr = dstReg.toString();
+                break;
+            case FCVT_S2D:
+                // 单精度到双精度转换：fcvt d, s
+                if (srcReg instanceof Backend.Armv8.Operand.Armv8FPUReg && 
+                    dstReg instanceof Backend.Armv8.Operand.Armv8FPUReg) {
+                    Backend.Armv8.Operand.Armv8FPUReg srcFPU = (Backend.Armv8.Operand.Armv8FPUReg) srcReg;
+                    Backend.Armv8.Operand.Armv8FPUReg dstFPU = (Backend.Armv8.Operand.Armv8FPUReg) dstReg;
+                    srcRegStr = srcFPU.getSingleName();  // 源是单精度
+                    dstRegStr = dstFPU.getDoubleName();  // 目标是双精度
+                } else {
+                    srcRegStr = srcReg.toString();
+                    dstRegStr = dstReg.toString();
+                }
+                break;
+            case FCVT_D2S:
+                // 双精度到单精度转换：fcvt s, d
+                if (srcReg instanceof Backend.Armv8.Operand.Armv8FPUReg && 
+                    dstReg instanceof Backend.Armv8.Operand.Armv8FPUReg) {
+                    Backend.Armv8.Operand.Armv8FPUReg srcFPU = (Backend.Armv8.Operand.Armv8FPUReg) srcReg;
+                    Backend.Armv8.Operand.Armv8FPUReg dstFPU = (Backend.Armv8.Operand.Armv8FPUReg) dstReg;
+                    srcRegStr = srcFPU.getDoubleName();  // 源是双精度
+                    dstRegStr = dstFPU.getSingleName();  // 目标是单精度
+                } else {
+                    srcRegStr = srcReg.toString();
+                    dstRegStr = dstReg.toString();
+                }
                 break;
             default:
                 // 其他情况，使用默认名称

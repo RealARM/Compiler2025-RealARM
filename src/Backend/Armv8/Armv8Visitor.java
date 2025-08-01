@@ -722,8 +722,23 @@ public class Armv8Visitor {
                     // 获取参数的寄存器
                     Armv8Reg argValueReg = RegList.get(arg);
                     if (argValueReg != null) {
-                        Armv8Move moveInst = new Armv8Move(argReg, argValueReg, false);
-                        addInstr(moveInst, insList, predefine);
+                        // 检查是否是putfloat调用且参数是浮点类型
+                        if (functionName.equals("putfloat") && isFloat && argValueReg instanceof Armv8VirReg) {
+                            // putfloat需要单精度参数，但我们内部使用双精度计算
+                            // 需要将双精度转换为单精度再传给putfloat
+                            Armv8VirReg tempSingleReg = new Armv8VirReg(true);  // 临时单精度寄存器
+                            
+                            // 添加fcvt指令从双精度转换为单精度
+                            Armv8Cvt cvtInst = new Armv8Cvt(argValueReg, Armv8Cvt.CvtType.FCVT_D2S, tempSingleReg);
+                            addInstr(cvtInst, insList, predefine);
+                            
+                            // 然后将单精度寄存器移动到参数寄存器
+                            Armv8Move moveInst = new Armv8Move(argReg, tempSingleReg, false);
+                            addInstr(moveInst, insList, predefine);
+                        } else {
+                            Armv8Move moveInst = new Armv8Move(argReg, argValueReg, false);
+                            addInstr(moveInst, insList, predefine);
+                        }
                     } else {
                         // 如果仍然没有寄存器，使用零寄存器
                         System.err.println("警告: 参数 " + arg + " 没有关联的寄存器，使用零寄存器");
@@ -906,8 +921,23 @@ public class Armv8Visitor {
             
             // 将返回值从x0/v0移动到结果寄存器
             if (returnReg != null) {  // 确保返回寄存器不为空
-                Armv8Move moveReturnInst = new Armv8Move(resultReg, returnReg, false);
-                addInstr(moveReturnInst, insList, predefine);
+                // 检查是否是getfloat调用
+                if (functionName.equals("getfloat") && ins.getCallee().getReturnType() instanceof FloatType) {
+                    // getfloat返回单精度浮点数在s0，但我们内部使用双精度计算
+                    // 需要将单精度转换为双精度
+                    Armv8VirReg tempSingleReg = new Armv8VirReg(true);  // 临时单精度寄存器
+                    
+                    // 首先将s0移动到临时单精度寄存器
+                    Armv8Move moveFromS0Inst = new Armv8Move(tempSingleReg, returnReg, false);
+                    addInstr(moveFromS0Inst, insList, predefine);
+                    
+                    // 然后添加fcvt指令从单精度转换为双精度
+                    Armv8Cvt cvtInst = new Armv8Cvt(tempSingleReg, Armv8Cvt.CvtType.FCVT_S2D, resultReg);
+                    addInstr(cvtInst, insList, predefine);
+                } else {
+                    Armv8Move moveReturnInst = new Armv8Move(resultReg, returnReg, false);
+                    addInstr(moveReturnInst, insList, predefine);
+                }
             } else {
                 System.err.println("错误: 返回寄存器为空，跳过移动返回值");
             }
