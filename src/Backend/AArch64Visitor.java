@@ -43,7 +43,7 @@ import java.io.IOException;
 import java.util.*;
 import java.util.stream.Collectors;
 
-public class ArmVisitor {
+public class AArch64Visitor {
     public Module irModule;
     public AArch64Module armv8Module = new AArch64Module();
     // 使用多态性，这样可以存储AArch64Label及其子类
@@ -54,7 +54,7 @@ public class ArmVisitor {
     private AArch64Function curAArch64Function = null;
     private final LinkedHashMap<Instruction, ArrayList<AArch64Instruction>> predefines = new LinkedHashMap<>();
 
-    public ArmVisitor(MiddleEnd.IR.Module irModule) {
+    public AArch64Visitor(MiddleEnd.IR.Module irModule) {
         this.irModule = irModule;
     }
 

@@ -2,7 +2,7 @@ package Backend.Structure;
 
 import java.util.*;
 
-import Backend.ArmVisitor;
+import Backend.AArch64Visitor;
 import Backend.Value.Base.AArch64Operand;
 import Backend.Value.Instruction.Arithmetic.AArch64Binary;
 import Backend.Value.Instruction.DataMovement.AArch64Move;
@@ -77,11 +77,11 @@ public class AArch64Function {
                 callerReg.add(argReg);
                 // 直接建立映射关系，无需复制
                 addRegArg(arg, argReg);
-                ArmVisitor.getRegList().put(arg, argReg);
+                AArch64Visitor.getRegList().put(arg, argReg);
             } else {
                 // 栈传递参数使用FP相对寻址
                 addStackArg(arg, stackOffset);
-                ArmVisitor.getPtrList().put(arg, stackOffset);
+                AArch64Visitor.getPtrList().put(arg, stackOffset);
                 stackOffset += 8; // 每个参数占8字节
             }
         }
