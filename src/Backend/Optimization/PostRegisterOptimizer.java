@@ -31,9 +31,6 @@ public class PostRegisterOptimizer {
         this.modifiedRegs = new LinkedHashSet<>();
     }
     
-    /**
-     * 执行所有的寄存器分配后优化
-     */
     public void optimize() {
         boolean changed = false;
         int round = 0;
@@ -62,17 +59,11 @@ public class PostRegisterOptimizer {
             
         } while (changed && round < MAX_ROUNDS);
         
-        // 最后一轮清理
-        // finalCleanup();
-        
         if (round > 1) {
             System.out.println("函数 " + function.getName() + " 后端优化完成，共 " + (round - 1) + " 轮");
         }
     }
     
-    /**
-     * 删除冗余的move指令
-     */
     private boolean removeRedundantMoves() {
         boolean changed = false;
         
@@ -99,9 +90,6 @@ public class PostRegisterOptimizer {
         return changed;
     }
     
-    /**
-     * 优化算术运算
-     */
     private boolean optimizeArithmetic() {
         boolean changed = false;
         
@@ -178,9 +166,6 @@ public class PostRegisterOptimizer {
         return changed;
     }
     
-    /**
-     * 删除未使用的指令
-     */
     private boolean removeUnusedInstructions() {
         boolean changed = false;
         
@@ -203,9 +188,6 @@ public class PostRegisterOptimizer {
         return changed;
     }
     
-    /**
-     * 合并内存操作
-     */
     private boolean combineMemoryOperations() {
         boolean changed = false;
         
@@ -243,9 +225,7 @@ public class PostRegisterOptimizer {
         return changed;
     }
     
-    /**
-     * 优化条件分支
-     */
+
     private boolean optimizeConditionalBranches() {
         boolean changed = false;
         
@@ -258,9 +238,8 @@ public class PostRegisterOptimizer {
                 AArch64Instruction next = instructions.get(i + 1);
                 
                 if (current instanceof AArch64Compare && next instanceof AArch64Branch) {
-                    // 可以在这里添加比较分支的优化逻辑
+                    // TODO：添加比较分支的优化逻辑
                     // 例如：cmp reg, 0; beq -> cbz reg
-                    // 暂时保持简单实现
                 }
             }
         }
@@ -268,9 +247,7 @@ public class PostRegisterOptimizer {
         return changed;
     }
     
-    /**
-     * 最终清理
-     */
+
     private void finalCleanup() {
         for (AArch64Block block : function.getBlocks()) {
             List<AArch64Instruction> instructions = block.getInstructions();
@@ -295,11 +272,6 @@ public class PostRegisterOptimizer {
         }
     }
     
-    // 辅助方法
-    
-    /**
-     * 检查move指令是否是冗余的
-     */
     private boolean isRedundantMove(AArch64Move moveInst) {
         if (moveInst.getOperands().size() > 0 && 
             moveInst.getOperands().get(0) instanceof AArch64Reg &&
@@ -314,11 +286,7 @@ public class PostRegisterOptimizer {
         return false;
     }
     
-    /**
-     * 检查指令是否可以删除
-     */
     private boolean canRemoveInstruction(AArch64Instruction inst, AArch64Block block) {
-        // 有副作用的指令不能删除
         if (hasSideEffects(inst)) {
             return false;
         }
@@ -334,9 +302,6 @@ public class PostRegisterOptimizer {
         return false;
     }
     
-    /**
-     * 检查指令是否有副作用
-     */
     private boolean hasSideEffects(AArch64Instruction instruction) {
         return instruction instanceof AArch64Store ||
                instruction instanceof AArch64StorePair ||
@@ -349,21 +314,14 @@ public class PostRegisterOptimizer {
                instruction instanceof AArch64Syscall;
     }
     
-    /**
-     * 检查寄存器是否在后续被使用
-     */
     private boolean isRegisterUsedLater(AArch64Reg reg, AArch64Instruction fromInst, AArch64Block block) {
         // 简化实现：保守地认为物理寄存器都会被使用
         return true;
     }
     
-    /**
-     * 检查store和load是否可以合并
-     */
     private boolean canCombineStoreLoad(AArch64Store store, AArch64Load load) {
         // 检查是否访问相同的内存地址
         if (store.getOperands().size() >= 3 && load.getOperands().size() >= 2) {
-            // 简化检查：基址寄存器和偏移量是否相同
             return store.getOperands().get(1).equals(load.getOperands().get(0)) &&
                    store.getOperands().get(2).equals(load.getOperands().get(1));
         }

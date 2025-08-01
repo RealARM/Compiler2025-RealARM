@@ -36,11 +36,9 @@ public class AArch64Function {
         this.name = name;
         this.irFunction = irFunction;
         
-        // 处理函数序言的传参问题
         List<Argument> arguments = irFunction.getArguments();
         int argCount = irFunction.getArgumentCount();
         
-        // 重要：清除寄存器映射，确保每个函数有自己独立的参数空间
         RegArgList.clear();
         stackArgList.clear();
         
@@ -48,7 +46,6 @@ public class AArch64Function {
         int floatArgCount = 0;   // 浮点参数计数器
         long stackOffset = 16;   // 栈参数偏移，从16开始，因为前16字节是保存的FP和LR
         
-        // 记录函数的参数数量和类型，用于生成序言代码
         for (int i = 0; i < argCount; i++) {
             Value arg = arguments.get(i);
             boolean isFloat = arg.getType() instanceof FloatType;
@@ -66,23 +63,20 @@ public class AArch64Function {
             if (!useStack) {
                 AArch64Reg argReg;
                 if (isFloat) {
-                    // 浮点参数使用v0-v7寄存器
                     argReg = AArch64FPUReg.getAArch64FArgReg(floatArgCount-1);
                 } else {
-                    // 整数参数使用x0-x7寄存器
                     argReg = AArch64CPUReg.getAArch64ArgReg(intArgCount-1);
                 }
 
                 //将参数寄存器加入保护行列
                 callerReg.add(argReg);
-                // 直接建立映射关系，无需复制
                 addRegArg(arg, argReg);
                 AArch64Visitor.getRegList().put(arg, argReg);
             } else {
                 // 栈传递参数使用FP相对寻址
                 addStackArg(arg, stackOffset);
                 AArch64Visitor.getPtrList().put(arg, stackOffset);
-                stackOffset += 8; // 每个参数占8字节
+                stackOffset += 8;
             }
         }
 
@@ -91,9 +85,6 @@ public class AArch64Function {
         this.stackSpace.addOffset(8 * (callerReg.size() + 32));
     }
 
-    /**
-     * 安全地创建内存访问指令，处理大偏移量
-     */
     private void createSafeMemoryInstruction(AArch64Block block, AArch64Reg baseReg, long offset, AArch64Reg valueReg, boolean isLoad) {
         // 检查偏移量是否在ARMv8内存指令的范围内
         // ARMv8 LDR/STR指令支持：
@@ -101,27 +92,22 @@ public class AArch64Function {
         // 2. 12位无符号偏移：0到32760，且必须是8的倍数
         
         if (offset >= -256 && offset <= 255) {
-            // 使用有符号偏移
             if (isLoad) {
                 block.addAArch64Instruction(new AArch64Load(baseReg, new AArch64Imm(offset), valueReg));
             } else {
                 block.addAArch64Instruction(new AArch64Store(valueReg, baseReg, new AArch64Imm(offset)));
             }
         } else if (offset >= 0 && offset <= 32760 && (offset % 8 == 0)) {
-            // 使用无符号偏移
             if (isLoad) {
                 block.addAArch64Instruction(new AArch64Load(baseReg, new AArch64Imm(offset), valueReg));
             } else {
                 block.addAArch64Instruction(new AArch64Store(valueReg, baseReg, new AArch64Imm(offset)));
             }
         } else {
-            // 偏移量超出范围，需要分解为ADD指令 + 零偏移访问
             AArch64VirReg tempAddrReg = new AArch64VirReg(false);
             
-            // 加载大立即数到临时寄存器
             loadLargeImmediate(block, tempAddrReg, offset);
             
-            // 计算地址：tempAddrReg = baseReg + offset
             ArrayList<AArch64Operand> addOperands = new ArrayList<>();
             addOperands.add(baseReg);
             addOperands.add(tempAddrReg);
@@ -136,10 +122,6 @@ public class AArch64Function {
             }
         }
     }
-
-    /**
-     * 加载大立即数到寄存器
-     */
     private void loadLargeImmediate(AArch64Block block, AArch64Reg destReg, long value) {
         long bits = value;
         

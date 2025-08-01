@@ -13,7 +13,7 @@ public class AArch64Block extends AArch64Label {
     private LinkedList<AArch64Instruction> instructions = new LinkedList<>();
     private LinkedHashSet<AArch64Block> preds = new LinkedHashSet<>();
     private LinkedHashSet<AArch64Block> succs = new LinkedHashSet<>();
-    private boolean hasReturnInstruction = false; // 标记块是否包含返回指令
+    private boolean hasReturnInstruction = false;
 
     public AArch64Block(String name) {
         super(name);
@@ -63,19 +63,12 @@ public class AArch64Block extends AArch64Label {
         succs.remove(block);
     }
     
-    /**
-     * 获取最后一条指令
-     * @return 最后一条指令，如果没有指令则返回null
-     */
+
     public AArch64Instruction getLastInstruction() {
         return instructions.isEmpty() ? null : instructions.getLast();
     }
     
-    /**
-     * 在指定指令前插入新指令
-     * @param target 目标指令
-     * @param newInst 要插入的新指令
-     */
+
     public void insertBeforeInst(AArch64Instruction target, AArch64Instruction newInst) {
         int index = instructions.indexOf(target);
         if (index != -1) {
@@ -83,7 +76,6 @@ public class AArch64Block extends AArch64Label {
         }
     }
 
-    // 添加兼容方法
     public String getName() {
         return getLabelName();
     }

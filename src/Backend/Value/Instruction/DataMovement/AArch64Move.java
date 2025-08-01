@@ -9,16 +9,10 @@ import java.util.Collections;
 
 
 public class AArch64Move extends AArch64Instruction {
-    private final boolean isImmediate; // 是否是立即数操作数
-    private final MoveType moveType; // 移动类型
+    private final boolean isImmediate;
+    private final MoveType moveType;
     private int shift = 0; // 移位值，用于MOVZ/MOVK指令
 
-    /**
-     * 构造一个Move指令
-     * @param destReg 目标寄存器
-     * @param operand 源操作数（寄存器或立即数）
-     * @param isImmediate 是否为立即数操作
-     */
     public AArch64Move(AArch64Reg destReg, AArch64Operand operand, boolean isImmediate) {
         super(destReg, new ArrayList<>(Collections.singletonList(operand)));
         if (operand == null) {
@@ -29,13 +23,6 @@ public class AArch64Move extends AArch64Instruction {
         this.moveType = MoveType.MOV;
     }
 
-    /**
-     * 构造一个特定类型的Move指令
-     * @param destReg 目标寄存器
-     * @param operand 源操作数（寄存器或立即数）
-     * @param isImmediate 是否为立即数操作
-     * @param moveType 移动指令类型
-     */
     public AArch64Move(AArch64Reg destReg, AArch64Operand operand, boolean isImmediate, MoveType moveType) {
         super(destReg, new ArrayList<>(Collections.singletonList(operand)));
         if (operand == null) {
@@ -46,24 +33,14 @@ public class AArch64Move extends AArch64Instruction {
         this.moveType = moveType;
     }
 
-    /**
-     * 设置指令的移位值（用于MOVZ/MOVK指令）
-     * @param shift 移位值（0、16、32或48）
-     */
     public void setShift(int shift) {
         this.shift = shift;
     }
 
-    /**
-     * 获取移位值
-     */
     public int getShift() {
         return shift;
     }
 
-    /**
-     * Move指令类型枚举
-     */
     public enum MoveType {
         MOV,  // 基本移动
         MOVK, // 保持其他位不变，更新指定16位
@@ -71,29 +48,22 @@ public class AArch64Move extends AArch64Instruction {
         MOVN  // 对操作数按位取反后移动
     }
 
-    /**
-     * 获取移动指令类型的字符串表示
-     */
     private String getMoveTypeString() {
         return moveType.toString().toLowerCase();
     }
 
-    /**
-     * 是否为立即数操作
-     */
     public boolean isImmediate() {
         return isImmediate;
     }
 
     @Override
     public String toString() {
-        // 构建基本指令
         StringBuilder sb = new StringBuilder();
         
-        // 检查是否需要使用fmov指令（浮点寄存器之间的移动）
+        // 检查是否需要使用fmov指令，只有在寄存器到寄存器的MOV操作时才检查
         boolean shouldUseFmov = false;
         if (moveType == MoveType.MOV && !isImmediate) {
-            // 只有在寄存器到寄存器的MOV操作时才检查
+            
             if (getDefReg() instanceof AArch64FPUReg && 
                 !getOperands().isEmpty() && 
                 getOperands().get(0) instanceof AArch64FPUReg) {
@@ -111,7 +81,6 @@ public class AArch64Move extends AArch64Instruction {
         sb.append(getDefReg().toString());
         sb.append(",\t");
         
-        // 安全地获取操作数，防止空指针异常
         if (getOperands().isEmpty()) {
             throw new RuntimeException("Move instruction has no operands");
         } else {
@@ -123,7 +92,6 @@ public class AArch64Move extends AArch64Instruction {
             }
         }
 
-        // 添加移位信息（如果有）
         if (shift > 0) {
             sb.append(", lsl #").append(shift);
         }

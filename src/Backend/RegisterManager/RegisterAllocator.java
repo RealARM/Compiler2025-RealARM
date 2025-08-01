@@ -29,10 +29,7 @@ public class RegisterAllocator {
         this.targetFunction = function;
     }
     
-    /**
-     * 执行寄存器分配
-     * 分别为整型和浮点寄存器进行分配
-     */
+
     public void allocateRegisters() {
         System.out.println("\n===== 开始为函数 " + targetFunction.getName() + " 分配寄存器 =====");
         
@@ -43,9 +40,7 @@ public class RegisterAllocator {
         System.out.println("===== 函数 " + targetFunction.getName() + " 寄存器分配完成 =====\n");
     }
     
-    /**
-     * 为指定类型的寄存器执行分配算法
-     */
+
     private void performAllocationForType(boolean isFloatingPoint) {
         String registerTypeName = isFloatingPoint ? "浮点" : "整型";
         
@@ -103,9 +98,7 @@ public class RegisterAllocator {
 
 
     
-    /**
-     * 应用分配结果到程序中
-     */
+
     private void applyAllocationResults() {
         System.out.println("开始应用寄存器分配结果...");
         int replacementCount = 0;
@@ -149,9 +142,7 @@ public class RegisterAllocator {
         System.out.println("寄存器分配结果应用完成，替换了 " + replacementCount + " 个寄存器");
     }
     
-    /**
-     * 处理寄存器溢出
-     */
+
     private void handleRegisterSpilling() {
         System.out.println("处理寄存器溢出，数量: " + currentState.getSpilledNodes().size());
         
@@ -172,9 +163,7 @@ public class RegisterAllocator {
     }
 
     
-    /**
-     * 将颜色映射到物理寄存器
-     */
+
     private AArch64PhyReg mapColorToPhysicalRegister(AArch64VirReg virtualRegister, int color) {
         if (virtualRegister.isFloat()) {
             // 浮点寄存器: v8-v31
@@ -192,9 +181,7 @@ public class RegisterAllocator {
         return null;
     }
     
-    /**
-     * 重写溢出寄存器的访问
-     */
+
     private void rewriteSpilledRegisterAccesses(AArch64VirReg spilledRegister, long stackOffset) {
         for (AArch64Block block : targetFunction.getBlocks()) {
             List<AArch64Instruction> instructionList = new ArrayList<>(block.getInstructions());
@@ -232,9 +219,7 @@ public class RegisterAllocator {
         }
     }
     
-    /**
-     * 为溢出寄存器的使用插入加载指令
-     */
+
     private void insertLoadInstructionForSpilledUse(AArch64Block block, AArch64Instruction instruction, 
                                                    AArch64VirReg spilledRegister, long stackOffset) {
         AArch64VirReg temporaryRegister = new AArch64VirReg(spilledRegister.isFloat());
@@ -266,9 +251,7 @@ public class RegisterAllocator {
         instruction.replaceOperands(spilledRegister, temporaryRegister);
     }
     
-    /**
-     * 为溢出寄存器的定义插入存储指令
-     */
+
     private void insertStoreInstructionForSpilledDef(AArch64Block block, AArch64Instruction instruction, 
                                                     AArch64VirReg spilledRegister, long stackOffset) {
         AArch64VirReg temporaryRegister = new AArch64VirReg(spilledRegister.isFloat());

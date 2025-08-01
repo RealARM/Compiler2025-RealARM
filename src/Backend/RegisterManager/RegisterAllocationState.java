@@ -10,8 +10,7 @@ import Backend.Value.Operand.Register.*;
 import java.util.*;
 
 /**
- * 核心寄存器分配状态类
- * 只保留图着色算法的核心数据结构，其他临时状态移到各自的算法模块中
+ * 寄存器分配状态类
  */
 public class RegisterAllocationState {
     
@@ -44,20 +43,16 @@ public class RegisterAllocationState {
      * 初始化核心数据结构
      */
     private void initializeCoreDataStructures() {
-        // 初始化核心图数据结构
         adjacencyGraph = new LinkedHashMap<>();
         nodeDegrees = new LinkedHashMap<>();
         nodeAliases = new LinkedHashMap<>();
         registerColors = new LinkedHashMap<>();
         
-        // 初始化Move指令管理
         nodeMoveMap = new LinkedHashMap<>();
         activeMoveInstructions = new LinkedHashSet<>();
         
-        // 初始化结果集合
         spilledNodes = new LinkedHashSet<>();
         
-        // 计算活跃性信息
         livenessInfo = LivenessAnalyzer.analyzeLiveness(function);
     }
     
@@ -108,7 +103,6 @@ public class RegisterAllocationState {
         return activeMoveInstructions; 
     }
     
-    // === 结果Getter方法 ===
     public LinkedHashSet<AArch64Operand> getSpilledNodes() { 
         return spilledNodes; 
     }

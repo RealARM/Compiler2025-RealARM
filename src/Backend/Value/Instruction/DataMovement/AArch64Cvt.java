@@ -6,27 +6,14 @@ import Backend.Value.Operand.Register.AArch64Reg;
 import java.util.ArrayList;
 import java.util.Collections;
 
-/**
- * 表示ARMv8中的类型转换指令
- * 用于处理整数和浮点数之间的转换
- */
 public class AArch64Cvt extends AArch64Instruction {
     private final CvtType conversionType;
     
-    /**
-     * 创建一个类型转换指令
-     * @param srcReg 源寄存器
-     * @param conversionType 转换类型
-     * @param defReg 目标寄存器
-     */
     public AArch64Cvt(AArch64Reg srcReg, CvtType conversionType, AArch64Reg defReg) {
         super(defReg, new ArrayList<>(Collections.singletonList(srcReg)));
         this.conversionType = conversionType;
     }
     
-    /**
-     * 表示不同类型的转换操作
-     */
     public enum CvtType {
         // 浮点转整数
         FCVTZS,  // 浮点转有符号整数，向零舍入
@@ -46,21 +33,15 @@ public class AArch64Cvt extends AArch64Instruction {
         FCVT_D2S  // 双精度到单精度转换 (fcvt s, d)
     }
     
-    /**
-     * 获取源寄存器
-     */
     public AArch64Reg getSrcReg() {
         return (AArch64Reg) getOperands().get(0);
     }
     
-    /**
-     * 将枚举转换为字符串表示
-     */
     private String getConversionTypeString() {
         switch (conversionType) {
             case FCVT_S2D:
             case FCVT_D2S:
-                return "fcvt";  // 两种FCVT类型都使用fcvt指令名
+                return "fcvt";
             default:
                 return conversionType.name().toLowerCase();
         }
@@ -68,14 +49,12 @@ public class AArch64Cvt extends AArch64Instruction {
     
     @Override
     public String toString() {
-        // 获取源寄存器和目标寄存器的合适表示
         AArch64Reg srcReg = getSrcReg();
         AArch64Reg dstReg = getDefReg();
         
         String srcRegStr;
         String dstRegStr;
         
-        // 根据转换类型确定使用寄存器的视图
         switch (conversionType) {
             case SCVTF:
             case UCVTF:
@@ -128,7 +107,6 @@ public class AArch64Cvt extends AArch64Instruction {
                 }
                 break;
             default:
-                // 其他情况，使用默认名称
                 srcRegStr = srcReg.toString();
                 dstRegStr = dstReg.toString();
         }

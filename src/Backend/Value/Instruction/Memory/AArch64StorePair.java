@@ -7,26 +7,16 @@ import Backend.Value.Operand.Register.AArch64Reg;
 import java.util.ArrayList;
 import java.util.Arrays;
 
-/**
- * ARMv8配对寄存器存储指令
- * 同时存储两个寄存器，可以提高内存访问效率
- */
 public class AArch64StorePair extends AArch64Instruction {
-    private final boolean isPreIndex; // 是否是前索引模式
-    private final boolean isPostIndex; // 是否是后索引模式
+    private final boolean isPreIndex;
+    private final boolean isPostIndex;
     
-    /**
-     * 创建一个基本的STP指令
-     */
     public AArch64StorePair(AArch64Reg storeReg1, AArch64Reg storeReg2, AArch64Reg baseReg, AArch64Imm offset) {
         super(null, new ArrayList<>(Arrays.asList(storeReg1, storeReg2, baseReg, offset)));
         this.isPreIndex = false;
         this.isPostIndex = false;
     }
     
-    /**
-     * 创建一个前索引或后索引模式的STP指令
-     */
     public AArch64StorePair(AArch64Reg storeReg1, AArch64Reg storeReg2, AArch64Reg baseReg, AArch64Imm offset, 
                         boolean isPreIndex, boolean isPostIndex) {
         super(null, new ArrayList<>(Arrays.asList(storeReg1, storeReg2, baseReg, offset)));
@@ -36,7 +26,6 @@ public class AArch64StorePair extends AArch64Instruction {
 
     @Override
     public String toString() {
-        // 使用64位寄存器
         String reg1 = getOperands().get(0).toString();
         String reg2 = getOperands().get(1).toString();
         

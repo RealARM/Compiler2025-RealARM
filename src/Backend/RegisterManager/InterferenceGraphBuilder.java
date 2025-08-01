@@ -22,9 +22,7 @@ public class InterferenceGraphBuilder {
         this.state = state;
     }
     
-    /**
-     * 收集候选的虚拟寄存器
-     */
+
     public void collectCandidateRegisters() {
         LinkedHashSet<AArch64VirReg> candidates = new LinkedHashSet<>();
         
@@ -55,9 +53,7 @@ public class InterferenceGraphBuilder {
         System.out.println("收集到 " + candidates.size() + " 个虚拟寄存器");
     }
     
-    /**
-     * 构建干扰图
-     */
+
     public void buildInterferenceGraph() {
         for (AArch64Block block : state.getFunction().getBlocks()) {
             LivenessAnalyzer.LivenessInfo blockLiveness = state.getLivenessInfo().get(block);
@@ -119,9 +115,7 @@ public class InterferenceGraphBuilder {
         System.out.println("干扰图构建完成，冲突边数: " + (totalEdges / 2)); // 除以2因为是无向图
     }
     
-    /**
-     * 处理Move指令的特殊逻辑
-     */
+
     private void processMoveInstruction(AArch64Move moveInstruction, LinkedHashSet<AArch64Reg> liveRegisters) {
         if (moveInstruction.getOperands().size() > 0 && 
             moveInstruction.getOperands().get(0) instanceof AArch64Reg &&
@@ -142,9 +136,7 @@ public class InterferenceGraphBuilder {
         }
     }
     
-    /**
-     * 确保图节点存在于数据结构中
-     */
+
     private void ensureGraphNodeExists(AArch64Reg register) {
         if (!state.getAdjacencyGraph().containsKey(register)) {
             state.getAdjacencyGraph().put(register, new LinkedHashSet<>());
@@ -154,9 +146,7 @@ public class InterferenceGraphBuilder {
         }
     }
     
-    /**
-     * 将Move指令与节点关联
-     */
+
     private void associateMoveWithNode(AArch64Reg register, AArch64Move moveInstruction) {
         ensureGraphNodeExists(register);
         if (!state.getNodeMoveMap().containsKey(register)) {
@@ -165,9 +155,7 @@ public class InterferenceGraphBuilder {
         state.getNodeMoveMap().get(register).add(moveInstruction);
     }
     
-    /**
-     * 在两个寄存器之间添加干扰边
-     */
+
     private void addInterferenceEdge(AArch64Reg firstReg, AArch64Reg secondReg) {
         if (firstReg.equals(secondReg)) return;
         

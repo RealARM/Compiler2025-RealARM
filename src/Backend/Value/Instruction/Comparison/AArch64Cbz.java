@@ -7,10 +7,6 @@ import Backend.Value.Operand.Register.AArch64Reg;
 import java.util.ArrayList;
 import java.util.Arrays;
 
-/**
- * ARMv8比较并分支如果为零指令
- * 如果寄存器值为零则跳转
- */
 public class AArch64Cbz extends AArch64Instruction {
     
     public AArch64Cbz(AArch64Reg reg, AArch64Block targetBlock) {
@@ -30,7 +26,6 @@ public class AArch64Cbz extends AArch64Instruction {
     @Override
     public String toString() {
         AArch64Block targetBlock = (AArch64Block) getOperands().get(1);
-        // Use getLabelName() to get just the label name without colon
         String blockName = targetBlock.getLabelName();
         return "cbz\t" + getOperands().get(0) + ", " + blockName;
     }

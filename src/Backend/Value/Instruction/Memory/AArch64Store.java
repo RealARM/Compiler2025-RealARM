@@ -18,7 +18,6 @@ public class AArch64Store extends AArch64Instruction {
     public String toString() {
         String storeInstr = "str\t";
         
-        // 直接使用寄存器自己的toString
         String srcReg = getOperands().get(0).toString();
         
         if (getOperands().get(2) instanceof AArch64Imm && ((AArch64Imm)(getOperands().get(2))).getValue() == 0) {

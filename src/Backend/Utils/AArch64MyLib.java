@@ -5,7 +5,6 @@ import java.util.Map;
 
 public class AArch64MyLib {
     
-   
     private static final Map<String, String> FUNCTION_64BIT_MAPPING = new HashMap<>();
     static {
         FUNCTION_64BIT_MAPPING.put("getarray", "getarray64");
@@ -90,10 +89,6 @@ public class AArch64MyLib {
 
         return sb.toString();
     }
-
-
-    
-    
 
     public static String generateGetarray64Function() {
         if (FUNCTION_64BIT_USAGE.get("getarray") == false) {
@@ -356,7 +351,6 @@ public class AArch64MyLib {
         return sb.toString();
     }
     
-
     public static String generateGetfarray64Function() {
         if (FUNCTION_64BIT_USAGE.get("getfarray") == false) {
             return "\n";
@@ -479,8 +473,6 @@ public class AArch64MyLib {
         sb.append("\tret\n");
         return sb.toString();
     }
-    
-    
     
     public static String generatePutfarray64Function() {
         if (FUNCTION_64BIT_USAGE.get("putfarray") == false) {

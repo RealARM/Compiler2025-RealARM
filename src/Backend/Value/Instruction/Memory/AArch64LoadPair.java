@@ -7,17 +7,10 @@ import Backend.Value.Operand.Register.AArch64Reg;
 import java.util.ArrayList;
 import java.util.Arrays;
 
-/**
- * ARMv8配对寄存器加载指令
- * 同时加载两个寄存器，可以提高内存访问效率
- */
 public class AArch64LoadPair extends AArch64Instruction {
-    private final boolean isPreIndex; // 是否是前索引模式
-    private final boolean isPostIndex; // 是否是后索引模式
+    private final boolean isPreIndex;
+    private final boolean isPostIndex;
     
-    /**
-     * 创建一个基本的LDP指令
-     */
     public AArch64LoadPair(AArch64Reg baseReg, AArch64Imm offset, AArch64Reg defReg1, AArch64Reg defReg2) {
         super(defReg1, new ArrayList<>(Arrays.asList(baseReg, offset, defReg2)));
         this.isPreIndex = false;
@@ -36,7 +29,6 @@ public class AArch64LoadPair extends AArch64Instruction {
 
     @Override
     public String toString() {
-        // 使用64位x寄存器
         String reg1 = getDefReg().toString();
         String reg2 = getOperands().get(2).toString();
         

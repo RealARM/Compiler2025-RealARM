@@ -74,23 +74,19 @@ public class AArch64Visitor {
     }
     
     public void run() {
-        // 生成全局变量
         for (GlobalVariable globalVariable : irModule.globalVars()) {
             generateGlobalVariable(globalVariable);
         }
 
-        // 生成函数
         for (Function function : irModule.functions()) {
             generateFunction(function);
         }
     }
 
     private void generateGlobalVariable(GlobalVariable globalVariable) {
-        // 生成全局变量的实现
         String varName = removeLeadingAt(globalVariable.getName());
         ArrayList<Number> initialValues = new ArrayList<>();
         
-        // 获取类型的元素类型
         Type elementType = globalVariable.getElementType();
         // 强制所有整型全局变量都使用8字节（64位）
         int byteSize;
@@ -99,7 +95,6 @@ public class AArch64Visitor {
         if (isFloat) {
             byteSize = elementType.getSize();
         } else {
-            // 整型强制使用8字节
             byteSize = 8;
         }
         
@@ -165,7 +160,6 @@ public class AArch64Visitor {
         armv8Module.addFunction(functionName, curAArch64Function);
         AArch64VirReg.resetCounter();
 
-        // 将基本块映射到ARM块
         for (BasicBlock basicBlock : function.getBasicBlocks()) {
             String blockName = removeLeadingAt(functionName) + "_" + basicBlock.getName();
             AArch64Block armv8Block = new AArch64Block(blockName);
@@ -173,7 +167,6 @@ public class AArch64Visitor {
             curAArch64Function.addBlock(armv8Block);
         }
         
-        // 获取函数参数，确保它们被保存和正确处理
         List<Argument> arguments = function.getArguments();
         for (Argument arg : arguments) {
             // 确认参数已被正确记录，无需其他处理
@@ -186,7 +179,6 @@ public class AArch64Visitor {
         }
         
         boolean first = curAArch64Function.getName().contains("main") ? false : true;
-        // 生成函数体的指令
         for (BasicBlock basicBlock : function.getBasicBlocks()) {
             curAArch64Block = (AArch64Block) LabelList.get(basicBlock);
             if (first) {
@@ -196,7 +188,6 @@ public class AArch64Visitor {
             generateBasicBlock(basicBlock);
         }
         
-        // 进行寄存器分配
         System.out.println("\n===== 开始对函数 " + functionName + " 进行寄存器分配 =====");
         RegisterAllocator allocator = new RegisterAllocator(curAArch64Function);
         allocator.allocateRegisters();
@@ -252,8 +243,7 @@ public class AArch64Visitor {
         }
     }
 
-    // 指令解析方法将在这里实现
-    private void parseAlloc(AllocaInstruction ins, boolean predefine) {
+        private void parseAlloc(AllocaInstruction ins, boolean predefine) {
         // 检查函数是否真的需要局部变量
         // 对于简单函数（如func函数），可能不需要任何栈空间
         if (ins.getType() == null) {
@@ -335,7 +325,7 @@ public class AArch64Visitor {
         }
         RegList.put(ins, destReg);
         
-        // 处理左操作数 - 对于大多数二元运算，左操作数必须是寄存器
+        // 对于大多数二元运算，左操作数必须是寄存器
         boolean leftRequiresReg = opCode == OpCode.MUL || opCode == OpCode.DIV || 
                                  opCode == OpCode.ADD || opCode == OpCode.SUB ||
                                  opCode == OpCode.AND || opCode == OpCode.OR || opCode == OpCode.XOR ||
@@ -354,7 +344,7 @@ public class AArch64Visitor {
         
         AArch64Operand leftOp = processOperand(leftOperand, insList, predefine, isFloatOperation, leftRequiresReg, leftRange);
         
-        // 处理右操作数 - 右操作数可以是立即数（除了乘除法）
+        // 右操作数可以是立即数（除了乘除法）
         boolean rightRequiresReg = opCode == OpCode.MUL || opCode == OpCode.DIV || opCode == OpCode.REM;
         AArch64Operand rightOp = processOperand(rightOperand, insList, predefine, isFloatOperation, rightRequiresReg, rightRange);
         
@@ -632,11 +622,9 @@ public class AArch64Visitor {
     private void parseCallInst(CallInstruction ins, boolean predefine) {
         ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         curAArch64Function.saveCallerRegs(curAArch64Block);
-        // 获取被调用的函数
         Function callee = ins.getCallee();
         String functionName = removeLeadingAt(callee.getName());
         
-        // 获取函数参数列表
         List<Value> arguments = ins.getArguments();
         int argCount = arguments.size();
         
