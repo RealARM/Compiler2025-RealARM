@@ -1,16 +1,10 @@
 package MiddleEnd.IR.Type;
 
-/**
- * IR整型类型
- */
 public class IntegerType extends Type {
-    private final int bitWidth; // 位宽，例如32表示32位整数
+    private final int bitWidth; 
     
-    // 常用的32位整数类型
     public static final IntegerType I32 = new IntegerType(32);
-    // 常用的1位整数类型（用于布尔值）
     public static final IntegerType I1 = new IntegerType(1);
-    // 常用的8位整数类型（字符）
     public static final IntegerType I8 = new IntegerType(8);
     
     public IntegerType(int bitWidth) {
@@ -23,7 +17,7 @@ public class IntegerType extends Type {
     
     @Override
     public int getSize() {
-        return (bitWidth + 7) / 8; // 向上取整为字节数
+        return (bitWidth + 7) / 8; 
     }
     
     @Override

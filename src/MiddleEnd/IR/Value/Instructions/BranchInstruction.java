@@ -5,17 +5,11 @@ import MiddleEnd.IR.Type.VoidType;
 import MiddleEnd.IR.Value.BasicBlock;
 import MiddleEnd.IR.Value.Value;
 
-/**
- * 分支指令，用于条件或无条件跳转
- */
 public class BranchInstruction extends Instruction implements TerminatorInstruction {
-    private final Value condition; // 条件表达式，可能为null表示无条件跳转
-    private final BasicBlock trueBlock; // 条件为真时跳转的基本块
-    private final BasicBlock falseBlock; // 条件为假时跳转的基本块，可能为null
+    private final Value condition;
+    private final BasicBlock trueBlock;
+    private final BasicBlock falseBlock;
     
-    /**
-     * 创建一个无条件跳转指令
-     */
     public BranchInstruction(BasicBlock target) {
         super("br", VoidType.VOID);
         this.condition = null;
@@ -24,9 +18,6 @@ public class BranchInstruction extends Instruction implements TerminatorInstruct
         addOperand(target);
     }
     
-    /**
-     * 创建一个条件跳转指令
-     */
     public BranchInstruction(Value condition, BasicBlock trueBlock, BasicBlock falseBlock) {
         super("br", VoidType.VOID);
         this.condition = condition;
@@ -38,32 +29,18 @@ public class BranchInstruction extends Instruction implements TerminatorInstruct
         addOperand(falseBlock);
     }
     
-    /**
-     * 判断是否为无条件跳转
-     */
     public boolean isUnconditional() {
         return condition == null;
     }
     
-    /**
-     * 获取条件表达式
-     */
     public Value getCondition() {
         return condition;
     }
     
-    /**
-     * 获取条件为真时跳转的基本块
-     * 对于无条件跳转，返回目标基本块
-     */
     public BasicBlock getTrueBlock() {
         return trueBlock;
     }
     
-    /**
-     * 获取条件为假时跳转的基本块
-     * 对于无条件跳转，返回null
-     */
     public BasicBlock getFalseBlock() {
         return falseBlock;
     }

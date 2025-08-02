@@ -1,0 +1,132 @@
+package Backend.Value.Operand.Register;
+
+import java.util.LinkedHashMap;
+
+public class AArch64CPUReg extends AArch64PhyReg {
+    private static final LinkedHashMap<Integer, String> AArch64IntRegNames = new LinkedHashMap<>();
+    
+    static {
+        AArch64IntRegNames.put(0, "x0");
+        AArch64IntRegNames.put(1, "x1");
+        AArch64IntRegNames.put(2, "x2");
+        AArch64IntRegNames.put(3, "x3");
+        AArch64IntRegNames.put(4, "x4");
+        AArch64IntRegNames.put(5, "x5");
+        AArch64IntRegNames.put(6, "x6");
+        AArch64IntRegNames.put(7, "x7");
+        // x8用于间接结果返回
+        AArch64IntRegNames.put(8, "x8");
+        // x9-x15是调用者保存的临时寄存器
+        AArch64IntRegNames.put(9, "x9");
+        AArch64IntRegNames.put(10, "x10");
+        AArch64IntRegNames.put(11, "x11");
+        AArch64IntRegNames.put(12, "x12");
+        AArch64IntRegNames.put(13, "x13");
+        AArch64IntRegNames.put(14, "x14");
+        AArch64IntRegNames.put(15, "x15");
+        // x16-x17是过程内调用临时寄存器
+        AArch64IntRegNames.put(16, "x16");
+        AArch64IntRegNames.put(17, "x17");
+        // x18是平台专用（保留）
+        AArch64IntRegNames.put(18, "x18");
+        // x19-x28是被调用者保存的寄存器
+        AArch64IntRegNames.put(19, "x19");
+        AArch64IntRegNames.put(20, "x20");
+        AArch64IntRegNames.put(21, "x21");
+        AArch64IntRegNames.put(22, "x22");
+        AArch64IntRegNames.put(23, "x23");
+        AArch64IntRegNames.put(24, "x24");
+        AArch64IntRegNames.put(25, "x25");
+        AArch64IntRegNames.put(26, "x26");
+        AArch64IntRegNames.put(27, "x27");
+        AArch64IntRegNames.put(28, "x28");
+        // x29是帧指针(FP)
+        AArch64IntRegNames.put(29, "x29");
+        // x30是链接寄存器(LR)
+        AArch64IntRegNames.put(30, "x30");
+        // sp是栈指针
+        AArch64IntRegNames.put(31, "sp");
+        // xzr是零寄存器（在某些指令中可作为x31引用）
+        AArch64IntRegNames.put(32, "xzr");
+    }
+
+    private final int index;
+    private final String name;
+
+    public AArch64CPUReg(int index, String name) {
+        super();
+        this.index = index;
+        this.name = name;
+    }
+    
+    
+    private static LinkedHashMap<Integer, AArch64CPUReg> armv8CPURegs = new LinkedHashMap<>();
+    
+    static {
+        for (int i = 0; i <= 32; i++) {
+            armv8CPURegs.put(i, new AArch64CPUReg(i, AArch64IntRegNames.get(i)));
+        }
+    }
+    
+    public boolean canBeReorder(){
+        // 被调用者保存寄存器和特殊寄存器不能被重排
+        if (index >= 19 && index <= 30) return false;
+        if (index == 31 || index == 32) return false; // SP和XZR
+        return true;
+    }
+    
+    public static LinkedHashMap<Integer, AArch64CPUReg> getAllCPURegs() {
+        return armv8CPURegs;
+    }
+    
+    public static AArch64CPUReg getAArch64CPUReg(int index) {
+        return armv8CPURegs.get(index);
+    }
+    public static AArch64CPUReg getAArch64RetReg() {
+        return armv8CPURegs.get(30);
+    }
+
+    public static AArch64CPUReg getAArch64CPURetValueReg() {
+        return armv8CPURegs.get(0);
+    }
+
+    public static AArch64CPUReg getAArch64SpReg() {
+        return armv8CPURegs.get(31);
+    }
+
+    public static AArch64CPUReg getAArch64FPReg() {
+        return armv8CPURegs.get(29);
+    }
+
+    public static AArch64CPUReg getAArch64ArgReg(int argIntIndex) {
+        assert argIntIndex < 8; // ARMv8在寄存器中传递前8个参数
+        return armv8CPURegs.get(argIntIndex);
+    }
+
+    public static AArch64CPUReg getZeroReg() {
+        return armv8CPURegs.get(32);
+    }
+
+    public int getIndex() {
+        return this.index;
+    }
+
+    public String getName() {
+        return this.name;
+    }
+
+    @Override
+    public String toString() {
+        return this.name;
+    }
+
+    public String get32BitName() {
+        if (index == 31) return "wsp";
+        if (index == 32) return "wzr";
+        return "w" + index;
+    }
+    
+    public boolean is64Bit() {
+        return this.name.startsWith("x") || this.name.equals("sp") || this.name.equals("xzr");
+    }
+} 

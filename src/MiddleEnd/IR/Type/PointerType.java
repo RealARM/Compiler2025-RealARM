@@ -1,12 +1,8 @@
 package MiddleEnd.IR.Type;
 
-/**
- * IR指针类型
- */
 public class PointerType extends Type {
-    private final Type elementType; // 指针指向的元素类型
+    private final Type elementType; 
     
-    // 常用的指针类型
     public static final PointerType INT32_PTR = new PointerType(IntegerType.I32);
     public static final PointerType FLOAT32_PTR = new PointerType(FloatType.F32);
     
@@ -14,16 +10,13 @@ public class PointerType extends Type {
         this.elementType = elementType;
     }
     
-    /**
-     * 获取指针指向的元素类型
-     */
     public Type getElementType() {
         return elementType;
     }
     
     @Override
     public int getSize() {
-        return 8; // 指针大小为8字节（64位架构）
+        return 8; 
     }
     
     @Override

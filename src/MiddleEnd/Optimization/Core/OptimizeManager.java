@@ -5,7 +5,6 @@ import MiddleEnd.Optimization.Core.Optimizer.ModuleOptimizer;
 import MiddleEnd.Optimization.Core.Optimizer.FunctionOptimizer;
 import MiddleEnd.IR.Value.Function;
 
-// 新的优化器导入
 import MiddleEnd.Optimization.Advanced.*;
 import MiddleEnd.Optimization.Cleanup.*;
 import MiddleEnd.Optimization.Constant.*;
@@ -39,19 +38,15 @@ public class OptimizeManager {
     private boolean debug = false;
     
     private OptimizeManager() {
-        // 私有构造函数，防止外部实例化
         initializeOptimizers();
     }
-    
-    /**
-     * 初始化默认的优化器
-     */
+
     private void initializeOptimizers() {
 
-        // 尾递归消除优化 - 应该在Mem2Reg之前运行，避免phi指令冲突
+        // 尾递归消除优化
         addModuleOptimizer(new TailRecursionElimination());
         
-        // Mem2Reg优化（SSA构造） - 在尾递归消除之后运行
+        // Mem2Reg优化，现在有点问题
         // addModuleOptimizer(new Mem2Reg());
         
         // 常量优化
@@ -108,30 +103,18 @@ public class OptimizeManager {
         addModuleOptimizer(new RemovePhiPass());
     }
     
-    /**
-     * 添加一个模块级优化器
-     */
     public void addModuleOptimizer(ModuleOptimizer optimizer) {
         moduleOptimizers.add(optimizer);
     }
     
-    /**
-     * 添加一个函数级优化器
-     */
     public void addFunctionOptimizer(FunctionOptimizer optimizer) {
         functionOptimizers.add(optimizer);
     }
     
-    /**
-     * 设置是否打印调试信息
-     */
     public void setDebug(boolean debug) {
         this.debug = debug;
     }
     
-    /**
-     * 运行所有模块级优化器
-     */
     public void runModuleOptimizers(Module module) {
         boolean changed = false;
         for (ModuleOptimizer optimizer : moduleOptimizers) {
@@ -152,9 +135,6 @@ public class OptimizeManager {
         }
     }
     
-    /**
-     * 对单个函数运行所有函数级优化器
-     */
     public void runFunctionOptimizers(Function function) {
         boolean changed = false;
         for (FunctionOptimizer optimizer : functionOptimizers) {
@@ -175,9 +155,6 @@ public class OptimizeManager {
         }
     }
     
-    /**
-     * 对模块中的所有函数运行函数级优化器
-     */
     public void runFunctionOptimizersOnModule(Module module) {
         for (Function function : module.functions()) {
             // 检查是否为库函数（外部函数），跳过库函数
@@ -189,30 +166,18 @@ public class OptimizeManager {
         }
     }
     
-    /**
-     * 保存分析结果
-     */
     public void cacheAnalysisResult(String optimizerName, Object result) {
         analysisResults.put(optimizerName, result);
     }
     
-    /**
-     * 获取分析结果
-     */
     public Object getAnalysisResult(String optimizerName) {
         return analysisResults.get(optimizerName);
     }
     
-    /**
-     * 清除所有分析结果
-     */
     public void clearAnalysisResults() {
         analysisResults.clear();
     }
     
-    /**
-     * 运行所有优化器（先模块级别，再函数级别）
-     */
     public void runAllOptimizers(Module module) {
         // 先运行模块级优化器
         runModuleOptimizers(module);
@@ -221,31 +186,20 @@ public class OptimizeManager {
         runFunctionOptimizersOnModule(module);
     }
     
-    /**
-     * 运行优化组合
-     * @param module 要优化的模块
-     * @param optimizationLevel 优化级别 (0-3)
-     */
     public void optimize(Module module, int optimizationLevel) {
-        clearAnalysisResults(); // 清除之前的分析结果
+        clearAnalysisResults();
         
         if (optimizationLevel <= 0) {
-            // 不进行优化
             return;
         }
         
-        // 基本优化 (O1)
         runModuleOptimizers(module);
         
         if (optimizationLevel >= 2) {
-            // 中等优化 (O2)
-            // 再次运行基本优化，因为之前的优化可能创造了新的机会
             runModuleOptimizers(module);
         }
         
         if (optimizationLevel >= 3) {
-            // 激进优化 (O3)
-            // 第三轮优化
             runModuleOptimizers(module);
         }
     }
