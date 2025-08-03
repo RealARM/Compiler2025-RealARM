@@ -173,14 +173,14 @@ public class AArch64Visitor {
             generateBasicBlock(basicBlock);
         }
         
-        System.out.println("\n===== 开始对函数 " + functionName + " 进行寄存器分配 =====");
+        // System.out.println("\n===== 开始对函数 " + functionName + " 进行寄存器分配 =====");
         RegisterAllocator allocator = new RegisterAllocator(curAArch64Function);
         allocator.allocateRegisters();
         
         PostRegisterOptimizer optimizer = new PostRegisterOptimizer(curAArch64Function);
         optimizer.optimize();
         
-        System.out.println("===== 函数 " + functionName + " 寄存器分配完成 =====\n");
+        // System.out.println("===== 函数 " + functionName + " 寄存器分配完成 =====\n");
     }
 
     private void generateBasicBlock(BasicBlock basicBlock) {
@@ -744,7 +744,7 @@ public class AArch64Visitor {
                     AArch64Instruction memInst = null;
                     if (argValueReg != null) {
                         AArch64CPUReg spReg = AArch64CPUReg.getAArch64SpReg();
-                        System.out.println(tempStackOffset + " " + argValueReg + " " + arg);
+                        // System.out.println(tempStackOffset + " " + argValueReg + " " + arg);
 
                         memInst = handleLargeStackOffset(spReg, tempStackOffset, argValueReg, false, arg.getType() instanceof FloatType, insList, predefine);
                     } else {
@@ -863,7 +863,7 @@ public class AArch64Visitor {
             srcReg = RegList.get(source);
         } else {
             srcReg = null;
-            System.out.println("error no virReg: " + source);
+            // System.out.println("error no virReg: " + source);
         }
         
         AArch64Reg destReg;
@@ -960,7 +960,7 @@ public class AArch64Visitor {
         
         if (pointer instanceof GetElementPtrInstruction) {
             if (!RegList.containsKey(pointer)) {
-                System.out.println("error: GEPinst not parse!");
+                // System.out.println("error: GEPinst not parse!");
                 parsePtrInst((GetElementPtrInstruction) pointer, true);
             }
             
@@ -1652,7 +1652,7 @@ public class AArch64Visitor {
                 condType = isFloat ? AArch64Tools.CondType.ls : AArch64Tools.CondType.ls;
                 break;
             case UNE:
-                condType = AArch64Tools.CondType.vs;
+                condType = AArch64Tools.CondType.ne;
                 break;
             case ORD:
                 condType = AArch64Tools.CondType.vc;
