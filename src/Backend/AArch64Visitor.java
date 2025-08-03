@@ -581,10 +581,13 @@ public class AArch64Visitor {
                 }
                 if (arg instanceof ConstantInt) {
                     long value = ((ConstantInt) arg).getValue();
-                    AArch64Imm imm = new AArch64Imm(value);
-                    
-                    AArch64Move moveInst = new AArch64Move(argReg, imm, true);
-                    addInstr(moveInst, insList, predefine);
+
+                    if (value > 65535 || value < -65536) {
+                        loadLargeImmediate(argReg, value, insList, predefine);
+                    } else {
+                        AArch64Move moveInst = new AArch64Move(argReg, new AArch64Imm(value), true);
+                        addInstr(moveInst, insList, predefine);
+                    }
                 } else if (arg instanceof ConstantFloat) {
                     double floatValue = ((ConstantFloat) arg).getValue();
                     
@@ -838,11 +841,14 @@ public class AArch64Visitor {
         AArch64Reg srcReg;
         if (source instanceof ConstantInt) {
             long value = ((ConstantInt) source).getValue();
-            AArch64Imm imm = new AArch64Imm(value);
             srcReg = new AArch64VirReg(false);
-            
-            AArch64Move moveInst = new AArch64Move(srcReg, imm, false);
-            addInstr(moveInst, insList, predefine);
+
+            if (value > 65535 || value < -65536) {
+                loadLargeImmediate(srcReg, value, insList, predefine);
+            } else {
+                AArch64Move moveInst = new AArch64Move(srcReg, new AArch64Imm(value), true);
+                addInstr(moveInst, insList, predefine);
+            }
         } else if (source instanceof ConstantFloat) {
             double value = ((ConstantFloat) source).getValue();
             AArch64VirReg fReg = new AArch64VirReg(true);
