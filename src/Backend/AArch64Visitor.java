@@ -632,14 +632,8 @@ public class AArch64Visitor {
                     
                     AArch64Reg argValueReg = RegList.get(arg);
                     if (argValueReg != null) {
-                        if (functionName.equals("putfloat") && isFloat && argValueReg instanceof AArch64VirReg) {
-                            // putfloat需要单精度参数，但我们内部使用双精度计算
-                            AArch64VirReg tempSingleReg = new AArch64VirReg(true);  // 临时单精度寄存器
-                            
-                            AArch64Cvt cvtInst = new AArch64Cvt(argValueReg, AArch64Cvt.CvtType.FCVT_D2S, tempSingleReg);
-                            addInstr(cvtInst, insList, predefine);
-                            
-                            AArch64Move moveInst = new AArch64Move(argReg, tempSingleReg, false);
+                        if (functionName.equals("putfloat") && isFloat) {
+                            AArch64Move moveInst = new AArch64Move(argReg, argValueReg, false);
                             addInstr(moveInst, insList, predefine);
                         } else {
                             AArch64Move moveInst = new AArch64Move(argReg, argValueReg, false);
@@ -796,13 +790,8 @@ public class AArch64Visitor {
             
             if (returnReg != null) {
                 if (functionName.equals("getfloat") && ins.getCallee().getReturnType() instanceof FloatType) {
-                    AArch64VirReg tempSingleReg = new AArch64VirReg(true);  // 临时单精度寄存器
-                    
-                    AArch64Move moveFromS0Inst = new AArch64Move(tempSingleReg, returnReg, false);
-                    addInstr(moveFromS0Inst, insList, predefine);
-                    
-                    AArch64Cvt cvtInst = new AArch64Cvt(tempSingleReg, AArch64Cvt.CvtType.FCVT_S2D, resultReg);
-                    addInstr(cvtInst, insList, predefine);
+                    AArch64Move moveInst = new AArch64Move(resultReg, returnReg, false);
+                    addInstr(moveInst, insList, predefine);
                 } else {
                     AArch64Move moveReturnInst = new AArch64Move(resultReg, returnReg, false);
                     addInstr(moveReturnInst, insList, predefine);
@@ -1999,33 +1988,22 @@ public class AArch64Visitor {
     
 
     private void loadFloatConstant(AArch64Reg destReg, double value, ArrayList<AArch64Instruction> insList, boolean predefine) {
-        // 先将浮点数转换为原始二进制表示
-        long bits = Double.doubleToRawLongBits(value);
-        
-        // 分配一个虚拟寄存器用于存放位模式 (整数类型)
+        // 将 double 值截断为单精度并获取其 32-bit IEEE754 位模式
+        int bits = Float.floatToIntBits((float) value);
+
         AArch64VirReg tempReg = new AArch64VirReg(false);
-        
-        // 使用MOVZ和MOVK指令加载64位浮点值的位模式到通用寄存器
-        // 加载低16位
-        AArch64Move movzInst = new AArch64Move(tempReg, new AArch64Imm(bits & 0xFFFF), true, AArch64Move.MoveType.MOVZ);
-        addInstr(movzInst, insList, predefine);
-        
-        // 加载第二个16位块
-        AArch64Move movk1Inst = new AArch64Move(tempReg, new AArch64Imm((bits >> 16) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
-        movk1Inst.setShift(16);
-        addInstr(movk1Inst, insList, predefine);
-        
-        // 加载第三个16位块
-        AArch64Move movk2Inst = new AArch64Move(tempReg, new AArch64Imm((bits >> 32) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
-        movk2Inst.setShift(32);
-        addInstr(movk2Inst, insList, predefine);
-        
-        // 加载最高16位
-        AArch64Move movk3Inst = new AArch64Move(tempReg, new AArch64Imm((bits >> 48) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
-        movk3Inst.setShift(48);
-        addInstr(movk3Inst, insList, predefine);
-        
-        // 使用FMOV指令将通用寄存器的位模式移动到浮点寄存器
+
+        AArch64Move movz = new AArch64Move(tempReg, new AArch64Imm(bits & 0xFFFF), true, AArch64Move.MoveType.MOVZ);
+        addInstr(movz, insList, predefine);
+
+        int high16 = (bits >> 16) & 0xFFFF;
+        if (high16 != 0) {
+            AArch64Move movk = new AArch64Move(tempReg, new AArch64Imm(high16), true, AArch64Move.MoveType.MOVK);
+            movk.setShift(16);
+            addInstr(movk, insList, predefine);
+        }
+
+        // fmov 将位模式解释为浮点数（w -> s）
         AArch64Fmov fmovInst = new AArch64Fmov(destReg, tempReg);
         addInstr(fmovInst, insList, predefine);
     }

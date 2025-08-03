@@ -62,10 +62,10 @@ public class Compiler {
         boolean lexOnly = false;
         boolean printAST = false;
         boolean generateIR = true;
-        boolean printIR = false;
+        boolean printIR = true;
         boolean generateARM = generateAsm;
         optimizationLevel = 1;
-        String targetPath = generateAsm ? null : outputPath;
+        String targetPath = "IR_output.ll";
         String armOutputPath = generateAsm ? outputPath : "armv8_backend.s";
         
         try {
