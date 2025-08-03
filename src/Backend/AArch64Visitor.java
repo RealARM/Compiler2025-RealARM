@@ -1262,25 +1262,9 @@ public class AArch64Visitor {
         }
 
 
-        Long localSize = curAArch64Function.getStackSize();
-        ArrayList<AArch64Operand> operands = new ArrayList<>();
-        operands.add(AArch64CPUReg.getAArch64SpReg());
 
-        long value = curAArch64Function.getStackSpace().getOffset();
-        if (ImmediateRange.ADD_SUB.isInRange(value)) {
-            operands.add(curAArch64Function.getStackSpace());
-        } else {
-            AArch64VirReg tempReg = new AArch64VirReg(false);
-            if (value > 65535 || value < -65536) {
-                loadLargeImmediate(tempReg, value, insList, predefine);
-            } else {
-                AArch64Move moveInst = new AArch64Move(tempReg, curAArch64Function.getStackSpace(), true);
-                addInstr(moveInst, insList, predefine);
-            }
-            operands.add(tempReg);
-        }
-        AArch64Binary addSpInst = new AArch64Binary(operands, AArch64CPUReg.getAArch64SpReg(), AArch64Binary.AArch64BinaryType.add);
-        addInstr(addSpInst, insList, predefine);
+        AArch64Move movSpFp = new AArch64Move(AArch64CPUReg.getAArch64SpReg(), AArch64CPUReg.getAArch64FPReg(), false);
+        addInstr(movSpFp, insList, predefine);
         
 
         AArch64LoadPair ldpInst = new AArch64LoadPair(
