@@ -8,6 +8,8 @@ public class AArch64Instruction {
     public AArch64Reg defReg;
     public ArrayList<AArch64Operand> operands;
 
+    private long calleeParamOffset = 0;
+
     public AArch64Instruction() {
         this.defReg = null;
         this.operands = new ArrayList<>();
@@ -17,6 +19,13 @@ public class AArch64Instruction {
         this.operands = new ArrayList<>();
         this.operands.addAll(operands);
         this.defReg = rd;
+    }
+
+    public long getCalleeParamOffset() {
+        return calleeParamOffset;
+    }
+    public void setCalleeParamOffset(long calleeParamOffset) {
+        this.calleeParamOffset = calleeParamOffset;
     }
 
     public void replaceOperands(AArch64Reg armv8Reg1, AArch64Operand armv8Reg2) {

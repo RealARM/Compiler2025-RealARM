@@ -215,12 +215,12 @@ public class GraphColoringEngine {
                 
                 if (allowedColors.isEmpty()) {
                     state.getSpilledNodes().add(currentNode);
-                    System.out.println("寄存器 " + currentNode + " 溢出");
+                    // System.out.println("寄存器 " + currentNode + " 溢出");
                 } else {
                     int selectedColor = allowedColors.iterator().next();
                     state.getRegisterColors().put((AArch64Reg) currentNode, selectedColor);
                     nodeScheduler.getSuccessfullyColored().add((AArch64Reg) currentNode);
-                    System.out.println("为寄存器 " + currentNode + " 分配颜色 " + selectedColor);
+                    // System.out.println("为寄存器 " + currentNode + " 分配颜色 " + selectedColor);
                 }
             }
         }
@@ -231,12 +231,11 @@ public class GraphColoringEngine {
             if (state.getRegisterColors().containsKey(aliasNode)) {
                 state.getRegisterColors().put((AArch64Reg) coalescedNode, 
                                             state.getRegisterColors().get(aliasNode));
-                System.out.println("合并节点 " + coalescedNode + " 继承颜色 " + 
-                                 state.getRegisterColors().get(aliasNode));
+                // System.out.println("合并节点 " + coalescedNode + " 继承颜色 " + state.getRegisterColors().get(aliasNode));
             }
         }
         
-        System.out.println("颜色分配完成，溢出节点数: " + state.getSpilledNodes().size());
+        // System.out.println("颜色分配完成，溢出节点数: " + state.getSpilledNodes().size());
         return state.getSpilledNodes().isEmpty();
     }
     

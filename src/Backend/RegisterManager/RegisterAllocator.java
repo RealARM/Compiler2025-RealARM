@@ -31,13 +31,13 @@ public class RegisterAllocator {
     
 
     public void allocateRegisters() {
-        System.out.println("\n===== 开始为函数 " + targetFunction.getName() + " 分配寄存器 =====");
+        // System.out.println("\n===== 开始为函数 " + targetFunction.getName() + " 分配寄存器 =====");
         
         // 分别处理整型和浮点寄存器
         performAllocationForType(false); // 整型寄存器
         performAllocationForType(true);  // 浮点寄存器
         
-        System.out.println("===== 函数 " + targetFunction.getName() + " 寄存器分配完成 =====\n");
+        // System.out.println("===== 函数 " + targetFunction.getName() + " 寄存器分配完成 =====\n");
     }
     
 
@@ -49,7 +49,7 @@ public class RegisterAllocator {
         
         while (requiresSpillHandling && allocationRound < MAX_ALLOCATION_ROUNDS) {
             allocationRound++;
-            System.out.println("第 " + allocationRound + " 轮分配 " + registerTypeName + " 寄存器");
+            // System.out.println("第 " + allocationRound + " 轮分配 " + registerTypeName + " 寄存器");
             
             // 创建新的分配状态
             currentState = new RegisterAllocationState(targetFunction, isFloatingPoint);
@@ -100,7 +100,7 @@ public class RegisterAllocator {
     
 
     private void applyAllocationResults() {
-        System.out.println("开始应用寄存器分配结果...");
+        // System.out.println("开始应用寄存器分配结果...");
         int replacementCount = 0;
         
         for (AArch64Block block : targetFunction.getBlocks()) {
@@ -139,12 +139,12 @@ public class RegisterAllocator {
             }
         }
         
-        System.out.println("寄存器分配结果应用完成，替换了 " + replacementCount + " 个寄存器");
+        // System.out.println("寄存器分配结果应用完成，替换了 " + replacementCount + " 个寄存器");
     }
     
 
     private void handleRegisterSpilling() {
-        System.out.println("处理寄存器溢出，数量: " + currentState.getSpilledNodes().size());
+        // System.out.println("处理寄存器溢出，数量: " + currentState.getSpilledNodes().size());
         
         for (AArch64Operand spillOperand : currentState.getSpilledNodes()) {
             if (!(spillOperand instanceof AArch64VirReg)) continue;
@@ -159,7 +159,7 @@ public class RegisterAllocator {
             rewriteSpilledRegisterAccesses(spillRegister, stackPosition);
         }
         
-        System.out.println("溢出处理完成");
+        // System.out.println("溢出处理完成");
     }
 
     
@@ -207,12 +207,14 @@ public class RegisterAllocator {
                 if (containsSpilledUse || containsSpilledDef) {
                     if (containsSpilledUse) {
                         // 为使用插入加载指令
-                        insertLoadInstructionForSpilledUse(block, instruction, spilledRegister, stackOffset);
+                        insertLoadInstructionForSpilledUse(block, instruction, spilledRegister, 
+                        stackOffset + instruction.getCalleeParamOffset());
                     }
                     
                     if (containsSpilledDef) {
                         // 为定义插入存储指令
-                        insertStoreInstructionForSpilledDef(block, instruction, spilledRegister, stackOffset);
+                        insertStoreInstructionForSpilledDef(block, instruction, spilledRegister, 
+                        stackOffset + instruction.getCalleeParamOffset());
                     }
                 }
             }

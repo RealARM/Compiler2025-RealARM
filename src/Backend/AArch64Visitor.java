@@ -658,6 +658,11 @@ public class AArch64Visitor {
                 curAArch64Function.addStackArg(arg, stackOffset);
             }
         }
+        
+        stackOffset = ((stackOffset + 15) & ~15);
+
+
+        //栈自减，为溢出形参提供空间
         if (stackOffset > 0) {
             AArch64Operand sizeOp = checkImmediate(stackOffset, ImmediateRange.ADD_SUB, insList, predefine);
             
@@ -736,10 +741,12 @@ public class AArch64Visitor {
                     }
                     
                     AArch64Reg argValueReg = RegList.get(arg);
+                    AArch64Instruction memInst = null;
                     if (argValueReg != null) {
                         AArch64CPUReg spReg = AArch64CPUReg.getAArch64SpReg();
-                         
-                         handleLargeStackOffset(spReg, tempStackOffset, argValueReg, false, arg.getType() instanceof FloatType, insList, predefine);
+                        System.out.println(tempStackOffset + " " + argValueReg + " " + arg);
+
+                        memInst = handleLargeStackOffset(spReg, tempStackOffset, argValueReg, false, arg.getType() instanceof FloatType, insList, predefine);
                     } else {
                         System.err.println("警告: 栈参数 " + arg + " 没有关联的寄存器，使用零寄存器");
                         AArch64VirReg tempReg = new AArch64VirReg(false);
@@ -748,8 +755,10 @@ public class AArch64Visitor {
                         
                         AArch64CPUReg spReg = AArch64CPUReg.getAArch64SpReg();
                         
-                        handleLargeStackOffset(spReg, tempStackOffset, tempReg, false, false, insList, predefine);
+                        memInst = handleLargeStackOffset(spReg, tempStackOffset, tempReg, false, false, insList, predefine);
                     }
+
+                    memInst.setCalleeParamOffset(stackOffset);
                 }
                 tempStackOffset += 8;
             }
@@ -2190,7 +2199,7 @@ public class AArch64Visitor {
     }
 
 
-    private void createSafeMemoryInstruction(AArch64Reg baseReg, long offset, AArch64Reg valueReg, 
+    private AArch64Instruction createSafeMemoryInstruction(AArch64Reg baseReg, long offset, AArch64Reg valueReg, 
                                            boolean isLoad, ArrayList<AArch64Instruction> insList, boolean predefine) {
         AArch64Operand offsetOp = createSafeMemoryOperand(offset, insList, predefine);
         
@@ -2205,24 +2214,28 @@ public class AArch64Visitor {
             if (isLoad) {
                 AArch64Load loadInst = new AArch64Load(addrReg, new AArch64Imm(0), valueReg);
                 addInstr(loadInst, insList, predefine);
+                return loadInst;
             } else {
                 AArch64Store storeInst = new AArch64Store(valueReg, addrReg, new AArch64Imm(0));
                 addInstr(storeInst, insList, predefine);
+                return storeInst;
             }
         } else {
             if (isLoad) {
                 AArch64Load loadInst = new AArch64Load(baseReg, (AArch64Imm)offsetOp, valueReg);
                 addInstr(loadInst, insList, predefine);
+                return loadInst;
             } else {
                 AArch64Store storeInst = new AArch64Store(valueReg, baseReg, (AArch64Imm)offsetOp);
                 addInstr(storeInst, insList, predefine);
+                return storeInst;
             }
         }
     }
 
-    private void handleLargeStackOffset(AArch64Reg baseReg, long offset, AArch64Reg valueReg, 
+    private AArch64Instruction handleLargeStackOffset(AArch64Reg baseReg, long offset, AArch64Reg valueReg, 
                                       boolean isLoad, boolean isFloat, 
                                       ArrayList<AArch64Instruction> insList, boolean predefine) {
-        createSafeMemoryInstruction(baseReg, offset, valueReg, isLoad, insList, predefine);
+        return createSafeMemoryInstruction(baseReg, offset, valueReg, isLoad, insList, predefine);
     }
 } 
