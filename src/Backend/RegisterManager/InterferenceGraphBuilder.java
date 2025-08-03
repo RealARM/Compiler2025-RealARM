@@ -50,7 +50,7 @@ public class InterferenceGraphBuilder {
             }
         }
         
-        System.out.println("收集到 " + candidates.size() + " 个虚拟寄存器");
+        // System.out.println("收集到 " + candidates.size() + " 个虚拟寄存器");
     }
     
 
@@ -112,7 +112,7 @@ public class InterferenceGraphBuilder {
         for (LinkedHashSet<AArch64Operand> neighbors : state.getAdjacencyGraph().values()) {
             totalEdges += neighbors.size();
         }
-        System.out.println("干扰图构建完成，冲突边数: " + (totalEdges / 2)); // 除以2因为是无向图
+        // System.out.println("干扰图构建完成，冲突边数: " + (totalEdges / 2)); // 除以2因为是无向图
     }
     
 

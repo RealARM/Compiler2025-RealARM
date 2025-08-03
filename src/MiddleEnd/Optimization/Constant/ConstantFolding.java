@@ -120,32 +120,32 @@ public class ConstantFolding implements Optimizer.ModuleOptimizer {
             }
         }           
         else if (inst.isFloatingPointOp()) {
-            if (left instanceof ConstantFloat && right instanceof ConstantFloat) {
-                double leftVal = ((ConstantFloat) left).getValue();
-                double rightVal = ((ConstantFloat) right).getValue();
+            // if (left instanceof ConstantFloat && right instanceof ConstantFloat) {
+            //     double leftVal = ((ConstantFloat) left).getValue();
+            //     double rightVal = ((ConstantFloat) right).getValue();
                 
-                switch (inst.getOpCode()) {
-                    case FADD:
-                        result = new ConstantFloat(leftVal + rightVal);
-                        break;
-                    case FSUB:
-                        result = new ConstantFloat(leftVal - rightVal);
-                        break;
-                    case FMUL:
-                        result = new ConstantFloat(leftVal * rightVal);
-                        break;
-                    case FDIV:
-                        if (rightVal != 0.0) {
-                            result = new ConstantFloat(leftVal / rightVal);
-                        }
-                        break;
-                    case FREM:
-                        if (rightVal != 0.0) {
-                            result = new ConstantFloat(leftVal % rightVal);
-                        }
-                        break;
-                }
-            }
+            //     switch (inst.getOpCode()) {
+            //         case FADD:
+            //             result = new ConstantFloat(leftVal + rightVal);
+            //             break;
+            //         case FSUB:
+            //             result = new ConstantFloat(leftVal - rightVal);
+            //             break;
+            //         case FMUL:
+            //             result = new ConstantFloat(leftVal * rightVal);
+            //             break;
+            //         case FDIV:
+            //             if (rightVal != 0.0) {
+            //                 result = new ConstantFloat(leftVal / rightVal);
+            //             }
+            //             break;
+            //         case FREM:
+            //             if (rightVal != 0.0) {
+            //                 result = new ConstantFloat(leftVal % rightVal);
+            //             }
+            //             break;
+            //     }
+            // }
         }
         
         if (result != null) {

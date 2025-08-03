@@ -76,7 +76,13 @@ public class AArch64Move extends AArch64Instruction {
         }
         
         sb.append("\t");
-        sb.append(getDefReg().toString());
+        String destStr;
+        if (isImmediate && getDefReg() instanceof Backend.Value.Operand.Register.AArch64CPUReg cpuDest) {
+            destStr = cpuDest.get32BitName();
+        } else {
+            destStr = getDefReg().toString();
+        }
+        sb.append(destStr);
         sb.append(",\t");
         
         if (getOperands().isEmpty()) {

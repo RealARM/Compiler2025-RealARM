@@ -173,14 +173,14 @@ public class AArch64Visitor {
             generateBasicBlock(basicBlock);
         }
         
-        System.out.println("\n===== 开始对函数 " + functionName + " 进行寄存器分配 =====");
+        // System.out.println("\n===== 开始对函数 " + functionName + " 进行寄存器分配 =====");
         RegisterAllocator allocator = new RegisterAllocator(curAArch64Function);
         allocator.allocateRegisters();
         
         PostRegisterOptimizer optimizer = new PostRegisterOptimizer(curAArch64Function);
         optimizer.optimize();
         
-        System.out.println("===== 函数 " + functionName + " 寄存器分配完成 =====\n");
+        // System.out.println("===== 函数 " + functionName + " 寄存器分配完成 =====\n");
     }
 
     private void generateBasicBlock(BasicBlock basicBlock) {
@@ -632,14 +632,8 @@ public class AArch64Visitor {
                     
                     AArch64Reg argValueReg = RegList.get(arg);
                     if (argValueReg != null) {
-                        if (functionName.equals("putfloat") && isFloat && argValueReg instanceof AArch64VirReg) {
-                            // putfloat需要单精度参数，但我们内部使用双精度计算
-                            AArch64VirReg tempSingleReg = new AArch64VirReg(true);  // 临时单精度寄存器
-                            
-                            AArch64Cvt cvtInst = new AArch64Cvt(argValueReg, AArch64Cvt.CvtType.FCVT_D2S, tempSingleReg);
-                            addInstr(cvtInst, insList, predefine);
-                            
-                            AArch64Move moveInst = new AArch64Move(argReg, tempSingleReg, false);
+                        if (functionName.equals("putfloat") && isFloat) {
+                            AArch64Move moveInst = new AArch64Move(argReg, argValueReg, false);
                             addInstr(moveInst, insList, predefine);
                         } else {
                             AArch64Move moveInst = new AArch64Move(argReg, argValueReg, false);
@@ -658,6 +652,11 @@ public class AArch64Visitor {
                 curAArch64Function.addStackArg(arg, stackOffset);
             }
         }
+        
+        stackOffset = ((stackOffset + 15) & ~15);
+
+
+        //栈自减，为溢出形参提供空间
         if (stackOffset > 0) {
             AArch64Operand sizeOp = checkImmediate(stackOffset, ImmediateRange.ADD_SUB, insList, predefine);
             
@@ -736,10 +735,12 @@ public class AArch64Visitor {
                     }
                     
                     AArch64Reg argValueReg = RegList.get(arg);
+                    AArch64Instruction memInst = null;
                     if (argValueReg != null) {
                         AArch64CPUReg spReg = AArch64CPUReg.getAArch64SpReg();
-                         
-                         handleLargeStackOffset(spReg, tempStackOffset, argValueReg, false, arg.getType() instanceof FloatType, insList, predefine);
+                        // System.out.println(tempStackOffset + " " + argValueReg + " " + arg);
+
+                        memInst = handleLargeStackOffset(spReg, tempStackOffset, argValueReg, false, arg.getType() instanceof FloatType, insList, predefine);
                     } else {
                         System.err.println("警告: 栈参数 " + arg + " 没有关联的寄存器，使用零寄存器");
                         AArch64VirReg tempReg = new AArch64VirReg(false);
@@ -748,8 +749,10 @@ public class AArch64Visitor {
                         
                         AArch64CPUReg spReg = AArch64CPUReg.getAArch64SpReg();
                         
-                        handleLargeStackOffset(spReg, tempStackOffset, tempReg, false, false, insList, predefine);
+                        memInst = handleLargeStackOffset(spReg, tempStackOffset, tempReg, false, false, insList, predefine);
                     }
+
+                    memInst.setCalleeParamOffset(stackOffset);
                 }
                 tempStackOffset += 8;
             }
@@ -787,13 +790,8 @@ public class AArch64Visitor {
             
             if (returnReg != null) {
                 if (functionName.equals("getfloat") && ins.getCallee().getReturnType() instanceof FloatType) {
-                    AArch64VirReg tempSingleReg = new AArch64VirReg(true);  // 临时单精度寄存器
-                    
-                    AArch64Move moveFromS0Inst = new AArch64Move(tempSingleReg, returnReg, false);
-                    addInstr(moveFromS0Inst, insList, predefine);
-                    
-                    AArch64Cvt cvtInst = new AArch64Cvt(tempSingleReg, AArch64Cvt.CvtType.FCVT_S2D, resultReg);
-                    addInstr(cvtInst, insList, predefine);
+                    AArch64Move moveInst = new AArch64Move(resultReg, returnReg, false);
+                    addInstr(moveInst, insList, predefine);
                 } else {
                     AArch64Move moveReturnInst = new AArch64Move(resultReg, returnReg, false);
                     addInstr(moveReturnInst, insList, predefine);
@@ -854,7 +852,7 @@ public class AArch64Visitor {
             srcReg = RegList.get(source);
         } else {
             srcReg = null;
-            System.out.println("error no virReg: " + source);
+            // System.out.println("error no virReg: " + source);
         }
         
         AArch64Reg destReg;
@@ -951,7 +949,7 @@ public class AArch64Visitor {
         
         if (pointer instanceof GetElementPtrInstruction) {
             if (!RegList.containsKey(pointer)) {
-                System.out.println("error: GEPinst not parse!");
+                // System.out.println("error: GEPinst not parse!");
                 parsePtrInst((GetElementPtrInstruction) pointer, true);
             }
             
@@ -1643,7 +1641,7 @@ public class AArch64Visitor {
                 condType = isFloat ? AArch64Tools.CondType.ls : AArch64Tools.CondType.ls;
                 break;
             case UNE:
-                condType = AArch64Tools.CondType.vs;
+                condType = AArch64Tools.CondType.ne;
                 break;
             case ORD:
                 condType = AArch64Tools.CondType.vc;
@@ -1856,14 +1854,61 @@ public class AArch64Visitor {
             srcOp = fpuReg;
         } else {
             if (!RegList.containsKey(source)) {
-                if (source.getType() instanceof FloatType) {
-                    AArch64Reg srcReg = new AArch64VirReg(true);
-                    RegList.put(source, srcReg);
-                    srcOp = srcReg;
+                if (source instanceof Argument) {
+                    Argument arg = (Argument) source;
+                    
+                    // 检查是否是栈参数
+                    if (curAArch64Function.getStackArg(arg) != null) {
+                        // 栈参数，需要从栈中加载
+                        AArch64Reg srcReg = source.getType() instanceof FloatType ? 
+                                           new AArch64VirReg(true) : new AArch64VirReg(false);
+                        
+                        long stackParamOffset = curAArch64Function.getStackArg(arg);
+                        AArch64Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
+                        
+                        if (paramOffsetOp instanceof AArch64Reg) {
+                            AArch64VirReg addrReg = new AArch64VirReg(false);
+                            ArrayList<AArch64Operand> operands = new ArrayList<>();
+                            operands.add(AArch64CPUReg.getAArch64FPReg());
+                            operands.add(paramOffsetOp);
+                            AArch64Binary addInst = new AArch64Binary(operands, addrReg, AArch64Binary.AArch64BinaryType.add);
+                            addInstr(addInst, insList, predefine);
+                            
+                            AArch64Load loadParamInst = new AArch64Load(addrReg, new AArch64Imm(0), srcReg);
+                            addInstr(loadParamInst, insList, predefine);
+                        } else {
+                            AArch64Load loadParamInst = new AArch64Load(AArch64CPUReg.getAArch64FPReg(), 
+                                paramOffsetOp, srcReg);
+                            addInstr(loadParamInst, insList, predefine);
+                        }
+                        
+                        RegList.put(source, srcReg);
+                        srcOp = srcReg;
+                    } else {
+                        // 寄存器参数，应该已经在RegList中了
+                        AArch64Reg srcReg = curAArch64Function.getRegArg(arg);
+                        if (srcReg != null) {
+                            RegList.put(source, srcReg);
+                            srcOp = srcReg;
+                        } else {
+                            // fallback
+                            srcReg = source.getType() instanceof FloatType ? 
+                                    new AArch64VirReg(true) : new AArch64VirReg(false);
+                            RegList.put(source, srcReg);
+                            srcOp = srcReg;
+                        }
+                    }
                 } else {
-                    AArch64Reg srcReg = new AArch64VirReg(false);
-                    RegList.put(source, srcReg);
-                    srcOp = srcReg;
+                    // 非参数的其他Value
+                    if (source.getType() instanceof FloatType) {
+                        AArch64Reg srcReg = new AArch64VirReg(true);
+                        RegList.put(source, srcReg);
+                        srcOp = srcReg;
+                    } else {
+                        AArch64Reg srcReg = new AArch64VirReg(false);
+                        RegList.put(source, srcReg);
+                        srcOp = srcReg;
+                    }
                 }
             } else {
                 srcOp = RegList.get(source);
@@ -1943,33 +1988,22 @@ public class AArch64Visitor {
     
 
     private void loadFloatConstant(AArch64Reg destReg, double value, ArrayList<AArch64Instruction> insList, boolean predefine) {
-        // 先将浮点数转换为原始二进制表示
-        long bits = Double.doubleToRawLongBits(value);
-        
-        // 分配一个虚拟寄存器用于存放位模式 (整数类型)
+        // 将 double 值截断为单精度并获取其 32-bit IEEE754 位模式
+        int bits = Float.floatToIntBits((float) value);
+
         AArch64VirReg tempReg = new AArch64VirReg(false);
-        
-        // 使用MOVZ和MOVK指令加载64位浮点值的位模式到通用寄存器
-        // 加载低16位
-        AArch64Move movzInst = new AArch64Move(tempReg, new AArch64Imm(bits & 0xFFFF), true, AArch64Move.MoveType.MOVZ);
-        addInstr(movzInst, insList, predefine);
-        
-        // 加载第二个16位块
-        AArch64Move movk1Inst = new AArch64Move(tempReg, new AArch64Imm((bits >> 16) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
-        movk1Inst.setShift(16);
-        addInstr(movk1Inst, insList, predefine);
-        
-        // 加载第三个16位块
-        AArch64Move movk2Inst = new AArch64Move(tempReg, new AArch64Imm((bits >> 32) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
-        movk2Inst.setShift(32);
-        addInstr(movk2Inst, insList, predefine);
-        
-        // 加载最高16位
-        AArch64Move movk3Inst = new AArch64Move(tempReg, new AArch64Imm((bits >> 48) & 0xFFFF), true, AArch64Move.MoveType.MOVK);
-        movk3Inst.setShift(48);
-        addInstr(movk3Inst, insList, predefine);
-        
-        // 使用FMOV指令将通用寄存器的位模式移动到浮点寄存器
+
+        AArch64Move movz = new AArch64Move(tempReg, new AArch64Imm(bits & 0xFFFF), true, AArch64Move.MoveType.MOVZ);
+        addInstr(movz, insList, predefine);
+
+        int high16 = (bits >> 16) & 0xFFFF;
+        if (high16 != 0) {
+            AArch64Move movk = new AArch64Move(tempReg, new AArch64Imm(high16), true, AArch64Move.MoveType.MOVK);
+            movk.setShift(16);
+            addInstr(movk, insList, predefine);
+        }
+
+        // fmov 将位模式解释为浮点数（w -> s）
         AArch64Fmov fmovInst = new AArch64Fmov(destReg, tempReg);
         addInstr(fmovInst, insList, predefine);
     }
@@ -2190,7 +2224,7 @@ public class AArch64Visitor {
     }
 
 
-    private void createSafeMemoryInstruction(AArch64Reg baseReg, long offset, AArch64Reg valueReg, 
+    private AArch64Instruction createSafeMemoryInstruction(AArch64Reg baseReg, long offset, AArch64Reg valueReg, 
                                            boolean isLoad, ArrayList<AArch64Instruction> insList, boolean predefine) {
         AArch64Operand offsetOp = createSafeMemoryOperand(offset, insList, predefine);
         
@@ -2205,24 +2239,28 @@ public class AArch64Visitor {
             if (isLoad) {
                 AArch64Load loadInst = new AArch64Load(addrReg, new AArch64Imm(0), valueReg);
                 addInstr(loadInst, insList, predefine);
+                return loadInst;
             } else {
                 AArch64Store storeInst = new AArch64Store(valueReg, addrReg, new AArch64Imm(0));
                 addInstr(storeInst, insList, predefine);
+                return storeInst;
             }
         } else {
             if (isLoad) {
                 AArch64Load loadInst = new AArch64Load(baseReg, (AArch64Imm)offsetOp, valueReg);
                 addInstr(loadInst, insList, predefine);
+                return loadInst;
             } else {
                 AArch64Store storeInst = new AArch64Store(valueReg, baseReg, (AArch64Imm)offsetOp);
                 addInstr(storeInst, insList, predefine);
+                return storeInst;
             }
         }
     }
 
-    private void handleLargeStackOffset(AArch64Reg baseReg, long offset, AArch64Reg valueReg, 
+    private AArch64Instruction handleLargeStackOffset(AArch64Reg baseReg, long offset, AArch64Reg valueReg, 
                                       boolean isLoad, boolean isFloat, 
                                       ArrayList<AArch64Instruction> insList, boolean predefine) {
-        createSafeMemoryInstruction(baseReg, offset, valueReg, isLoad, insList, predefine);
+        return createSafeMemoryInstruction(baseReg, offset, valueReg, isLoad, insList, predefine);
     }
 } 

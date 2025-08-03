@@ -40,3 +40,4 @@
 *.s
 *.py
 /.vscode
+/transfer_folder

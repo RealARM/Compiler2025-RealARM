@@ -108,6 +108,6 @@ public class AArch64FPUReg extends AArch64PhyReg {
 
     @Override
     public String toString() {
-        return "d" + index;
+        return "s" + index;
     }
 } 

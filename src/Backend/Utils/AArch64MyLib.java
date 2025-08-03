@@ -426,7 +426,7 @@ public class AArch64MyLib {
         sb.append("\tlsl x8, x8, #3\n");
         sb.append("\tadd x9, x9, x8\n");
         //来吧，类型转换
-        sb.append("\tfcvt d8, s8\n");
+        // sb.append("\tfcvt d8, s8\n");
         //跟你拼了
         sb.append("\tstr d8, [x9]\n");
         sb.append("\tldr x8, [sp, #272]\n");
@@ -560,7 +560,7 @@ public class AArch64MyLib {
         sb.append("\tstr x1, [sp, #8]\n");
         sb.append("\tfmov d0, d8\n");
         //卡密一手
-        sb.append("\tfcvt s0, d0\n");
+        // sb.append("\tfcvt s0, d0\n");
         sb.append("\tbl putfloat\n");
         sb.append("\tldr x0, [sp]\n");
         sb.append("\tldr x1, [sp, #8]\n");

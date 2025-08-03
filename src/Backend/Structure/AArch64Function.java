@@ -85,6 +85,31 @@ public class AArch64Function {
         this.stackSpace.addOffset(8 * (callerReg.size() + 32));
     }
 
+
+
+    public void movStackForParams(long off) {
+        for (Map.Entry<Value, Long> entry : stackArgList.entrySet()) {
+            Value key = entry.getKey();
+            Long value = entry.getValue();
+            stackArgList.put(key, value + off);
+        }
+
+        for (Map.Entry<Value, Long> entry : stack.entrySet()) {
+            Value key = entry.getKey();
+            Long value = entry.getValue();
+            stack.put(key, value + off);
+        }
+
+        for (Map.Entry<Value, Long> entry : AArch64Visitor.getPtrList().entrySet()) {
+            Value key = entry.getKey();
+            Long value = entry.getValue();
+            AArch64Visitor.getPtrList().put(key, value + off);
+        }
+    }
+
+
+
+
     private void createSafeMemoryInstruction(AArch64Block block, AArch64Reg baseReg, long offset, AArch64Reg valueReg, boolean isLoad) {
         // 检查偏移量是否在ARMv8内存指令的范围内
         // ARMv8 LDR/STR指令支持：
