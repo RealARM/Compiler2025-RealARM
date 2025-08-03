@@ -1865,14 +1865,61 @@ public class AArch64Visitor {
             srcOp = fpuReg;
         } else {
             if (!RegList.containsKey(source)) {
-                if (source.getType() instanceof FloatType) {
-                    AArch64Reg srcReg = new AArch64VirReg(true);
-                    RegList.put(source, srcReg);
-                    srcOp = srcReg;
+                if (source instanceof Argument) {
+                    Argument arg = (Argument) source;
+                    
+                    // 检查是否是栈参数
+                    if (curAArch64Function.getStackArg(arg) != null) {
+                        // 栈参数，需要从栈中加载
+                        AArch64Reg srcReg = source.getType() instanceof FloatType ? 
+                                           new AArch64VirReg(true) : new AArch64VirReg(false);
+                        
+                        long stackParamOffset = curAArch64Function.getStackArg(arg);
+                        AArch64Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
+                        
+                        if (paramOffsetOp instanceof AArch64Reg) {
+                            AArch64VirReg addrReg = new AArch64VirReg(false);
+                            ArrayList<AArch64Operand> operands = new ArrayList<>();
+                            operands.add(AArch64CPUReg.getAArch64FPReg());
+                            operands.add(paramOffsetOp);
+                            AArch64Binary addInst = new AArch64Binary(operands, addrReg, AArch64Binary.AArch64BinaryType.add);
+                            addInstr(addInst, insList, predefine);
+                            
+                            AArch64Load loadParamInst = new AArch64Load(addrReg, new AArch64Imm(0), srcReg);
+                            addInstr(loadParamInst, insList, predefine);
+                        } else {
+                            AArch64Load loadParamInst = new AArch64Load(AArch64CPUReg.getAArch64FPReg(), 
+                                paramOffsetOp, srcReg);
+                            addInstr(loadParamInst, insList, predefine);
+                        }
+                        
+                        RegList.put(source, srcReg);
+                        srcOp = srcReg;
+                    } else {
+                        // 寄存器参数，应该已经在RegList中了
+                        AArch64Reg srcReg = curAArch64Function.getRegArg(arg);
+                        if (srcReg != null) {
+                            RegList.put(source, srcReg);
+                            srcOp = srcReg;
+                        } else {
+                            // fallback
+                            srcReg = source.getType() instanceof FloatType ? 
+                                    new AArch64VirReg(true) : new AArch64VirReg(false);
+                            RegList.put(source, srcReg);
+                            srcOp = srcReg;
+                        }
+                    }
                 } else {
-                    AArch64Reg srcReg = new AArch64VirReg(false);
-                    RegList.put(source, srcReg);
-                    srcOp = srcReg;
+                    // 非参数的其他Value
+                    if (source.getType() instanceof FloatType) {
+                        AArch64Reg srcReg = new AArch64VirReg(true);
+                        RegList.put(source, srcReg);
+                        srcOp = srcReg;
+                    } else {
+                        AArch64Reg srcReg = new AArch64VirReg(false);
+                        RegList.put(source, srcReg);
+                        srcOp = srcReg;
+                    }
                 }
             } else {
                 srcOp = RegList.get(source);

@@ -62,7 +62,7 @@ public class RegisterAllocatorHelper {
      * 在指定指令后插入新指令。
      * 若对同一个 refInst 多次调用，会保证插入顺序与调用顺序一致，避免指令被倒置。
      */
-    private static final Map<AArch64Instruction, AArch64Instruction> lastInsertedAfter = new java.util.HashMap<>();
+    private static final Map<AArch64Instruction, AArch64Instruction> lastInsertedAfter = new HashMap<>();
 
     public static void insertAfterInstruction(AArch64Block block, AArch64Instruction refInst, AArch64Instruction newInst) {
         AArch64Instruction anchor = lastInsertedAfter.getOrDefault(refInst, refInst);
