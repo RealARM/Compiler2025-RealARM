@@ -8,9 +8,6 @@ import Backend.Value.Operand.Register.AArch64Reg;
 
 import java.util.*;
 
-/**
- * RegisterAllocator的辅助类，提供图着色算法和内存操作的辅助方法
- */
 public class RegisterAllocatorHelper {
     
     /**
@@ -62,16 +59,21 @@ public class RegisterAllocatorHelper {
     }
 
     /**
-     * 在指定指令后插入新指令
+     * 在指定指令后插入新指令。
+     * 若对同一个 refInst 多次调用，会保证插入顺序与调用顺序一致，避免指令被倒置。
      */
+    private static final Map<AArch64Instruction, AArch64Instruction> lastInsertedAfter = new java.util.HashMap<>();
+
     public static void insertAfterInstruction(AArch64Block block, AArch64Instruction refInst, AArch64Instruction newInst) {
-        int instIndex = block.getInstructions().indexOf(refInst);
-        if (instIndex != -1 && instIndex + 1 < block.getInstructions().size()) {
-            AArch64Instruction nextInst = block.getInstructions().get(instIndex + 1);
-            block.insertBeforeInst(nextInst, newInst);
+        AArch64Instruction anchor = lastInsertedAfter.getOrDefault(refInst, refInst);
+
+        int idx = block.getInstructions().indexOf(anchor);
+        if (idx != -1) {
+            block.getInstructions().add(idx + 1, newInst);
         } else {
             block.addAArch64Instruction(newInst);
         }
+        lastInsertedAfter.put(refInst, newInst);
     }
     
 }
