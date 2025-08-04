@@ -383,6 +383,24 @@ public class AArch64Visitor {
             
             AArch64Binary binaryInst = new AArch64Binary(operands, destReg, binaryType);
             addInstr(binaryInst, insList, predefine);
+
+            // 强制 32 位整数乘法回绕，截取低 32 位并恢复符号
+            if (binaryType == AArch64Binary.AArch64BinaryType.mul &&
+                ins.getType() instanceof MiddleEnd.IR.Type.IntegerType &&
+                ((MiddleEnd.IR.Type.IntegerType) ins.getType()).getBitWidth() == 32) {
+
+                ArrayList<AArch64Operand> maskOps = new ArrayList<>();
+                maskOps.add(destReg);
+                maskOps.add(new AArch64Imm(0xffffffffL));
+                AArch64Binary maskInst = new AArch64Binary(maskOps, destReg, AArch64Binary.AArch64BinaryType.and);
+                addInstr(maskInst, insList, predefine);
+
+                AArch64Binary lslInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                addInstr(lslInst, insList, predefine);
+
+                AArch64Binary asrInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                addInstr(asrInst, insList, predefine);
+            }
         }
         
         if (predefine) {
@@ -582,11 +600,13 @@ public class AArch64Visitor {
                 }
                 if (arg instanceof ConstantInt) {
                     long value = ((ConstantInt) arg).getValue();
-                    AArch64Imm imm = new AArch64Imm(value);
-                    
-                    AArch64Move moveInst = new AArch64Move(argReg, imm, true);
-                    // addInstr(moveInst, insList, predefine);
-                    addInstr(moveInst, constMoves, true);
+
+                    if (value > 65535 || value < -65536) {
+                        loadLargeImmediate(argReg, value, insList, predefine);
+                    } else {
+                        AArch64Move moveInst = new AArch64Move(argReg, new AArch64Imm(value), true);
+                        addInstr(moveInst, insList, predefine);
+                    }
                 } else if (arg instanceof ConstantFloat) {
                     double floatValue = ((ConstantFloat) arg).getValue();
                     
@@ -848,11 +868,14 @@ public class AArch64Visitor {
         AArch64Reg srcReg;
         if (source instanceof ConstantInt) {
             long value = ((ConstantInt) source).getValue();
-            AArch64Imm imm = new AArch64Imm(value);
             srcReg = new AArch64VirReg(false);
-            
-            AArch64Move moveInst = new AArch64Move(srcReg, imm, false);
-            addInstr(moveInst, insList, predefine);
+
+            if (value > 65535 || value < -65536) {
+                loadLargeImmediate(srcReg, value, insList, predefine);
+            } else {
+                AArch64Move moveInst = new AArch64Move(srcReg, new AArch64Imm(value), true);
+                addInstr(moveInst, insList, predefine);
+            }
         } else if (source instanceof ConstantFloat) {
             double value = ((ConstantFloat) source).getValue();
             AArch64VirReg fReg = new AArch64VirReg(true);
@@ -1272,25 +1295,9 @@ public class AArch64Visitor {
         }
 
 
-        Long localSize = curAArch64Function.getStackSize();
-        ArrayList<AArch64Operand> operands = new ArrayList<>();
-        operands.add(AArch64CPUReg.getAArch64SpReg());
 
-        long value = curAArch64Function.getStackSpace().getOffset();
-        if (ImmediateRange.ADD_SUB.isInRange(value)) {
-            operands.add(curAArch64Function.getStackSpace());
-        } else {
-            AArch64VirReg tempReg = new AArch64VirReg(false);
-            if (value > 65535 || value < -65536) {
-                loadLargeImmediate(tempReg, value, insList, predefine);
-            } else {
-                AArch64Move moveInst = new AArch64Move(tempReg, curAArch64Function.getStackSpace(), true);
-                addInstr(moveInst, insList, predefine);
-            }
-            operands.add(tempReg);
-        }
-        AArch64Binary addSpInst = new AArch64Binary(operands, AArch64CPUReg.getAArch64SpReg(), AArch64Binary.AArch64BinaryType.add);
-        addInstr(addSpInst, insList, predefine);
+        AArch64Move movSpFp = new AArch64Move(AArch64CPUReg.getAArch64SpReg(), AArch64CPUReg.getAArch64FPReg(), false);
+        addInstr(movSpFp, insList, predefine);
         
 
         AArch64LoadPair ldpInst = new AArch64LoadPair(
