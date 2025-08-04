@@ -47,7 +47,7 @@ public class OptimizeManager {
         addModuleOptimizer(new TailRecursionElimination());
         
         // Mem2Reg优化，现在有点问题
-        // addModuleOptimizer(new Mem2Reg());
+        addModuleOptimizer(new Mem2Reg());
         
         // 常量优化
         addModuleOptimizer(new ConstantDeduplication());

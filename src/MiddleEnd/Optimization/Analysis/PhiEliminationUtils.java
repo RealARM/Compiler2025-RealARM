@@ -113,18 +113,32 @@ public class PhiEliminationUtils {
         }
     }
     
-    private static void breakCycleMoves(BasicBlock bb, List<Instruction> remainingMoves, 
+        private static void breakCycleMoves(BasicBlock bb, List<Instruction> remainingMoves, 
                                       Map<String, Integer> outDegree, boolean debug) {
         if (remainingMoves.isEmpty()) return;
-        
-        Instruction chosenMove = remainingMoves.get(0);
-        
-        if (debug) {
-            System.out.println("        选择破环的Move: " + chosenMove.toString());
+
+        Instruction rawChosen = remainingMoves.get(0);
+        if (!(rawChosen instanceof MoveInstruction)) {
+            outDegree.put(rawChosen.getName(), 0);
+            return;
         }
-        
+        MoveInstruction chosenMove = (MoveInstruction) rawChosen;
+
+        if (debug) {
+            System.out.println("        选择破环的Move并插入临时变量: " + chosenMove.toString());
+        }
+
+        String tmpName = chosenMove.getName() + "_phi_tmp";
+        MoveInstruction saveInst = new MoveInstruction(tmpName, chosenMove.getType(), chosenMove.getSource());
+        insertInstructionBeforeTerminator(bb, saveInst);
+
+        chosenMove.replaceOperand(chosenMove.getSource(), saveInst);
+
         outDegree.put(chosenMove.getName(), 0);
-        
+        String oldSourceName = saveInst.getSource().getName();
+        if (outDegree.containsKey(oldSourceName)) {
+            outDegree.put(oldSourceName, outDegree.get(oldSourceName) - 1);
+        }
     }
     
     public static String getSourceName(Instruction inst) {
