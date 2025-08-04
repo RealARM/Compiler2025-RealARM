@@ -168,6 +168,19 @@ public class AArch64Visitor {
             curAArch64Block = (AArch64Block) LabelList.get(basicBlock);
             if (first) {
                 curAArch64Function.saveCalleeRegs(curAArch64Block);
+
+                // 在函数入口处为位于参数寄存器中的形参分配新的虚拟寄存器
+                for (Argument arg : arguments) {
+                    AArch64Reg src = curAArch64Function.getRegArg(arg);
+                    if (src != null) {
+                        boolean isFloat = arg.getType() instanceof FloatType;
+                        AArch64VirReg dest = new AArch64VirReg(isFloat);
+                        AArch64Move mv = new AArch64Move(dest, src, false);
+                        curAArch64Block.addAArch64Instruction(mv);
+                        RegList.put(arg, dest);
+                    }
+                }
+
                 first = false;
             }
             generateBasicBlock(basicBlock);
