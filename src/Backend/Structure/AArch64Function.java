@@ -108,13 +108,6 @@ public class AArch64Function {
     }
 
 
-    public void resetArgRegList(LinkedHashMap<Value, AArch64Reg> regList) {
-        for (Map.Entry<Value, AArch64Reg> entry : RegArgList.entrySet()) {
-            Value key = entry.getKey();
-            AArch64Reg value = entry.getValue();
-            regList.put(key, value);
-        }
-    }
 
 
     private void createSafeMemoryInstruction(AArch64Block block, AArch64Reg baseReg, long offset, AArch64Reg valueReg, boolean isLoad) {

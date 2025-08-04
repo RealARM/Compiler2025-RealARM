@@ -559,7 +559,6 @@ public class AArch64Visitor {
 
     private void parseCallInst(CallInstruction ins, boolean predefine) {
         ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
-        ArrayList<AArch64Instruction> constMoves = new ArrayList<>();
         curAArch64Function.saveCallerRegs(curAArch64Block);
         Function callee = ins.getCallee();
         String functionName = removeLeadingAt(callee.getName());
@@ -612,11 +611,10 @@ public class AArch64Visitor {
                     
                     AArch64VirReg fReg = new AArch64VirReg(true);
                     
-                    // loadFloatConstant(fReg, floatValue, insList, predefine);
-                    loadFloatConstant(fReg, floatValue, constMoves, true);
+                    loadFloatConstant(fReg, floatValue, insList, predefine);
+                    
                     AArch64Fmov fmovInst = new AArch64Fmov(argReg, fReg);
-                    // addInstr(fmovInst, insList, predefine);
-                    addInstr(fmovInst, constMoves, true);
+                    addInstr(fmovInst, insList, predefine);
                 } else {
                                         if (!RegList.containsKey(arg)) {
                         if (arg instanceof Instruction) {
@@ -668,14 +666,16 @@ public class AArch64Visitor {
                         addInstr(moveInst, insList, predefine);
                     }
                 }
-                // Only record initial formal-parameter mapping once
+                // 如果当前函数尚未记录该值才添加，避免覆盖已有形参映射
                 if (curAArch64Function.getRegArg(arg) == null) {
                     curAArch64Function.addRegArg(arg, argReg);
                 }
             } else {
                 stackOffset += 8;
                 stackArgList.add(arg);
-                curAArch64Function.addStackArg(arg, stackOffset);
+                if (curAArch64Function.getStackArg(arg) == null) {
+                    curAArch64Function.addStackArg(arg, stackOffset);
+                }
             }
         }
         
@@ -799,10 +799,7 @@ public class AArch64Visitor {
         //         callInst.addUsedReg(reg);
         //     }
         // }
-        for (AArch64Instruction cm : constMoves) {
-            addInstr(cm, insList, predefine);
-        }
-
+        
         addInstr(callInst, insList, predefine);
         
         if (!ins.isVoidCall()) {
@@ -851,7 +848,6 @@ public class AArch64Visitor {
         }
         
         curAArch64Function.loadCallerRegs(curAArch64Block);
-        curAArch64Function.resetArgRegList(RegList);
 
         if (predefine) {
             predefines.put(ins, insList);
