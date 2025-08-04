@@ -541,6 +541,7 @@ public class AArch64Visitor {
 
     private void parseCallInst(CallInstruction ins, boolean predefine) {
         ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
+        ArrayList<AArch64Instruction> constMoves = new ArrayList<>();
         curAArch64Function.saveCallerRegs(curAArch64Block);
         Function callee = ins.getCallee();
         String functionName = removeLeadingAt(callee.getName());
@@ -584,16 +585,18 @@ public class AArch64Visitor {
                     AArch64Imm imm = new AArch64Imm(value);
                     
                     AArch64Move moveInst = new AArch64Move(argReg, imm, true);
-                    addInstr(moveInst, insList, predefine);
+                    // addInstr(moveInst, insList, predefine);
+                    addInstr(moveInst, constMoves, true);
                 } else if (arg instanceof ConstantFloat) {
                     double floatValue = ((ConstantFloat) arg).getValue();
                     
                     AArch64VirReg fReg = new AArch64VirReg(true);
                     
-                    loadFloatConstant(fReg, floatValue, insList, predefine);
-                    
+                    // loadFloatConstant(fReg, floatValue, insList, predefine);
+                    loadFloatConstant(fReg, floatValue, constMoves, true);
                     AArch64Fmov fmovInst = new AArch64Fmov(argReg, fReg);
-                    addInstr(fmovInst, insList, predefine);
+                    // addInstr(fmovInst, insList, predefine);
+                    addInstr(fmovInst, constMoves, true);
                 } else {
                                         if (!RegList.containsKey(arg)) {
                         if (arg instanceof Instruction) {
@@ -645,7 +648,10 @@ public class AArch64Visitor {
                         addInstr(moveInst, insList, predefine);
                     }
                 }
-                curAArch64Function.addRegArg(arg, argReg);
+                // Only record initial formal-parameter mapping once
+                if (curAArch64Function.getRegArg(arg) == null) {
+                    curAArch64Function.addRegArg(arg, argReg);
+                }
             } else {
                 stackOffset += 8;
                 stackArgList.add(arg);
@@ -773,7 +779,10 @@ public class AArch64Visitor {
         //         callInst.addUsedReg(reg);
         //     }
         // }
-        
+        for (AArch64Instruction cm : constMoves) {
+            addInstr(cm, insList, predefine);
+        }
+
         addInstr(callInst, insList, predefine);
         
         if (!ins.isVoidCall()) {
@@ -822,6 +831,7 @@ public class AArch64Visitor {
         }
         
         curAArch64Function.loadCallerRegs(curAArch64Block);
+        curAArch64Function.resetArgRegList(RegList);
 
         if (predefine) {
             predefines.put(ins, insList);
