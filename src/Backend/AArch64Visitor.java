@@ -666,11 +666,16 @@ public class AArch64Visitor {
                         addInstr(moveInst, insList, predefine);
                     }
                 }
-                curAArch64Function.addRegArg(arg, argReg);
+                // 如果当前函数尚未记录该值才添加，避免覆盖已有形参映射
+                if (curAArch64Function.getRegArg(arg) == null) {
+                    curAArch64Function.addRegArg(arg, argReg);
+                }
             } else {
                 stackOffset += 8;
                 stackArgList.add(arg);
-                curAArch64Function.addStackArg(arg, stackOffset);
+                if (curAArch64Function.getStackArg(arg) == null) {
+                    curAArch64Function.addStackArg(arg, stackOffset);
+                }
             }
         }
         
