@@ -383,6 +383,24 @@ public class AArch64Visitor {
             
             AArch64Binary binaryInst = new AArch64Binary(operands, destReg, binaryType);
             addInstr(binaryInst, insList, predefine);
+
+            // 强制 32 位整数乘法回绕，截取低 32 位并恢复符号
+            if (binaryType == AArch64Binary.AArch64BinaryType.mul &&
+                ins.getType() instanceof MiddleEnd.IR.Type.IntegerType &&
+                ((MiddleEnd.IR.Type.IntegerType) ins.getType()).getBitWidth() == 32) {
+
+                ArrayList<AArch64Operand> maskOps = new ArrayList<>();
+                maskOps.add(destReg);
+                maskOps.add(new AArch64Imm(0xffffffffL));
+                AArch64Binary maskInst = new AArch64Binary(maskOps, destReg, AArch64Binary.AArch64BinaryType.and);
+                addInstr(maskInst, insList, predefine);
+
+                AArch64Binary lslInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                addInstr(lslInst, insList, predefine);
+
+                AArch64Binary asrInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                addInstr(asrInst, insList, predefine);
+            }
         }
         
         if (predefine) {
