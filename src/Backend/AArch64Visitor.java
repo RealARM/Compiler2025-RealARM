@@ -688,16 +688,11 @@ public class AArch64Visitor {
                         addInstr(moveInst, insList, predefine);
                     }
                 }
-                // 如果当前函数尚未记录该值才添加，避免覆盖已有形参映射
-                if (curAArch64Function.getRegArg(arg) == null) {
-                    curAArch64Function.addRegArg(arg, argReg);
-                }
+
             } else {
                 stackOffset += 8;
                 stackArgList.add(arg);
-                if (curAArch64Function.getStackArg(arg) == null) {
-                    curAArch64Function.addStackArg(arg, stackOffset);
-                }
+
             }
         }
         
@@ -1028,7 +1023,9 @@ public class AArch64Visitor {
             offsetOp = checkImmediate(offset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
         } else if (pointer instanceof Argument) {
             Argument arg = (Argument) pointer;
-            if (curAArch64Function.getRegArg(arg) != null) {
+            if (RegList.containsKey(arg)) {
+                baseReg = RegList.get(arg);
+            } else if (curAArch64Function.getRegArg(arg) != null) {
                 baseReg = curAArch64Function.getRegArg(arg);
             } else if (curAArch64Function.getStackArg(arg) != null) {
                 baseReg = new AArch64VirReg(false);
@@ -1129,7 +1126,9 @@ public class AArch64Visitor {
             }
         } else if (pointer instanceof Argument) {
             Argument arg = (Argument) pointer;
-            if (curAArch64Function.getRegArg(arg) != null) {
+            if (RegList.containsKey(arg)) {
+                baseReg = RegList.get(arg);
+            } else if (curAArch64Function.getRegArg(arg) != null) {
                 baseReg = curAArch64Function.getRegArg(arg);
             } else if (curAArch64Function.getStackArg(arg) != null) {
                 baseReg = new AArch64VirReg(false);
@@ -1469,7 +1468,9 @@ public class AArch64Visitor {
             offsetOp = checkImmediate(offset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
         } else if (pointer instanceof Argument) {
             Argument arg = (Argument) pointer;
-            if (curAArch64Function.getRegArg(arg) != null) {
+            if (RegList.containsKey(arg)) {
+                baseReg = RegList.get(arg);
+            } else if (curAArch64Function.getRegArg(arg) != null) {
                 baseReg = curAArch64Function.getRegArg(arg);
             } else if (curAArch64Function.getStackArg(arg) != null) {
                 baseReg = new AArch64VirReg(false);
