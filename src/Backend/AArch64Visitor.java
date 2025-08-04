@@ -565,6 +565,28 @@ public class AArch64Visitor {
         
         List<Value> arguments = ins.getArguments();
         int argCount = arguments.size();
+
+        // 在开始装载参数之前，将目前仍驻留在参数寄存器(x0-x7 / v0-v7)中的值拷贝到新的虚拟寄存器，
+        // 以免后续对这些寄存器的写入覆盖还会被用作实参的旧值。
+        for (Map.Entry<MiddleEnd.IR.Value.Value, Backend.Value.Operand.Register.AArch64Reg> entry :
+                new ArrayList<>(RegList.entrySet())) {
+            Backend.Value.Operand.Register.AArch64Reg reg = entry.getValue();
+            boolean needSpill = false;
+            if (reg instanceof Backend.Value.Operand.Register.AArch64CPUReg) {
+                int idx = ((Backend.Value.Operand.Register.AArch64CPUReg) reg).getIndex();
+                needSpill = idx >= 0 && idx < 8; // x0-x7
+            } else if (reg instanceof Backend.Value.Operand.Register.AArch64FPUReg) {
+                int idx = ((Backend.Value.Operand.Register.AArch64FPUReg) reg).getIndex();
+                needSpill = idx >= 0 && idx < 8; // v0-v7
+            }
+            if (needSpill) {
+                Backend.Value.Operand.Register.AArch64VirReg tmp =
+                        new Backend.Value.Operand.Register.AArch64VirReg(reg instanceof Backend.Value.Operand.Register.AArch64FPUReg);
+                AArch64Move spillMove = new AArch64Move(tmp, reg, false);
+                addInstr(spillMove, insList, predefine);
+                RegList.put(entry.getKey(), tmp);
+            }
+        }
         
         // ARMv8调用约定：前8个整型参数用x0-x7，前8个浮点参数用v0-v7，其余参数通过栈传递
         int intArgCount = 0;
