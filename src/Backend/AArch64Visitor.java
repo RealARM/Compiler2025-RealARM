@@ -46,6 +46,7 @@ public class AArch64Visitor {
     public AArch64Module armv8Module = new AArch64Module();
     private static final LinkedHashMap<Value, AArch64Label> LabelList = new LinkedHashMap<>();
     private static final LinkedHashMap<Value, AArch64Reg> RegList = new LinkedHashMap<>();
+    private static final java.util.Map<String, AArch64Reg> NameToReg = new java.util.HashMap<>();
     private static final LinkedHashMap<Value, Long> ptrList = new LinkedHashMap<>();
     private AArch64Block curAArch64Block = null;
     private AArch64Function curAArch64Function = null;
@@ -1715,11 +1716,17 @@ public class AArch64Visitor {
     private void parsePhiInst(PhiInstruction ins, boolean predefine) {
         ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
         
+        String destName = ins.getName();
         AArch64Reg destReg;
-        if (ins.getType() instanceof FloatType) {
-            destReg = new AArch64VirReg(true);
+        if (NameToReg.containsKey(destName)) {
+            destReg = NameToReg.get(destName);
         } else {
-            destReg = new AArch64VirReg(false);
+            if (ins.getType() instanceof FloatType) {
+                destReg = new AArch64VirReg(true);
+            } else {
+                destReg = new AArch64VirReg(false);
+            }
+            NameToReg.put(destName, destReg);
         }
         RegList.put(ins, destReg);
         
@@ -1871,12 +1878,15 @@ public class AArch64Visitor {
         
         if (existingValue != null) {
             destReg = RegList.get(existingValue);
+        } else if (NameToReg.containsKey(destName)) {
+            destReg = NameToReg.get(destName);
         } else {
             if (ins.getType() instanceof FloatType) {
                 destReg = new AArch64VirReg(true);
             } else {
                 destReg = new AArch64VirReg(false);
             }
+            NameToReg.put(destName, destReg);
         }
         
         RegList.put(ins, destReg);
@@ -1948,15 +1958,24 @@ public class AArch64Visitor {
                         }
                     }
                 } else {
-                    // 非参数的其他Value
-                    if (source.getType() instanceof FloatType) {
-                        AArch64Reg srcReg = new AArch64VirReg(true);
-                        RegList.put(source, srcReg);
-                        srcOp = srcReg;
+                    // 尝试按名字复用
+                    String sourceName = source.getName();
+                    if (NameToReg.containsKey(sourceName)) {
+                        AArch64Reg reusedReg = NameToReg.get(sourceName);
+                        RegList.put(source, reusedReg);
+                        srcOp = reusedReg;
                     } else {
-                        AArch64Reg srcReg = new AArch64VirReg(false);
-                        RegList.put(source, srcReg);
-                        srcOp = srcReg;
+                        if (source.getType() instanceof FloatType) {
+                            AArch64Reg srcReg = new AArch64VirReg(true);
+                            RegList.put(source, srcReg);
+                            NameToReg.put(sourceName, srcReg);
+                            srcOp = srcReg;
+                        } else {
+                            AArch64Reg srcReg = new AArch64VirReg(false);
+                            RegList.put(source, srcReg);
+                            NameToReg.put(sourceName, srcReg);
+                            srcOp = srcReg;
+                        }
                     }
                 }
             } else {
@@ -2247,8 +2266,19 @@ public class AArch64Visitor {
             return RegList.get(operand);
         } 
         else {
-            System.err.println("警告: 无法处理的操作数: " + operand);
-            return new AArch64Imm(0);
+            // 尝试按名字复用已存在的寄存器
+            String opName = operand.getName();
+            if (NameToReg.containsKey(opName)) {
+                AArch64Reg reusedReg = NameToReg.get(opName);
+                RegList.put(operand, reusedReg);
+
+                return reusedReg;
+            } else {
+                AArch64Reg newReg = isFloat ? new AArch64VirReg(true) : new AArch64VirReg(false);
+                RegList.put(operand, newReg);
+                NameToReg.put(opName, newReg);
+                return newReg;
+            }
         }
     }
 

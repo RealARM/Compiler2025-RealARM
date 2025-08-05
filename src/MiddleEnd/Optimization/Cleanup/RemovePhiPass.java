@@ -137,6 +137,14 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
             }
         }
         
+        if (DEBUG) {
+            System.out.println("  PHI代表Move映射 (代表Move所在基本块):");
+            for (java.util.Map.Entry<PhiInstruction, MoveInstruction> entry : phiToRepresentativeMove.entrySet()) {
+                BasicBlock repBB = entry.getValue().getParent();
+                System.out.println("    " + entry.getKey().getName() + " -> " + (repBB != null ? repBB.getName() : "<unknown>") );
+            }
+        }
+        
         updatePhiReferences(function, phiToRepresentativeMove);
         
         if (DEBUG) {
@@ -221,6 +229,7 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
         if (DEBUG) {
             System.out.println("  开始更新PHI引用...");
         }
+        Map<BasicBlock, java.util.Set<BasicBlock>> dominatorMap = MiddleEnd.Optimization.Analysis.DominatorAnalysis.computeDominators(function);
         
         int replacementCount = 0;
         
@@ -236,12 +245,29 @@ public class RemovePhiPass implements Optimizer.ModuleOptimizer {
                     if (phiToMoveMap.containsKey(operand)) {
                         MoveInstruction representativeMove = phiToMoveMap.get(operand);
                         
-                        if (DEBUG) {
-                            System.out.println("    替换 " + inst.toString() + " 中的PHI引用 " + operand.getName() + " 为Move指令 " + representativeMove.getName());
+                        boolean dominates = false;
+                        BasicBlock repBB = null;
+                        if (representativeMove != null && representativeMove.getParent() != null) {
+                            repBB = representativeMove.getParent();
+                            java.util.Set<BasicBlock> domSet = dominatorMap.get(bb);
+                            dominates = domSet != null && domSet.contains(repBB);
                         }
-                        
-                        inst.setOperand(i, representativeMove);
-                        replacementCount++;
+                        if (DEBUG) {
+                            if (repBB != null) {
+                                System.out.println("    替换 " + inst.toString() + " 中的PHI引用 " + operand.getName() + " 为Move指令 " + representativeMove.getName() +
+                                        " (" + repBB.getName() + " -> " + bb.getName() + " 支配? " + dominates + ")");
+                            } else {
+                                System.out.println("    替换 " + inst.toString() + " 中的PHI引用 " + operand.getName() + " 为Move指令 " + representativeMove.getName());
+                            }
+                        }
+                        if (dominates || repBB == null) {
+                                inst.setOperand(i, representativeMove);
+                                replacementCount++;
+                        } else {
+                            if (DEBUG) {
+                                System.out.println("      跳过替换，因为代表Move不支配使用位置");
+                            }
+                        }
                     }
                 }
             }
