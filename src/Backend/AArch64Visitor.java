@@ -71,6 +71,34 @@ public class AArch64Visitor {
         return ptrList;
     }
     
+    /**
+     * 获取或创建操作数对应的寄存器
+     * 优先使用已存在的同名寄存器映射，避免phi变量等同名变量的映射问题
+     * @param operand 需要映射的操作数
+     * @param isFloat 是否为浮点类型
+     * @return 对应的寄存器
+     */
+    private AArch64Reg getOrCreateRegister(Value operand, boolean isFloat) {
+        // 1. 首先检查是否已经在RegList中
+        if (RegList.containsKey(operand)) {
+            return RegList.get(operand);
+        }
+        
+        // 2. 通过变量名在NameToReg中查找（处理phi变量等同名变量）
+        String operandName = operand.getName();
+        if (NameToReg.containsKey(operandName)) {
+            AArch64Reg existingReg = NameToReg.get(operandName);
+            RegList.put(operand, existingReg);
+            return existingReg;
+        }
+        
+        // 3. 创建新的寄存器
+        AArch64Reg newReg = isFloat ? new AArch64VirReg(true) : new AArch64VirReg(false);
+        RegList.put(operand, newReg);
+        NameToReg.put(operandName, newReg);
+        return newReg;
+    }
+    
     public void run() {
         for (GlobalVariable globalVariable : irModule.globalVars()) {
             generateGlobalVariable(globalVariable);
@@ -295,16 +323,8 @@ public class AArch64Visitor {
         boolean isFloatOperation = leftOperand.getType() instanceof FloatType || 
                                  rightOperand.getType() instanceof FloatType;
  
-        AArch64Reg destReg;
-        if (RegList.containsKey(ins)) {
-            destReg = RegList.get(ins);
-        } else {
-            if (isFloatOperation) {
-                destReg = new AArch64VirReg(true);
-            } else {
-                destReg = new AArch64VirReg(false);
-            }
-        }
+        // 使用通用方法获取目标寄存器
+        AArch64Reg destReg = getOrCreateRegister(ins, isFloatOperation);
         
         RegList.put(ins, destReg);
         
@@ -1066,20 +1086,15 @@ public class AArch64Visitor {
             if (!RegList.containsKey(pointer)) {
                 if (pointer instanceof Instruction) {
                     parseInstruction((Instruction) pointer, true);
-                } else if (pointer.getType() instanceof PointerType) {
-                    AArch64Reg ptrReg = new AArch64VirReg(false);
-                    RegList.put(pointer, ptrReg);
-                } else if (pointer.getType() instanceof FloatType) {
-                    AArch64Reg floatReg = new AArch64VirReg(true);
-                    RegList.put(pointer, floatReg);
-                } else if (pointer.getType() instanceof IntegerType) {
-                    AArch64Reg intReg = new AArch64VirReg(false);
-                    RegList.put(pointer, intReg);
+                    baseReg = RegList.get(pointer);
                 } else {
-                    throw new RuntimeException("未处理的指针类型: " + pointer);
+                    // 使用通用方法获取指针寄存器
+                    boolean ptrIsFloat = pointer.getType() instanceof FloatType;
+                    baseReg = getOrCreateRegister(pointer, ptrIsFloat);
                 }
+            } else {
+                baseReg = RegList.get(pointer);
             }
-            baseReg = RegList.get(pointer);
         }
         
         if (baseReg == null) {
@@ -1575,34 +1590,24 @@ public class AArch64Visitor {
             
             leftOp = fpuReg;
         } else {
-            if (!RegList.containsKey(left)) {
-                if (left.getType() instanceof FloatType) {
-                    AArch64Reg leftReg = new AArch64VirReg(true);
-                    
-                    RegList.put(left, leftReg);
-                    leftOp = leftReg;
-                } else {
-                    AArch64Reg leftReg = new AArch64VirReg(false);
-                    RegList.put(left, leftReg);
-                    leftOp = leftReg;
-                }
-            } else {
-                leftOp = RegList.get(left);
+            // 使用通用方法获取左操作数寄存器
+            boolean leftIsFloat = left.getType() instanceof FloatType;
+            AArch64Reg leftReg = getOrCreateRegister(left, leftIsFloat);
+            leftOp = leftReg;
                 
-                // 如果左操作数是寄存器中的整数变量，需要进行符号扩展
-                if (!isFloat && leftOp instanceof AArch64Reg && left.getType().isIntegerType()) {
-                    AArch64Reg extendedLeftReg = new AArch64VirReg(false);
-                    AArch64Move moveInst = new AArch64Move(extendedLeftReg, (AArch64Reg)leftOp, false);
-                    addInstr(moveInst, insList, predefine);
-                    
-                    AArch64Binary lslInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                    addInstr(lslInst, insList, predefine);
-                    
-                    AArch64Binary asrInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                    addInstr(asrInst, insList, predefine);
-                    
-                    leftOp = extendedLeftReg;
-                }
+            // 如果左操作数是寄存器中的整数变量，需要进行符号扩展
+            if (!isFloat && leftOp instanceof AArch64Reg && left.getType().isIntegerType()) {
+                AArch64Reg extendedLeftReg = new AArch64VirReg(false);
+                AArch64Move moveInst = new AArch64Move(extendedLeftReg, (AArch64Reg)leftOp, false);
+                addInstr(moveInst, insList, predefine);
+                
+                AArch64Binary lslInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                addInstr(lslInst, insList, predefine);
+                
+                AArch64Binary asrInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                addInstr(asrInst, insList, predefine);
+                
+                leftOp = extendedLeftReg;
             }
         }
         
@@ -1622,43 +1627,29 @@ public class AArch64Visitor {
                 rightOp = new AArch64Imm(value);
             }
         } else if (right instanceof ConstantFloat) {
-    
             double floatValue = ((ConstantFloat) right).getValue();
-            
-    
             AArch64Reg fpuReg = new AArch64VirReg(true);
             loadFloatConstant(fpuReg, floatValue, insList, predefine);
-            
             rightOp = fpuReg;
         } else {
-            if (!RegList.containsKey(right)) {
-                if (right.getType() instanceof FloatType) {
-                    AArch64Reg rightReg = new AArch64VirReg(true);
-                    
-                    RegList.put(right, rightReg);
-                    rightOp = rightReg;
-                } else {
-                    AArch64Reg rightReg = new AArch64VirReg(false);
-                    RegList.put(right, rightReg);
-                    rightOp = rightReg;
-                }
-            } else {
-                rightOp = RegList.get(right);
+            // 使用通用方法获取右操作数寄存器
+            boolean rightIsFloat = right.getType() instanceof FloatType;
+            AArch64Reg rightReg = getOrCreateRegister(right, rightIsFloat);
+            rightOp = rightReg;
                 
-                // 如果右操作数是寄存器中的整数变量，需要进行符号扩展
-                if (!isFloat && rightOp instanceof AArch64Reg && right.getType().isIntegerType()) {
-                    AArch64Reg extendedRightReg = new AArch64VirReg(false);
-                    AArch64Move moveInst = new AArch64Move(extendedRightReg, (AArch64Reg)rightOp, false);
-                    addInstr(moveInst, insList, predefine);
-                    
-                    AArch64Binary lslInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                    addInstr(lslInst, insList, predefine);
-                    
-                    AArch64Binary asrInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                    addInstr(asrInst, insList, predefine);
-                    
-                    rightOp = extendedRightReg;
-                }
+            // 如果右操作数是寄存器中的整数变量，需要进行符号扩展
+            if (!isFloat && rightOp instanceof AArch64Reg && right.getType().isIntegerType()) {
+                AArch64Reg extendedRightReg = new AArch64VirReg(false);
+                AArch64Move moveInst = new AArch64Move(extendedRightReg, (AArch64Reg)rightOp, false);
+                addInstr(moveInst, insList, predefine);
+                
+                AArch64Binary lslInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                addInstr(lslInst, insList, predefine);
+                
+                AArch64Binary asrInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                addInstr(asrInst, insList, predefine);
+                
+                rightOp = extendedRightReg;
             }
         }
         
@@ -1784,16 +1775,20 @@ public class AArch64Visitor {
                     if (incomingValue instanceof Instruction) {
                         parseInstruction((Instruction) incomingValue, true);
                     } else {
-                        AArch64Reg valueReg = new AArch64VirReg(false);
-                        RegList.put(incomingValue, valueReg);
+                        // 使用通用方法获取寄存器
+                        boolean valueIsFloat = incomingValue.getType() instanceof FloatType;
+                        AArch64Reg valueReg = getOrCreateRegister(incomingValue, valueIsFloat);
+                        srcOp = valueReg;
+                        continue;
                     }
                 }
                 
                 if (RegList.containsKey(incomingValue)) {
                     srcOp = RegList.get(incomingValue);
                 } else {
-                    System.err.println("警告: 无法为Phi指令的输入值创建操作数: " + incomingValue);
-                    continue;
+                    // 最后尝试通过变量名获取寄存器
+                    boolean valueIsFloat = incomingValue.getType() instanceof FloatType;
+                    srcOp = getOrCreateRegister(incomingValue, valueIsFloat);
                 }
             }
             
@@ -1849,15 +1844,10 @@ public class AArch64Visitor {
             loadFloatConstant(fpuReg, floatValue, insList, predefine);
             srcOp = fpuReg;
         } else {
-            if (!RegList.containsKey(operand)) {
-                if (operand instanceof Instruction) {
-                    parseInstruction((Instruction) operand, true);
-                } else {
-                    AArch64Reg srcReg = new AArch64VirReg(false);
-                    RegList.put(operand, srcReg);
-                }
-            }
-            srcOp = RegList.get(operand);
+            // 使用通用方法获取操作数寄存器
+            boolean operandIsFloat = operand.getType() instanceof FloatType;
+            AArch64Reg srcReg = getOrCreateRegister(operand, operandIsFloat);
+            srcOp = srcReg;
         }
         
         
@@ -1891,42 +1881,9 @@ public class AArch64Visitor {
         
         Value source = ins.getSource();
         
-        AArch64Reg destReg;
-        
-        String destName = ins.getName();
-        
-        Value existingValue = null;
-        for (Map.Entry<Value, AArch64Reg> entry : RegList.entrySet()) {
-            if (entry.getKey().getName().equals(destName)) {
-                existingValue = entry.getKey();
-                break;
-            }
-        }
-        
-        if (existingValue != null) {
-            destReg = RegList.get(existingValue);
-        } else if (NameToReg.containsKey(destName)) {
-            destReg = NameToReg.get(destName);
-        } else {
-            if (ins.getType() instanceof FloatType) {
-                destReg = new AArch64VirReg(true);
-            } else {
-                destReg = new AArch64VirReg(false);
-            }
-            NameToReg.put(destName, destReg);
-        }
-        
-        RegList.put(ins, destReg);
-        
-        if (existingValue == null) {
-            Value targetValue = new Value(destName, ins.getType()) {
-                @Override
-                public String toString() {
-                    return destName;
-                }
-            };
-            RegList.put(targetValue, destReg);
-        }
+        // 使用通用方法获取目标寄存器
+        boolean isFloat = ins.getType() instanceof FloatType;
+        AArch64Reg destReg = getOrCreateRegister(ins, isFloat);
         
 
         AArch64Operand srcOp;
@@ -2289,23 +2246,9 @@ public class AArch64Visitor {
                 return new AArch64Imm(0);
             }
         } 
-        else if (RegList.containsKey(operand)) {
-            return RegList.get(operand);
-        } 
         else {
-            // 尝试按名字复用已存在的寄存器
-            String opName = operand.getName();
-            if (NameToReg.containsKey(opName)) {
-                AArch64Reg reusedReg = NameToReg.get(opName);
-                RegList.put(operand, reusedReg);
-
-                return reusedReg;
-            } else {
-                AArch64Reg newReg = isFloat ? new AArch64VirReg(true) : new AArch64VirReg(false);
-                RegList.put(operand, newReg);
-                NameToReg.put(opName, newReg);
-                return newReg;
-            }
+            // 使用通用方法获取寄存器
+            return getOrCreateRegister(operand, isFloat);
         }
     }
 

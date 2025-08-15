@@ -285,7 +285,7 @@ public class PostRegisterOptimizer {
                         // 连续两个move到同一个寄存器，删除第一个
                         instructions.remove(i);
                         i--;
-                        System.out.println("删除重复move: " + move1);
+                        // System.out.println("删除重复move: " + move1);
                     }
                 }
             }
