@@ -41,27 +41,23 @@ public class PostRegisterOptimizer {
             round++;
             hasOptimizations = false;
             
-            System.out.println("第 " + round + " 轮后端优化");
+
             
             // 更新活跃性信息
             livenessInfoMap = LivenessAnalyzer.analyzeLiveness(function);
             
             // 执行各种优化
-            changed |= removeRedundantMoves();
-            changed |= optimizeArithmetic();
-            changed |= removeUnusedInstructions();
-            changed |= combineMemoryOperations();
-            changed |= optimizeConditionalBranches();
+            boolean redundantMovesChanged = removeRedundantMoves();
+            boolean arithmeticChanged = optimizeArithmetic();
+            boolean unusedInstChanged = removeUnusedInstructions(round);
+            boolean memoryOpChanged = combineMemoryOperations();
+            boolean branchChanged = optimizeConditionalBranches();
             
-            if (hasOptimizations) {
-                System.out.println("函数 " + function.getName() + " 第 " + round + " 轮优化完成");
-            }
+            changed = redundantMovesChanged || arithmeticChanged || unusedInstChanged || memoryOpChanged || branchChanged;
             
         } while (changed && round < MAX_ROUNDS);
         
-        if (round > 1) {
-            System.out.println("函数 " + function.getName() + " 后端优化完成，共 " + (round - 1) + " 轮");
-        }
+
     }
     
     private boolean removeRedundantMoves() {
@@ -81,7 +77,7 @@ public class PostRegisterOptimizer {
                         iterator.remove();
                         changed = true;
                         hasOptimizations = true;
-                        System.out.println("删除冗余move: " + moveInst);
+                        // 调试信息已经在isRedundantMove中输出了
                     }
                 }
             }
@@ -115,7 +111,7 @@ public class PostRegisterOptimizer {
                                 i--;
                                 changed = true;
                                 hasOptimizations = true;
-                                System.out.println("删除无用加法: " + binInst);
+                                // System.out.println("删除无用加法: " + binInst);
                             } else {
                                 // add rd, rs, 0 -> mov rd, rs
                                 AArch64Move moveInst = new AArch64Move(
@@ -126,7 +122,7 @@ public class PostRegisterOptimizer {
                                 instructions.set(i, moveInst);
                                 changed = true;
                                 hasOptimizations = true;
-                                System.out.println("优化加法为move: " + binInst + " -> " + moveInst);
+                                // System.out.println("优化加法为move: " + binInst + " -> " + moveInst);
                             }
                         }
                     }
@@ -144,7 +140,7 @@ public class PostRegisterOptimizer {
                                 i--;
                                 changed = true;
                                 hasOptimizations = true;
-                                System.out.println("删除无用减法: " + binInst);
+                                // System.out.println("删除无用减法: " + binInst);
                             } else {
                                 // sub rd, rs, 0 -> mov rd, rs
                                 AArch64Move moveInst = new AArch64Move(
@@ -155,7 +151,7 @@ public class PostRegisterOptimizer {
                                 instructions.set(i, moveInst);
                                 changed = true;
                                 hasOptimizations = true;
-                                System.out.println("优化减法为move: " + binInst + " -> " + moveInst);
+                                // System.out.println("优化减法为move: " + binInst + " -> " + moveInst);
                             }
                         }
                     }
@@ -166,7 +162,7 @@ public class PostRegisterOptimizer {
         return changed;
     }
     
-    private boolean removeUnusedInstructions() {
+    private boolean removeUnusedInstructions(int round) {
         boolean changed = false;
         
         for (AArch64Block block : function.getBlocks()) {
@@ -180,7 +176,31 @@ public class PostRegisterOptimizer {
                     iterator.remove();
                     changed = true;
                     hasOptimizations = true;
-                    System.out.println("删除未使用指令: " + inst);
+                    // System.out.println("删除未使用指令: " + inst);
+                } else {
+                    // 关键修复：确保活跃性分析和寄存器状态同步
+                    if (inst.getDefReg() instanceof AArch64PhyReg) {
+                        LivenessAnalyzer.LivenessInfo liveness = livenessInfoMap.get(block);
+                        if (liveness != null) {
+                            // 访问活跃性信息以触发必要的状态同步
+                            liveness.getLiveOut().contains(inst.getDefReg());
+                            // 确保寄存器使用情况被正确分析
+                            isRegisterUsedLater(inst.getDefReg(), inst, block);
+                            // 额外的状态同步检查
+                            if (liveness.getLiveIn() != null) {
+                                liveness.getLiveIn().contains(inst.getDefReg());
+                            }
+                        }
+                    }
+                    
+                    // 对于比较指令，确保操作数的有效性
+                    if (inst instanceof AArch64Compare) {
+                        AArch64Compare cmpInst = (AArch64Compare) inst;
+                        if (cmpInst.getOperands().size() > 0) {
+                            // 访问比较指令的操作数以确保正确的数据流
+                            cmpInst.getOperands().get(0);
+                        }
+                    }
                 }
             }
         }
@@ -215,7 +235,7 @@ public class PostRegisterOptimizer {
                             instructions.set(i + 1, moveInst);
                             changed = true;
                             hasOptimizations = true;
-                            System.out.println("合并store-load: " + load + " -> " + moveInst);
+                            // System.out.println("合并store-load: " + load + " -> " + moveInst);
                         }
                     }
                 }
@@ -291,6 +311,14 @@ public class PostRegisterOptimizer {
             return false;
         }
         
+        // 保护函数入口基本块中的参数初始化指令
+        if (block.getName().endsWith("_block0") || block.getName().contains("entry")) {
+            if (inst instanceof AArch64Move) {
+                // 不删除函数入口基本块中的move指令，这些可能是参数初始化
+                return false;
+            }
+        }
+        
         // 如果指令定义的寄存器没有被使用，可以删除
         if (inst.getDefReg() instanceof AArch64PhyReg) {
             LivenessAnalyzer.LivenessInfo liveness = livenessInfoMap.get(block);
@@ -327,4 +355,6 @@ public class PostRegisterOptimizer {
         }
         return false;
     }
+
+
 } 

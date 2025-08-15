@@ -103,8 +103,36 @@ public class RegisterAllocator {
         // System.out.println("开始应用寄存器分配结果...");
         int replacementCount = 0;
         
+        // 调试：打印所有虚拟寄存器的颜色分配
+        System.out.println("=== 寄存器颜色分配结果 ===");
+        for (Map.Entry<AArch64Reg, Integer> entry : currentState.getRegisterColors().entrySet()) {
+            AArch64Reg reg = entry.getKey();
+            Integer color = entry.getValue();
+            if (reg instanceof AArch64VirReg) {
+                AArch64VirReg virReg = (AArch64VirReg) reg;
+                if (virReg.isFloat() == currentState.isFloatingPoint()) {
+                    AArch64PhyReg physReg = mapColorToPhysicalRegister(virReg, color);
+                    System.out.println(virReg + " -> 颜色" + color + " -> " + physReg);
+                }
+            }
+        }
+        System.out.println("=== 开始替换指令 ===");
+        
         for (AArch64Block block : targetFunction.getBlocks()) {
             for (AArch64Instruction instruction : block.getInstructions()) {
+                // 调试：打印所有指令的寄存器分配前状态
+                if (instruction.toString().contains("mov") || instruction.toString().contains("cmp")) {
+                    System.out.println("分配前指令: " + instruction);
+                    if (instruction.getDefReg() instanceof AArch64VirReg) {
+                        System.out.println("  定义寄存器: " + instruction.getDefReg());
+                    }
+                    for (AArch64Operand op : instruction.getOperands()) {
+                        if (op instanceof AArch64VirReg) {
+                            System.out.println("  操作数: " + op);
+                        }
+                    }
+                }
+                
                 // 替换定义寄存器
                 if (instruction.getDefReg() instanceof AArch64VirReg) {
                     AArch64VirReg virtualReg = (AArch64VirReg) instruction.getDefReg();
@@ -125,16 +153,26 @@ public class RegisterAllocator {
                     AArch64Operand operand = operandList.get(i);
                     if (operand instanceof AArch64VirReg) {
                         AArch64VirReg virtualReg = (AArch64VirReg) operand;
-                        if (virtualReg.isFloat() == currentState.isFloatingPoint() && 
-                            currentState.getRegisterColors().containsKey(virtualReg)) {
-                            AArch64PhyReg physicalReg = mapColorToPhysicalRegister(virtualReg, 
-                                                                                 currentState.getRegisterColors().get(virtualReg));
-                            if (physicalReg != null) {
-                                instruction.replaceOperands(virtualReg, physicalReg);
-                                replacementCount++;
+                        if (virtualReg.isFloat() == currentState.isFloatingPoint()) {
+                            if (currentState.getRegisterColors().containsKey(virtualReg)) {
+                                AArch64PhyReg physicalReg = mapColorToPhysicalRegister(virtualReg, 
+                                                                                     currentState.getRegisterColors().get(virtualReg));
+                                if (physicalReg != null) {
+                                    instruction.replaceOperands(virtualReg, physicalReg);
+                                    replacementCount++;
+                                } else {
+                                    System.err.println("警告: 无法为虚拟寄存器 " + virtualReg + " 创建物理寄存器映射");
+                                }
+                            } else {
+                                System.err.println("警告: 虚拟寄存器 " + virtualReg + " 没有分配颜色，指令: " + instruction);
                             }
                         }
                     }
+                }
+                
+                // 调试：打印分配后的指令状态
+                if (instruction.toString().contains("mov") || instruction.toString().contains("cmp")) {
+                    System.out.println("分配后指令: " + instruction);
                 }
             }
         }
@@ -171,7 +209,7 @@ public class RegisterAllocator {
                 return AArch64FPUReg.getAArch64FloatReg(color + 8);
             }
         } else {
-            // 整型寄存器: x8-x15
+            // 整型寄存器: x19-x26
             if (color >= 0 && color < INTEGER_REGISTER_COUNT) {
                 return AArch64CPUReg.getAArch64CPUReg(color + 19);
             }

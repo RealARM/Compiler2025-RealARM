@@ -296,11 +296,16 @@ public class AArch64Visitor {
                                  rightOperand.getType() instanceof FloatType;
  
         AArch64Reg destReg;
-        if (isFloatOperation) {
-            destReg = new AArch64VirReg(true);
+        if (RegList.containsKey(ins)) {
+            destReg = RegList.get(ins);
         } else {
-            destReg = new AArch64VirReg(false);
+            if (isFloatOperation) {
+                destReg = new AArch64VirReg(true);
+            } else {
+                destReg = new AArch64VirReg(false);
+            }
         }
+        
         RegList.put(ins, destReg);
         
         boolean leftRequiresReg = opCode == OpCode.MUL || opCode == OpCode.DIV || 
