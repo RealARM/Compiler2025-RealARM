@@ -397,24 +397,6 @@ public class AArch64Visitor {
             
             AArch64Binary binaryInst = new AArch64Binary(operands, destReg, binaryType);
             addInstr(binaryInst, insList, predefine);
-
-            // 强制 32 位整数乘法回绕，截取低 32 位并恢复符号
-            if (binaryType == AArch64Binary.AArch64BinaryType.mul &&
-                ins.getType() instanceof MiddleEnd.IR.Type.IntegerType &&
-                ((MiddleEnd.IR.Type.IntegerType) ins.getType()).getBitWidth() == 32) {
-
-                ArrayList<AArch64Operand> maskOps = new ArrayList<>();
-                maskOps.add(destReg);
-                maskOps.add(new AArch64Imm(0xffffffffL));
-                AArch64Binary maskInst = new AArch64Binary(maskOps, destReg, AArch64Binary.AArch64BinaryType.and);
-                addInstr(maskInst, insList, predefine);
-
-                AArch64Binary lslInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                addInstr(lslInst, insList, predefine);
-
-                AArch64Binary asrInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                addInstr(asrInst, insList, predefine);
-            }
         }
         
         if (predefine) {
@@ -852,6 +834,16 @@ public class AArch64Visitor {
                 } else {
                     AArch64Move moveReturnInst = new AArch64Move(resultReg, returnReg, false);
                     addInstr(moveReturnInst, insList, predefine);
+                    
+                    // 为getint函数调用添加32位到64位的符号扩展
+                    if (functionName.equals("getint") && ins.getCallee().getReturnType().isIntegerType()) {
+                        // getint返回的已经是32位值，高32位自动为0，只需要进行符号扩展
+                        AArch64Binary lslInst = new AArch64Binary(resultReg, resultReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                        addInstr(lslInst, insList, predefine);
+                        
+                        AArch64Binary asrInst = new AArch64Binary(resultReg, resultReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                        addInstr(asrInst, insList, predefine);
+                    }
                 }
             } else {
                 System.err.println("错误: 返回寄存器为空，跳过移动返回值");
@@ -1591,6 +1583,21 @@ public class AArch64Visitor {
                 }
             } else {
                 leftOp = RegList.get(left);
+                
+                // 如果左操作数是寄存器中的整数变量，需要进行符号扩展
+                if (!isFloat && leftOp instanceof AArch64Reg && left.getType().isIntegerType()) {
+                    AArch64Reg extendedLeftReg = new AArch64VirReg(false);
+                    AArch64Move moveInst = new AArch64Move(extendedLeftReg, (AArch64Reg)leftOp, false);
+                    addInstr(moveInst, insList, predefine);
+                    
+                    AArch64Binary lslInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                    addInstr(lslInst, insList, predefine);
+                    
+                    AArch64Binary asrInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                    addInstr(asrInst, insList, predefine);
+                    
+                    leftOp = extendedLeftReg;
+                }
             }
         }
         
@@ -1632,6 +1639,21 @@ public class AArch64Visitor {
                 }
             } else {
                 rightOp = RegList.get(right);
+                
+                // 如果右操作数是寄存器中的整数变量，需要进行符号扩展
+                if (!isFloat && rightOp instanceof AArch64Reg && right.getType().isIntegerType()) {
+                    AArch64Reg extendedRightReg = new AArch64VirReg(false);
+                    AArch64Move moveInst = new AArch64Move(extendedRightReg, (AArch64Reg)rightOp, false);
+                    addInstr(moveInst, insList, predefine);
+                    
+                    AArch64Binary lslInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                    addInstr(lslInst, insList, predefine);
+                    
+                    AArch64Binary asrInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                    addInstr(asrInst, insList, predefine);
+                    
+                    rightOp = extendedRightReg;
+                }
             }
         }
         

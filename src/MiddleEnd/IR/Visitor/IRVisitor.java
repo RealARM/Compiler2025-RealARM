@@ -79,11 +79,11 @@ public class IRVisitor {
         declareLibFunction("putarray", VoidType.VOID, IntegerType.I32, new PointerType(IntegerType.I32));
         declareLibFunction("putfarray", VoidType.VOID, IntegerType.I32, new PointerType(FloatType.F64));
         
-        // Function startTimeFunc = declareLibFunction("_sysy_starttime", VoidType.VOID, IntegerType.I32);
-        // Function stopTimeFunc = declareLibFunction("_sysy_stoptime", VoidType.VOID, IntegerType.I32);
+        Function startTimeFunc = declareLibFunction("_sysy_starttime", VoidType.VOID, IntegerType.I32);
+        Function stopTimeFunc = declareLibFunction("_sysy_stoptime", VoidType.VOID, IntegerType.I32);
         
-        // symbolTables.get(0).put("starttime", startTimeFunc);
-        // symbolTables.get(0).put("stoptime", stopTimeFunc);
+        symbolTables.get(0).put("starttime", startTimeFunc);
+        symbolTables.get(0).put("stoptime", stopTimeFunc);
         
         declareLibFunction("memset", VoidType.VOID, new PointerType(IntegerType.I32), IntegerType.I32, IntegerType.I32);
     }
