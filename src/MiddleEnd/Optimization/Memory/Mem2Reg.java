@@ -87,6 +87,9 @@ public class Mem2Reg implements Optimizer.ModuleOptimizer {
             return false;
         }
         
+        // 首先提升所有alloca到入口块，确保支配关系
+        hoistAllocasToEntry(function);
+        
         context = new OptimizationContext(function);
         
         try {
@@ -494,6 +497,62 @@ public class Mem2Reg implements Optimizer.ModuleOptimizer {
                     user.setOperand(i, newValue);
                 }
             }
+        }
+    }
+    
+    /**
+     * 将函数中所有的alloca指令提升到入口块开头，确保支配关系
+     */
+    private void hoistAllocasToEntry(Function func) {
+        BasicBlock entryBlock = func.getEntryBlock();
+        if (entryBlock == null) return;
+        
+        debug("    提升函数 " + func.getName() + " 中的alloca");
+        
+        List<AllocaInstruction> allocasToHoist = new ArrayList<>();
+        
+        // 收集所有非入口块中的alloca指令
+        for (BasicBlock block : func.getBasicBlocks()) {
+            if (block == entryBlock) continue;
+            
+            List<Instruction> instructions = new ArrayList<>(block.getInstructions());
+            for (Instruction inst : instructions) {
+                if (inst instanceof AllocaInstruction allocaInst) {
+                    debug("      发现需要提升的alloca: " + allocaInst.getName() + 
+                                     " (在块: " + block.getName() + ")");
+                    allocasToHoist.add(allocaInst);
+                    block.removeInstruction(allocaInst);
+                }
+            }
+        }
+        
+        // 将alloca指令移动到入口块开头
+        for (AllocaInstruction alloca : allocasToHoist) {
+            entryBlock.addInstructionFirst(alloca);
+            debug("      提升alloca到入口块: " + alloca.getName());
+        }
+        
+        // 确保入口块中所有alloca指令排在最前面（包括原本就在入口块中的alloca）
+        List<Instruction> reordered = new ArrayList<>();
+        List<Instruction> others = new ArrayList<>();
+        for (Instruction inst : new ArrayList<>(entryBlock.getInstructions())) {
+            if (inst instanceof AllocaInstruction) {
+                reordered.add(inst);
+            } else {
+                others.add(inst);
+            }
+        }
+        // 清空并重新插入按 allocas -> others 的顺序
+        entryBlock.getInstructions().clear();
+        for (Instruction inst : reordered) {
+            entryBlock.addInstruction(inst);
+        }
+        for (Instruction inst : others) {
+            entryBlock.addInstruction(inst);
+        }
+        
+        if (!allocasToHoist.isEmpty()) {
+            debug("    函数 " + func.getName() + " 提升了 " + allocasToHoist.size() + " 个alloca");
         }
     }
 }

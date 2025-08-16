@@ -56,38 +56,8 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             cleanupOrphanedFunctions();
         }
         
-        // 最后一步：提升所有函数中的alloca到入口块，确保支配关系
-        for (Function func : module.functions()) {
-            if (!func.isExternal()) {
-                System.out.println("[DEBUG] 准备处理函数: " + func.getName());
-                
-                // 先检查函数中所有的alloca位置
-                System.out.println("[DEBUG] 检查函数 " + func.getName() + " 中的alloca分布:");
-                for (int i = 0; i < func.getBasicBlocks().size(); i++) {
-                    BasicBlock block = func.getBasicBlocks().get(i);
-                    for (Instruction inst : block.getInstructions()) {
-                        if (inst instanceof AllocaInstruction allocaInst) {
-                            System.out.println("[DEBUG]   alloca " + allocaInst.getName() + 
-                                             " 在块 " + block.getName() + " (块索引: " + i + ")");
-                        }
-                    }
-                }
-                
-                hoistAllocasToEntry(func);
-                
-                // 再次检查提升后的结果
-                System.out.println("[DEBUG] 提升后检查函数 " + func.getName() + " 中的alloca分布:");
-                for (int i = 0; i < func.getBasicBlocks().size(); i++) {
-                    BasicBlock block = func.getBasicBlocks().get(i);
-                    for (Instruction inst : block.getInstructions()) {
-                        if (inst instanceof AllocaInstruction allocaInst) {
-                            System.out.println("[DEBUG]   alloca " + allocaInst.getName() + 
-                                             " 在块 " + block.getName() + " (块索引: " + i + ")");
-                        }
-                    }
-                }
-            }
-        }
+        // 注意：不再在这里提升alloca，而是让后续的Mem2Reg优化来处理
+        // 这样可以避免破坏SSA形式和支配关系
         
         System.out.println("[InlineExpansion] Inline expansion " + 
                           (hasExpanded ? "completed with changes" : "found no expansion opportunities"));
@@ -208,7 +178,20 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         for (BasicBlock block : func.getBasicBlocks()) {
             for (Instruction inst : block.getInstructions()) {
                 if (inst instanceof PhiInstruction) {
+                    System.out.println("[InlineExpansion] Skipping " + func.getName() + " due to Phi instruction: " + inst.getName());
                     return false;
+                }
+            }
+        }
+        
+        // 检查调用者是否包含复杂控制流（包含Phi指令）
+        for (Function caller : func.getCallers()) {
+            for (BasicBlock block : caller.getBasicBlocks()) {
+                for (Instruction inst : block.getInstructions()) {
+                    if (inst instanceof PhiInstruction) {
+                        System.out.println("[InlineExpansion] Skipping " + func.getName() + " due to Phi in caller " + caller.getName());
+                        return false;
+                    }
                 }
             }
         }
@@ -371,6 +354,8 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             
             System.out.println("[DEBUG] 开始内联 " + targetFunc.getName() + " 到 " + callerFunc.getName());
             
+            // 0. 不再需要特殊处理调用者的alloca，正常复制即可
+            
             // 1. 创建临时函数副本
             FunctionReplicator replicator = new FunctionReplicator(callerFunc, targetFunc, inlinePrefix);
             ReplicatedFunction replica = replicator.createReplica();
@@ -406,6 +391,8 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         }
     }
     
+
+    
     /**
      * 在调用指令处分割基本块
      */
@@ -436,10 +423,21 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             // 修复后继块中Phi指令的来边：将 originalBlock 替换为 continuationBlock
             for (Instruction succInst : new ArrayList<>(successor.getInstructions())) {
                 if (succInst instanceof PhiInstruction phi) {
-                    // 直接操作Phi的incoming映射
-                    Value incomingFromOriginal = phi.getIncomingValues().remove(originalBlock);
+                    // 检查Phi指令的operands，确保它们与incoming映射一致
+                    Map<BasicBlock, Value> incomingValues = phi.getIncomingValues();
+                    Value incomingFromOriginal = incomingValues.remove(originalBlock);
                     if (incomingFromOriginal != null) {
-                        phi.getIncomingValues().put(continuationBlock, incomingFromOriginal);
+                        incomingValues.put(continuationBlock, incomingFromOriginal);
+                        
+                        // 同时更新operands列表中的对应关系
+                        List<BasicBlock> predecessors = successor.getPredecessors();
+                        for (int i = 0; i < predecessors.size(); i++) {
+                            if (predecessors.get(i) == continuationBlock && i < phi.getOperandCount()) {
+                                // 确保operand与incoming value一致
+                                phi.setOperand(i, incomingFromOriginal);
+                                break;
+                            }
+                        }
                     }
                 } else {
                     // Phi应位于基本块首部，遇到非Phi可提前结束
@@ -464,14 +462,27 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         
         // 2. 将所有内联基本块插入到继续块之前
         Function callerFunction = callBlock.getParentFunction();
+        
+        // 先从调用者函数中移除所有内联块（它们在创建时已经添加到函数中）
         for (BasicBlock inlineBlock : replica.allBlocks) {
-            callerFunction.removeBasicBlock(inlineBlock);
+            if (callerFunction.getBasicBlocks().contains(inlineBlock)) {
+                callerFunction.removeBasicBlock(inlineBlock);
+            }
+        }
+        
+        // 按顺序将内联块插入到继续块之前
+        for (BasicBlock inlineBlock : replica.allBlocks) {
             callerFunction.addBasicBlockBefore(inlineBlock, continuationBlock);
             System.out.println("[DEBUG] 插入内联块: " + inlineBlock.getName() + " 到继续块之前");
         }
         
         // 3. 处理返回值
         handleReturnValues(replica, continuationBlock, callSite, inlinePrefix);
+        
+        // 4. 修复前驱关系
+        for (BasicBlock exitBlock : replica.exitBlocks) {
+            continuationBlock.addPredecessor(exitBlock);
+        }
     }
     
     /**
@@ -492,6 +503,10 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                 BranchInstruction branch = new BranchInstruction(continuationBlock);
                 exitBlock.addInstruction(branch);
                 exitBlock.addSuccessor(continuationBlock);
+                // 确保前驱关系
+                if (!continuationBlock.getPredecessors().contains(exitBlock)) {
+                    continuationBlock.addPredecessor(exitBlock);
+                }
             }
         } else {
             // 非void函数，需要处理返回值
@@ -513,6 +528,10 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                 BranchInstruction branch = new BranchInstruction(continuationBlock);
                 exitBlock.addInstruction(branch);
                 exitBlock.addSuccessor(continuationBlock);
+                // 确保前驱关系
+                if (!continuationBlock.getPredecessors().contains(exitBlock)) {
+                    continuationBlock.addPredecessor(exitBlock);
+                }
                 
             } else {
                 // 多个返回值，使用Phi指令
@@ -548,9 +567,18 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                     
                     if (returnValue != null) {
                         System.out.println("[DEBUG] 添加phi incoming: " + returnValue + " from block " + exitBlock.getName());
-                        // 直接操作phi指令的内部结构，绕过前驱检查
+                        // 使用标准的addIncoming方法，确保正确的前驱关系
+                        try {
+                            // 确保前驱关系存在
+                            if (!continuationBlock.getPredecessors().contains(exitBlock)) {
+                                continuationBlock.addPredecessor(exitBlock);
+                            }
+                            resultPhi.addIncoming(returnValue, exitBlock);
+                        } catch (Exception e) {
+                            // 如果标准方法失败，使用直接操作
                         resultPhi.getIncomingValues().put(exitBlock, returnValue);
                         resultPhi.addOperand(returnValue);
+                        }
                     } else {
                         System.out.println("[DEBUG] 警告: 返回值为null for block " + exitBlock.getName());
                     }
@@ -708,79 +736,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         }
     }
     
-    /**
-     * 将函数中所有的alloca指令提升到入口块开头，确保支配关系
-     */
-    private void hoistAllocasToEntry(Function func) {
-        BasicBlock entryBlock = func.getEntryBlock();
-        if (entryBlock == null) return;
-        
-        System.out.println("[DEBUG] 提升函数 " + func.getName() + " 中的alloca");
-        
-        List<AllocaInstruction> allocasToHoist = new ArrayList<>();
-        
-        // 收集所有非入口块中的alloca指令
-        for (BasicBlock block : func.getBasicBlocks()) {
-            if (block == entryBlock) continue;
-            
-            List<Instruction> instructions = new ArrayList<>(block.getInstructions());
-            for (Instruction inst : instructions) {
-                if (inst instanceof AllocaInstruction allocaInst) {
-                    System.out.println("[DEBUG] 发现需要提升的alloca: " + allocaInst.getName() + 
-                                     " (在块: " + block.getName() + ")");
-                    allocasToHoist.add(allocaInst);
-                    block.removeInstruction(allocaInst);
-                }
-            }
-        }
-        
-        // 将alloca指令移动到入口块开头
-        for (AllocaInstruction alloca : allocasToHoist) {
-            entryBlock.addInstructionFirst(alloca);
-            System.out.println("[DEBUG] 提升alloca到入口块: " + alloca.getName());
-        }
-        
-        // 确保入口块中所有alloca指令排在最前面（包括原本就在入口块中的alloca）
-        List<Instruction> reordered = new ArrayList<>();
-        List<Instruction> others = new ArrayList<>();
-        for (Instruction inst : new ArrayList<>(entryBlock.getInstructions())) {
-            if (inst instanceof AllocaInstruction) {
-                reordered.add(inst);
-            } else {
-                others.add(inst);
-            }
-        }
-        // 清空并重新插入按 allocas -> others 的顺序
-        entryBlock.getInstructions().clear();
-        for (Instruction inst : reordered) {
-            entryBlock.addInstruction(inst);
-        }
-        for (Instruction inst : others) {
-            entryBlock.addInstruction(inst);
-        }
-        
-        // 调试输出重新排序后前5条指令
-        System.out.println("[DEBUG] 重新排序后入口块 " + entryBlock.getName() + " 的前10条指令:");
-        List<Instruction> entryInsts2 = entryBlock.getInstructions();
-        for (int i = 0; i < Math.min(10, entryInsts2.size()); i++) {
-            Instruction inst = entryInsts2.get(i);
-            System.out.println("[DEBUG]   " + i + ": " + inst.getClass().getSimpleName() +
-                             (inst instanceof AllocaInstruction ? " " + ((AllocaInstruction)inst).getName() : ""));
-        }
-        
-        // 强制验证LinkedList的实际顺序
-        System.out.println("[DEBUG] 直接访问LinkedList验证顺序:");
-        LinkedList<Instruction> rawList = (LinkedList<Instruction>) entryBlock.getInstructions();
-        for (int i = 0; i < Math.min(10, rawList.size()); i++) {
-            Instruction inst = rawList.get(i);
-            System.out.println("[DEBUG]   LinkedList[" + i + "]: " + inst.getClass().getSimpleName() +
-                             (inst instanceof AllocaInstruction ? " " + ((AllocaInstruction)inst).getName() : ""));
-        }
-        
-        if (!allocasToHoist.isEmpty()) {
-            System.out.println("[DEBUG] 函数 " + func.getName() + " 提升了 " + allocasToHoist.size() + " 个alloca");
-        }
-    }
+
 
     
     /**
@@ -832,45 +788,14 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                 replicatedBlocks.add(replicatedBlock);
             }
             
-            // 第二步：收集所有alloca指令，稍后统一处理
-            List<AllocaInstruction> allocaInstructions = new ArrayList<>();
-            BasicBlock inlineEntryBlock = blockMap.get(sourceFunction.getEntryBlock());
-            System.out.println("[DEBUG] 内联函数入口块: " + inlineEntryBlock.getName());
+            // 第二步：正常复制所有指令（包括alloca）到对应的基本块中
+            // 不再特殊处理alloca，让它们在正确的基本块中保持原有位置
             
-            for (BasicBlock originalBlock : sourceFunction.getBasicBlocks()) {
-                for (Instruction originalInst : originalBlock.getInstructions()) {
-                    if (originalInst instanceof AllocaInstruction allocaInst) {
-                        AllocaInstruction replicatedAlloca = new AllocaInstruction(
-                            allocaInst.getAllocatedType(),
-                            inlinePrefix + allocaInst.getName()
-                        );
-                        
-                        System.out.println("[DEBUG] 收集alloca: " + allocaInst.getName() + 
-                                         " -> " + replicatedAlloca.getName() + 
-                                         " (原块: " + originalBlock.getName() + ")");
-                        
-                        allocaInstructions.add(replicatedAlloca);
-                        valueMap.put(originalInst, replicatedAlloca);
-                    }
-                }
-            }
-            
-            // 将所有alloca放到入口块开头
-            for (AllocaInstruction alloca : allocaInstructions) {
-                inlineEntryBlock.addInstructionFirst(alloca);
-            }
-            System.out.println("[DEBUG] 总共处理了 " + allocaInstructions.size() + " 个alloca指令");
-            
-            // 第三步：复制其他指令
+            // 第三步：复制所有指令到对应的基本块中
             for (BasicBlock originalBlock : sourceFunction.getBasicBlocks()) {
                 BasicBlock replicatedBlock = blockMap.get(originalBlock);
                 
                 for (Instruction originalInst : originalBlock.getInstructions()) {
-                    // 跳过已经处理的alloca指令
-                    if (originalInst instanceof AllocaInstruction) {
-                        continue;
-                    }
-                    
                     Instruction replicatedInst = replicateInstruction(originalInst);
                     if (replicatedInst != null) {
                         replicatedBlock.addInstruction(replicatedInst);
@@ -929,8 +854,12 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                     );
                     
                 } else if (original instanceof AllocaInstruction allocaInst) {
-                    // Alloca指令已经在createReplica的第二步中处理了
-                    return (Instruction) valueMap.get(original);
+                    AllocaInstruction replica = new AllocaInstruction(
+                        allocaInst.getAllocatedType(),
+                        inlinePrefix + allocaInst.getName()
+                    );
+                    valueMap.put(original, replica);
+                    return replica;
                     
                 } else if (original instanceof CompareInstruction cmpInst) {
                     CompareInstruction replica = new CompareInstruction(
