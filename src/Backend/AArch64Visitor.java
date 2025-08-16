@@ -856,13 +856,11 @@ public class AArch64Visitor {
             AArch64Reg returnReg, resultReg;
             if (ins.getCallee().getReturnType().isIntegerType()) {
                 returnReg = AArch64CPUReg.getAArch64CPURetValueReg();
-                resultReg = new AArch64VirReg(false);
+                resultReg = getOrCreateRegister(ins, false);
             } else {
                 returnReg = AArch64FPUReg.getAArch64FPURetValueReg();
-                resultReg = new AArch64VirReg(true);
+                resultReg = getOrCreateRegister(ins, true);
             }
-            
-            RegList.put(ins, resultReg);
             
             if (returnReg != null) {
                 if (functionName.equals("getfloat") && ins.getCallee().getReturnType() instanceof FloatType) {
@@ -944,13 +942,8 @@ public class AArch64Visitor {
             // System.out.println("error no virReg: " + source);
         }
         
-        AArch64Reg destReg;
-        if (targetType.isFloatType()) {
-            destReg = new AArch64VirReg(true);
-        } else {
-            destReg = new AArch64VirReg(false);
-        }
-        RegList.put(ins, destReg);
+        boolean isFloat = targetType.isFloatType();
+        AArch64Reg destReg = getOrCreateRegister(ins, isFloat);
         
         AArch64Cvt.CvtType armCvtType;
         
@@ -1025,13 +1018,7 @@ public class AArch64Visitor {
         Type loadedType = ins.getLoadedType();
         boolean isFloat = loadedType instanceof FloatType;
         
-        AArch64Reg destReg;
-        if (isFloat) {
-            destReg = new AArch64VirReg(true);
-        } else {
-            destReg = new AArch64VirReg(false);
-        }
-        RegList.put(ins, destReg);
+        AArch64Reg destReg = getOrCreateRegister(ins, isFloat);
         
         AArch64Reg baseReg = null;
         AArch64Operand offsetOp = new AArch64Imm(0);
@@ -1131,8 +1118,7 @@ public class AArch64Visitor {
         Value pointer = ins.getPointer();
         List<Value> indices = ins.getIndices();
         
-        AArch64Reg destReg = new AArch64VirReg(false);
-        RegList.put(ins, destReg);
+        AArch64Reg destReg = getOrCreateRegister(ins, false);
         
         AArch64Reg baseReg = null;
 
@@ -1576,8 +1562,7 @@ public class AArch64Visitor {
         boolean isFloat = ins.isFloatCompare();
         
 
-        AArch64Reg destReg = new AArch64VirReg(false);
-        RegList.put(ins, destReg);
+        AArch64Reg destReg = getOrCreateRegister(ins, false);
         
 
         AArch64Operand leftOp;
@@ -1775,7 +1760,14 @@ public class AArch64Visitor {
             AArch64Operand srcOp;
             if (incomingValue instanceof ConstantInt) {
                 long value = ((ConstantInt) incomingValue).getValue();
-                srcOp = new AArch64Imm(value);
+                // 检查是否需要使用loadLargeImmediate
+                if (value > 65535 || value < -65536) {
+                    AArch64VirReg tempReg = new AArch64VirReg(false);
+                    loadLargeImmediate(tempReg, value, insList, predefine);
+                    srcOp = tempReg;
+                } else {
+                    srcOp = new AArch64Imm(value);
+                }
             } else if (incomingValue instanceof ConstantFloat) {
                 double floatValue = ((ConstantFloat) incomingValue).getValue();
                 AArch64Reg fpuReg = new AArch64VirReg(true);
@@ -1835,21 +1827,21 @@ public class AArch64Visitor {
         Value operand = ins.getOperand();
         
 
-        AArch64Reg destReg;
-        if (operand instanceof ConstantInt) {
-            destReg = new AArch64VirReg(false);
-        } else if (operand instanceof ConstantFloat) {
-            destReg = new AArch64VirReg(true);
-        } else {
-            destReg = new AArch64VirReg(false);
-        }
-        RegList.put(ins, destReg);
+        boolean isFloat = operand instanceof ConstantFloat || operand.getType() instanceof FloatType;
+        AArch64Reg destReg = getOrCreateRegister(ins, isFloat);
         
 
         AArch64Operand srcOp;
         if (operand instanceof ConstantInt) {
             long value = ((ConstantInt) operand).getValue();
-            srcOp = new AArch64Imm(value);
+            // 检查是否需要使用loadLargeImmediate
+            if (value > 65535 || value < -65536) {
+                AArch64VirReg tempReg = new AArch64VirReg(false);
+                loadLargeImmediate(tempReg, value, insList, predefine);
+                srcOp = tempReg;
+            } else {
+                srcOp = new AArch64Imm(value);
+            }
         } else if (operand instanceof ConstantFloat) {
             double floatValue = ((ConstantFloat) operand).getValue();
             AArch64Reg fpuReg = new AArch64VirReg(true);
@@ -1866,12 +1858,16 @@ public class AArch64Visitor {
         switch (opCode) {
             case NEG:
                 if (srcOp instanceof AArch64Imm) {
-
                     long value = ((AArch64Imm) srcOp).getValue();
-                    AArch64Move moveInst = new AArch64Move(destReg, new AArch64Imm(-value), true);
-                    addInstr(moveInst, insList, predefine);
+                    long negValue = -value;
+                    // 检查否定后的值是否仍在MOV指令范围内
+                    if (negValue > 65535 || negValue < -65536) {
+                        loadLargeImmediate(destReg, negValue, insList, predefine);
+                    } else {
+                        AArch64Move moveInst = new AArch64Move(destReg, new AArch64Imm(negValue), true);
+                        addInstr(moveInst, insList, predefine);
+                    }
                 } else {
-
                     AArch64Reg srcReg = (AArch64Reg) srcOp;
                     AArch64Unary negInst = new AArch64Unary(srcReg, destReg, AArch64Unary.AArch64UnaryType.neg);
                     addInstr(negInst, insList, predefine);
@@ -1901,7 +1897,14 @@ public class AArch64Visitor {
         AArch64Operand srcOp;
         if (source instanceof ConstantInt) {
             long value = ((ConstantInt) source).getValue();
-            srcOp = new AArch64Imm(value);
+            // 检查是否需要使用loadLargeImmediate
+            if (value > 65535 || value < -65536) {
+                AArch64VirReg tempReg = new AArch64VirReg(false);
+                loadLargeImmediate(tempReg, value, insList, predefine);
+                srcOp = tempReg;
+            } else {
+                srcOp = new AArch64Imm(value);
+            }
         } else if (source instanceof ConstantFloat) {
             double floatValue = ((ConstantFloat) source).getValue();
             AArch64Reg fpuReg = new AArch64VirReg(true);
