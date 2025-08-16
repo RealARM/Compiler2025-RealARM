@@ -242,23 +242,31 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             for (BasicBlock block : caller.getBasicBlocks()) {
                 for (Instruction inst : block.getInstructions()) {
                     if (inst instanceof CallInstruction callInst && callInst.getCallee().equals(func)) {
-                        // 检查这个调用的返回值是否被用在条件跳转或phi指令中
-                        for (User user : callInst.getUsers()) {
-                            if (user instanceof Instruction userInst) {
-                                // 如果返回值被用在比较指令中，进一步检查比较结果是否用于控制流
-                                if (userInst instanceof CompareInstruction) {
-                                    for (User compareUser : userInst.getUsers()) {
-                                        if (compareUser instanceof BranchInstruction || compareUser instanceof PhiInstruction) {
-                                            return true;
-                                        }
-                                    }
-                                }
-                                // 如果直接用在分支或phi指令中
-                                if (userInst instanceof BranchInstruction || userInst instanceof PhiInstruction) {
-                                    return true;
-                                }
-                            }
+                        // 直接或间接参与控制流（短路）使用检测
+                        if (isTransitivelyUsedInControlFlow(callInst, 0, new HashSet<>())) {
+                            return true;
                         }
+                    }
+                }
+            }
+        }
+        return false;
+    }
+    
+    private boolean isTransitivelyUsedInControlFlow(Value value, int depth, Set<User> visited) {
+        if (depth > 6) return false;
+        for (User user : value.getUsers()) {
+            if (visited.contains(user)) continue;
+            visited.add(user);
+            if (user instanceof BranchInstruction || user instanceof PhiInstruction) {
+                return true;
+            }
+            if (user instanceof Instruction inst) {
+                // 允许穿过的中间节点：比较、类型转换、再次调用、二元运算等
+                if (inst instanceof CompareInstruction || inst instanceof ConversionInstruction ||
+                    inst instanceof CallInstruction || inst instanceof BinaryInstruction) {
+                    if (isTransitivelyUsedInControlFlow(inst, depth + 1, visited)) {
+                        return true;
                     }
                 }
             }
@@ -424,6 +432,20 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             // 重要：更新后继块的前驱关系
             successor.removePredecessor(originalBlock);
             successor.addPredecessor(continuationBlock);
+            
+            // 修复后继块中Phi指令的来边：将 originalBlock 替换为 continuationBlock
+            for (Instruction succInst : new ArrayList<>(successor.getInstructions())) {
+                if (succInst instanceof PhiInstruction phi) {
+                    // 直接操作Phi的incoming映射
+                    Value incomingFromOriginal = phi.getIncomingValues().remove(originalBlock);
+                    if (incomingFromOriginal != null) {
+                        phi.getIncomingValues().put(continuationBlock, incomingFromOriginal);
+                    }
+                } else {
+                    // Phi应位于基本块首部，遇到非Phi可提前结束
+                    break;
+                }
+            }
         }
         
         return continuationBlock;
