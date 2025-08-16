@@ -203,6 +203,15 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             return false;
         }
         
+        // 避免包含Phi指令的函数（暂时不支持）
+        for (BasicBlock block : func.getBasicBlocks()) {
+            for (Instruction inst : block.getInstructions()) {
+                if (inst instanceof PhiInstruction) {
+                    return false;
+                }
+            }
+        }
+        
         // 优先内联叶子函数（不调用其他非库函数）
         Set<Function> callees = callGraph.get(func);
         for (Function callee : callees) {
@@ -339,7 +348,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             callBlock.removeInstruction(callSite);
             
             // 6. 连接控制流（参考example第175-251行）
-            connectInlineBlocksLikeExample(callBlock, replica, continuationBlock, callSite);
+            connectInlineBlocksLikeExample(callBlock, replica, continuationBlock, callSite, inlinePrefix);
             
             return true;
             
@@ -380,7 +389,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
      * 连接内联后的基本块 - 完全参考example的方法
      */
     private void connectInlineBlocksLikeExample(BasicBlock callBlock, ReplicatedFunction replica, 
-                                              BasicBlock continuationBlock, CallInstruction callSite) {
+                                              BasicBlock continuationBlock, CallInstruction callSite, String inlinePrefix) {
         
         System.out.println("[DEBUG] 按example方式连接内联块");
         
@@ -398,13 +407,13 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         }
         
         // 3. 处理返回值（参考example第210-248行）
-        handleReturnValues(replica, continuationBlock, callSite);
+        handleReturnValues(replica, continuationBlock, callSite, inlinePrefix);
     }
     
     /**
      * 处理返回值 - 参考example的返回值处理逻辑
      */
-    private void handleReturnValues(ReplicatedFunction replica, BasicBlock continuationBlock, CallInstruction callSite) {
+    private void handleReturnValues(ReplicatedFunction replica, BasicBlock continuationBlock, CallInstruction callSite, String inlinePrefix) {
         if (replica.returnInstructions.isEmpty()) {
             return;
         }
@@ -439,7 +448,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                 
             } else {
                 // 多个返回值，使用Phi指令（参考example第221-238行）
-                PhiInstruction resultPhi = new PhiInstruction(callSite.getType(), "inline_result");
+                PhiInstruction resultPhi = new PhiInstruction(callSite.getType(), inlinePrefix + "result");
                 continuationBlock.addInstructionFirst(resultPhi);
                 
                 for (int i = 0; i < replica.exitBlocks.size(); i++) {
@@ -466,7 +475,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
      * 连接内联后的基本块
      */
     private void connectInlineBlocks(BasicBlock callBlock, ReplicatedFunction replica, 
-                                   BasicBlock continuationBlock, CallInstruction callSite) {
+                                   BasicBlock continuationBlock, CallInstruction callSite, String inlinePrefix) {
         
         System.out.println("[DEBUG] 连接内联块，调用块: " + callBlock.getName() + 
                           ", 继续块: " + continuationBlock.getName());
@@ -527,7 +536,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             } else {
                 // 多个退出点 - 使用Phi指令合并
                 if (!callSite.isVoidCall()) {
-                    PhiInstruction resultPhi = new PhiInstruction(callSite.getType(), "inline_result");
+                    PhiInstruction resultPhi = new PhiInstruction(callSite.getType(), inlinePrefix + "result");
                     continuationBlock.addInstructionFirst(resultPhi);
                     resultValue = resultPhi;
                     
@@ -886,6 +895,25 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                     );
                     valueMap.put(original, replica);
                     return replica;
+                    
+                } else if (original instanceof GetElementPtrInstruction gepInst) {
+                    List<Value> mappedIndices = new ArrayList<>();
+                    for (Value index : gepInst.getIndices()) {
+                        mappedIndices.add(getMappedValue(index));
+                    }
+                    GetElementPtrInstruction replica = new GetElementPtrInstruction(
+                        getMappedValue(gepInst.getPointer()),
+                        mappedIndices,
+                        inlinePrefix + gepInst.getName()
+                    );
+                    valueMap.put(original, replica);
+                    return replica;
+                    
+                } else if (original instanceof PhiInstruction phiInst) {
+                    // 暂时跳过Phi指令的复制，这需要特殊处理
+                    // 在实际编译器中，内联通常会避免包含复杂Phi指令的函数
+                    System.out.println("[InlineExpansion] Warning: Skipping PhiInstruction in inline: " + phiInst.getName());
+                    return null;
                     
                 } else {
                     System.out.println("[InlineExpansion] Warning: Unknown instruction type: " + 
