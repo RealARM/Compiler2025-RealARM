@@ -71,13 +71,7 @@ public class AArch64Visitor {
         return ptrList;
     }
     
-    /**
-     * 获取或创建操作数对应的寄存器
-     * 优先使用已存在的同名寄存器映射，避免phi变量等同名变量的映射问题
-     * @param operand 需要映射的操作数
-     * @param isFloat 是否为浮点类型
-     * @return 对应的寄存器
-     */
+    
     private AArch64Reg getOrCreateRegister(Value operand, boolean isFloat) {
         // 1. 首先检查是否已经在RegList中
         if (RegList.containsKey(operand)) {
@@ -422,6 +416,24 @@ public class AArch64Visitor {
             
             AArch64Binary binaryInst = new AArch64Binary(operands, destReg, binaryType);
             addInstr(binaryInst, insList, predefine);
+            // 强制 32 位整数乘法回绕，截取低 32 位并恢复符号
+            if (binaryType == AArch64Binary.AArch64BinaryType.mul &&
+                ins.getType() instanceof MiddleEnd.IR.Type.IntegerType &&
+                ((MiddleEnd.IR.Type.IntegerType) ins.getType()).getBitWidth() == 32) {
+
+                ArrayList<AArch64Operand> maskOps = new ArrayList<>();
+                maskOps.add(destReg);
+                maskOps.add(new AArch64Imm(0xffffffffL));
+                AArch64Binary maskInst = new AArch64Binary(maskOps, destReg, AArch64Binary.AArch64BinaryType.and);
+                addInstr(maskInst, insList, predefine);
+
+                AArch64Binary lslInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                addInstr(lslInst, insList, predefine);
+
+                AArch64Binary asrInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                addInstr(asrInst, insList, predefine);
+            }
+        
         }
         
         if (predefine) {
