@@ -50,7 +50,7 @@ public class OptimizeManager {
         addModuleOptimizer(new Mem2Reg());
         
         // 函数内联展开优化（在第一次Mem2Reg之后）
-        // addModuleOptimizer(new InlineExpansion());
+        addModuleOptimizer(new InlineExpansion());
 
         // 第二次Mem2Reg优化（处理内联产生的alloca）
         addModuleOptimizer(new Mem2Reg());
