@@ -181,6 +181,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
     /**
      * 判断函数是否适合内联展开
      */
+     
     private boolean isExpansionCandidate(Function func) {
         // 跳过main函数和外部函数
         if (func.getName().equals("main") || func.getName().equals("@main") || func.isExternal()) {
@@ -212,6 +213,12 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             }
         }
         
+        // 检查是否参与短路求值 - 如果调用指令的返回值被用在条件跳转或phi指令中，则不内联
+        if (hasShortCircuitUsage(func)) {
+            System.out.println("[InlineExpansion] Skipping " + func.getName() + " due to short-circuit usage");
+            return false;
+        }
+        
         // 优先内联叶子函数（不调用其他非库函数）
         Set<Function> callees = callGraph.get(func);
         for (Function callee : callees) {
@@ -225,6 +232,38 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         }
         
         return true;
+    }
+    
+    /**
+     * 检查函数是否参与短路求值逻辑
+     */
+    private boolean hasShortCircuitUsage(Function func) {
+        for (Function caller : func.getCallers()) {
+            for (BasicBlock block : caller.getBasicBlocks()) {
+                for (Instruction inst : block.getInstructions()) {
+                    if (inst instanceof CallInstruction callInst && callInst.getCallee().equals(func)) {
+                        // 检查这个调用的返回值是否被用在条件跳转或phi指令中
+                        for (User user : callInst.getUsers()) {
+                            if (user instanceof Instruction userInst) {
+                                // 如果返回值被用在比较指令中，进一步检查比较结果是否用于控制流
+                                if (userInst instanceof CompareInstruction) {
+                                    for (User compareUser : userInst.getUsers()) {
+                                        if (compareUser instanceof BranchInstruction || compareUser instanceof PhiInstruction) {
+                                            return true;
+                                        }
+                                    }
+                                }
+                                // 如果直接用在分支或phi指令中
+                                if (userInst instanceof BranchInstruction || userInst instanceof PhiInstruction) {
+                                    return true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return false;
     }
     
     /**
@@ -311,7 +350,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
     }
     
     /**
-     * 展开单个调用点 - 参考example的方法
+     * 展开单个调用点 
      */
     private boolean expandCallSite(CallInstruction callSite, Function targetFunc) {
         try {
@@ -324,14 +363,14 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             
             System.out.println("[DEBUG] 开始内联 " + targetFunc.getName() + " 到 " + callerFunc.getName());
             
-            // 1. 创建临时函数副本（参考example第137行）
+            // 1. 创建临时函数副本
             FunctionReplicator replicator = new FunctionReplicator(callerFunc, targetFunc, inlinePrefix);
             ReplicatedFunction replica = replicator.createReplica();
             
-            // 2. 创建继续块并分割调用块（参考example第141-152行）
+            // 2. 创建继续块并分割调用块
             BasicBlock continuationBlock = splitBlockAtCall(callBlock, callSite, currentInlineId);
             
-            // 3. 建立参数映射（参考example第179-187行）
+            // 3. 建立参数映射
             List<Value> arguments = callSite.getArguments();
             List<Argument> parameters = targetFunc.getArguments();
             Map<Value, Value> parameterMap = new HashMap<>();
@@ -344,11 +383,12 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             // 4. 应用参数映射
             replicator.applyValueMapping(parameterMap);
             
-            // 5. 移除调用指令（参考example第155行）
-            callBlock.removeInstruction(callSite);
-            
-            // 6. 连接控制流（参考example第175-251行）
+            // 5. 连接控制流
+            // 注意：必须在移除调用指令之前处理返回值，因为replaceAllUsages需要访问callSite的用户列表
             connectInlineBlocksLikeExample(callBlock, replica, continuationBlock, callSite, inlinePrefix);
+            
+            // 6. 移除调用指令（在返回值处理完成后）
+            callBlock.removeInstruction(callSite);
             
             return true;
             
@@ -375,30 +415,32 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             continuationBlock.addInstruction(inst);
         }
         
-        // 更新后继关系
+        // 更新后继关系和前驱关系
         List<BasicBlock> successors = new ArrayList<>(originalBlock.getSuccessors());
         for (BasicBlock successor : successors) {
             originalBlock.removeSuccessor(successor);
             continuationBlock.addSuccessor(successor);
+            
+            // 重要：更新后继块的前驱关系
+            successor.removePredecessor(originalBlock);
+            successor.addPredecessor(continuationBlock);
         }
         
         return continuationBlock;
     }
     
     /**
-     * 连接内联后的基本块 - 完全参考example的方法
+     * 连接内联后的基本块
      */
     private void connectInlineBlocksLikeExample(BasicBlock callBlock, ReplicatedFunction replica, 
                                               BasicBlock continuationBlock, CallInstruction callSite, String inlinePrefix) {
         
-        System.out.println("[DEBUG] 按example方式连接内联块");
-        
-        // 1. 从调用块跳转到内联函数入口（参考example第175行）
+        // 1. 从调用块跳转到内联函数入口
         BranchInstruction entryBranch = new BranchInstruction(replica.entryBlock);
         callBlock.addInstruction(entryBranch);
         callBlock.addSuccessor(replica.entryBlock);
         
-        // 2. 将所有内联基本块插入到继续块之前（参考example第251行）
+        // 2. 将所有内联基本块插入到继续块之前
         Function callerFunction = callBlock.getParentFunction();
         for (BasicBlock inlineBlock : replica.allBlocks) {
             callerFunction.removeBasicBlock(inlineBlock);
@@ -406,12 +448,12 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             System.out.println("[DEBUG] 插入内联块: " + inlineBlock.getName() + " 到继续块之前");
         }
         
-        // 3. 处理返回值（参考example第210-248行）
+        // 3. 处理返回值
         handleReturnValues(replica, continuationBlock, callSite, inlinePrefix);
     }
     
     /**
-     * 处理返回值 - 参考example的返回值处理逻辑
+     * 处理返回值 
      */
     private void handleReturnValues(ReplicatedFunction replica, BasicBlock continuationBlock, CallInstruction callSite, String inlinePrefix) {
         if (replica.returnInstructions.isEmpty()) {
@@ -432,13 +474,17 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         } else {
             // 非void函数，需要处理返回值
             if (replica.returnInstructions.size() == 1) {
-                // 单个返回值（参考example第212-219行）
+                // 单个返回值
                 ReturnInstruction returnInst = replica.returnInstructions.get(0);
                 BasicBlock exitBlock = replica.exitBlocks.get(0);
                 
                 Value returnValue = returnInst.getReturnValue();
                 if (returnValue != null) {
+                    System.out.println("[DEBUG] 替换调用指令 " + callSite + " 为返回值 " + returnValue);
+                    System.out.println("[DEBUG] 调用指令的用户数量: " + callSite.getUsers().size());
                     replaceAllUsages(callSite, returnValue);
+                } else {
+                    System.out.println("[DEBUG] 警告: 返回值为null!");
                 }
                 
                 exitBlock.removeInstruction(returnInst);
@@ -447,7 +493,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                 exitBlock.addSuccessor(continuationBlock);
                 
             } else {
-                // 多个返回值，使用Phi指令（参考example第221-238行）
+                // 多个返回值，使用Phi指令
                 PhiInstruction resultPhi = new PhiInstruction(callSite.getType(), inlinePrefix + "result");
                 continuationBlock.addInstructionFirst(resultPhi);
                 
@@ -503,7 +549,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                           ", 继续块: " + continuationBlock.getName());
         System.out.println("[DEBUG] 内联函数有 " + replica.allBlocks.size() + " 个基本块");
         
-        // 将内联函数的所有基本块插入到继续块之前（参考example第251行）
+        // 将内联函数的所有基本块插入到继续块之前
         Function callerFunction = callBlock.getParentFunction();
         
         System.out.println("[DEBUG] 调用者函数 " + callerFunction.getName() + " 当前有 " + 
@@ -967,6 +1013,11 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             if (brInst.isUnconditional()) {
                 BasicBlock newTarget = blockMap.get(brInst.getTrueBlock());
                 if (newTarget != null) {
+                    // 清除原有的后继关系
+                    for (BasicBlock successor : new ArrayList<>(parentBlock.getSuccessors())) {
+                        parentBlock.removeSuccessor(successor);
+                    }
+                    
                     parentBlock.removeInstruction(brInst);
                     BranchInstruction newBr = new BranchInstruction(newTarget);
                     parentBlock.addInstruction(newBr);
@@ -977,9 +1028,16 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                 BasicBlock newFalseTarget = blockMap.get(brInst.getFalseBlock());
                 
                 if (newTrueTarget != null && newFalseTarget != null) {
+                    // 清除原有的后继关系
+                    for (BasicBlock successor : new ArrayList<>(parentBlock.getSuccessors())) {
+                        parentBlock.removeSuccessor(successor);
+                    }
+                    
                     parentBlock.removeInstruction(brInst);
+                    // 重要：条件值也需要重新映射
+                    Value mappedCondition = getMappedValue(brInst.getCondition());
                     BranchInstruction newBr = new BranchInstruction(
-                        brInst.getCondition(), newTrueTarget, newFalseTarget);
+                        mappedCondition, newTrueTarget, newFalseTarget);
                     parentBlock.addInstruction(newBr);
                     parentBlock.addSuccessor(newTrueTarget);
                     parentBlock.addSuccessor(newFalseTarget);
