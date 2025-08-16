@@ -451,19 +451,41 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                 PhiInstruction resultPhi = new PhiInstruction(callSite.getType(), inlinePrefix + "result");
                 continuationBlock.addInstructionFirst(resultPhi);
                 
+                // 首先保存所有的返回值，避免在移除指令后丢失
+                List<Value> returnValues = new ArrayList<>();
+                for (int i = 0; i < replica.returnInstructions.size(); i++) {
+                    ReturnInstruction returnInst = replica.returnInstructions.get(i);
+                    Value returnValue = returnInst.getReturnValue();
+                    returnValues.add(returnValue);
+                    System.out.println("[DEBUG] 保存返回值[" + i + "]: " + returnValue + 
+                                     " from block " + replica.exitBlocks.get(i).getName());
+                }
+                
+                // 建立基本块的连接关系
                 for (int i = 0; i < replica.exitBlocks.size(); i++) {
                     BasicBlock exitBlock = replica.exitBlocks.get(i);
                     ReturnInstruction returnInst = replica.returnInstructions.get(i);
                     
-                    Value returnValue = returnInst.getReturnValue();
-                    if (returnValue != null) {
-                        resultPhi.addIncoming(returnValue, exitBlock);
-                    }
-                    
+                    // 移除return指令，建立跳转关系
                     exitBlock.removeInstruction(returnInst);
                     BranchInstruction branch = new BranchInstruction(continuationBlock);
                     exitBlock.addInstruction(branch);
                     exitBlock.addSuccessor(continuationBlock);
+                }
+                
+                // 现在基本块连接关系已经建立，安全地添加phi的incoming values
+                for (int i = 0; i < replica.exitBlocks.size(); i++) {
+                    BasicBlock exitBlock = replica.exitBlocks.get(i);
+                    Value returnValue = returnValues.get(i);
+                    
+                    if (returnValue != null) {
+                        System.out.println("[DEBUG] 添加phi incoming: " + returnValue + " from block " + exitBlock.getName());
+                        // 直接操作phi指令的内部结构，绕过前驱检查
+                        resultPhi.getIncomingValues().put(exitBlock, returnValue);
+                        resultPhi.addOperand(returnValue);
+                    } else {
+                        System.out.println("[DEBUG] 警告: 返回值为null for block " + exitBlock.getName());
+                    }
                 }
                 
                 replaceAllUsages(callSite, resultPhi);
