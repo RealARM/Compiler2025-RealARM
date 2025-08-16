@@ -384,7 +384,8 @@ public class GCM implements Optimizer.ModuleOptimizer {
                instruction instanceof ReturnInstruction ||
                instruction instanceof StoreInstruction ||
                instruction instanceof LoadInstruction ||
-               instruction instanceof CallInstruction;
+               instruction instanceof CallInstruction ||
+               instruction instanceof AllocaInstruction;  // 添加AllocaInstruction到固定指令列表
                 
         if (debug && pinned) {
             System.out.println("[GCM] Instruction " + instruction + " is pinned (cannot be moved)");
