@@ -378,7 +378,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             
             // 5. 连接控制流
             // 注意：必须在移除调用指令之前处理返回值，因为replaceAllUsages需要访问callSite的用户列表
-            connectInlineBlocksLikeExample(callBlock, replica, continuationBlock, callSite, inlinePrefix);
+            connectInlineBlocks(callBlock, replica, continuationBlock, callSite, inlinePrefix);
             
             // 6. 移除调用指令（在返回值处理完成后）
             callBlock.removeInstruction(callSite);
@@ -452,7 +452,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
     /**
      * 连接内联后的基本块
      */
-    private void connectInlineBlocksLikeExample(BasicBlock callBlock, ReplicatedFunction replica, 
+    private void connectInlineBlocks(BasicBlock callBlock, ReplicatedFunction replica, 
                                               BasicBlock continuationBlock, CallInstruction callSite, String inlinePrefix) {
         
         // 1. 从调用块跳转到内联函数入口
@@ -586,110 +586,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                 
                 replaceAllUsages(callSite, resultPhi);
             }
-        }
-    }
-    
-    /**
-     * 连接内联后的基本块
-     */
-    private void connectInlineBlocks(BasicBlock callBlock, ReplicatedFunction replica, 
-                                   BasicBlock continuationBlock, CallInstruction callSite, String inlinePrefix) {
-        
-        System.out.println("[DEBUG] 连接内联块，调用块: " + callBlock.getName() + 
-                          ", 继续块: " + continuationBlock.getName());
-        System.out.println("[DEBUG] 内联函数有 " + replica.allBlocks.size() + " 个基本块");
-        
-        // 将内联函数的所有基本块插入到继续块之前
-        Function callerFunction = callBlock.getParentFunction();
-        
-        System.out.println("[DEBUG] 调用者函数 " + callerFunction.getName() + " 当前有 " + 
-                          callerFunction.getBasicBlocks().size() + " 个基本块");
-        
-        for (int i = 0; i < replica.allBlocks.size(); i++) {
-            BasicBlock inlineBlock = replica.allBlocks.get(i);
-            System.out.println("[DEBUG] 处理内联块 " + i + ": " + inlineBlock.getName() + 
-                              ", 指令数: " + inlineBlock.getInstructions().size());
-            
-            // 检查第一个指令是否是alloca
-            if (!inlineBlock.getInstructions().isEmpty()) {
-                Instruction firstInst = inlineBlock.getInstructions().get(0);
-                System.out.println("[DEBUG] 第一个指令类型: " + firstInst.getClass().getSimpleName());
-            }
-            
-            // 从调用者函数中移除，然后重新插入到正确位置
-            callerFunction.removeBasicBlock(inlineBlock);
-        }
-        
-        // 按正确顺序重新插入所有内联块到继续块之前
-        for (BasicBlock inlineBlock : replica.allBlocks) {
-            callerFunction.addBasicBlockBefore(inlineBlock, continuationBlock);
-            System.out.println("[DEBUG] 重新插入内联块: " + inlineBlock.getName());
-        }
-        
-        System.out.println("[DEBUG] 重新排列后，调用者函数有 " + 
-                          callerFunction.getBasicBlocks().size() + " 个基本块");
-        
-        // 从调用块跳转到内联函数入口
-        BranchInstruction entryBranch = new BranchInstruction(replica.entryBlock);
-        callBlock.addInstruction(entryBranch);
-        callBlock.addSuccessor(replica.entryBlock);
-        
-        // 处理返回值合并
-        Value resultValue = null;
-        
-        if (!replica.exitBlocks.isEmpty()) {
-            if (replica.exitBlocks.size() == 1) {
-                // 单个退出点 - 直接替换
-                BasicBlock exitBlock = replica.exitBlocks.get(0);
-                ReturnInstruction returnInst = replica.returnInstructions.get(0);
-                
-                resultValue = returnInst.getReturnValue();
-                
-                // 移除return指令，添加跳转到继续块
-                exitBlock.removeInstruction(returnInst);
-                BranchInstruction exitBranch = new BranchInstruction(continuationBlock);
-                exitBlock.addInstruction(exitBranch);
-                exitBlock.addSuccessor(continuationBlock);
-                
-            } else {
-                // 多个退出点 - 使用Phi指令合并
-                if (!callSite.isVoidCall()) {
-                    PhiInstruction resultPhi = new PhiInstruction(callSite.getType(), inlinePrefix + "result");
-                    continuationBlock.addInstructionFirst(resultPhi);
-                    resultValue = resultPhi;
-                    
-                    for (int i = 0; i < replica.exitBlocks.size(); i++) {
-                        BasicBlock exitBlock = replica.exitBlocks.get(i);
-                        ReturnInstruction returnInst = replica.returnInstructions.get(i);
-                        Value returnValue = returnInst.getReturnValue();
-                        
-                        if (returnValue != null) {
-                            resultPhi.addIncoming(returnValue, exitBlock);
-                        }
-                        
-                        exitBlock.removeInstruction(returnInst);
-                        BranchInstruction exitBranch = new BranchInstruction(continuationBlock);
-                        exitBlock.addInstruction(exitBranch);
-                        exitBlock.addSuccessor(continuationBlock);
-                    }
-                } else {
-                    // void函数，直接跳转
-                    for (BasicBlock exitBlock : replica.exitBlocks) {
-                        ReturnInstruction returnInst = (ReturnInstruction) exitBlock.getLastInstruction();
-                        if (returnInst != null) {
-                            exitBlock.removeInstruction(returnInst);
-                        }
-                        BranchInstruction exitBranch = new BranchInstruction(continuationBlock);
-                        exitBlock.addInstruction(exitBranch);
-                        exitBlock.addSuccessor(continuationBlock);
-                    }
-                }
-            }
-        }
-        
-        // 替换调用指令的使用
-        if (resultValue != null && !callSite.isVoidCall()) {
-            replaceAllUsages(callSite, resultValue);
         }
     }
     

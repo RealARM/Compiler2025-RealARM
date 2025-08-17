@@ -46,13 +46,13 @@ public class OptimizeManager {
         // 尾递归消除优化
         addModuleOptimizer(new TailRecursionElimination());
         
-        // 第一次Mem2Reg优化（清理原始的alloca指令）
+        // 第一次Mem2Reg优化
         addModuleOptimizer(new Mem2Reg());
         
-        // 函数内联展开优化（在第一次Mem2Reg之后）
+        // 函数内联展开优化
         addModuleOptimizer(new InlineExpansion());
 
-        // 第二次Mem2Reg优化（处理内联产生的alloca）
+        // 第二次Mem2Reg优化
         addModuleOptimizer(new Mem2Reg());
         
         // 常量优化
