@@ -47,7 +47,13 @@ public class OptimizeManager {
         // 尾递归消除优化
         addModuleOptimizer(new TailRecursionElimination());
         
-        // Mem2Reg优化，现在有点问题
+        // 第一次Mem2Reg优化
+        addModuleOptimizer(new Mem2Reg());
+        
+        // 函数内联展开优化
+        addModuleOptimizer(new InlineExpansion());
+
+        // 第二次Mem2Reg优化
         addModuleOptimizer(new Mem2Reg());
         
         // 常量优化
