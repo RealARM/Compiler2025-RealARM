@@ -16,6 +16,8 @@ import MiddleEnd.Optimization.Core.Optimizer;
 import java.util.*;
 
 public class TrivialLoopDeletion implements Optimizer.ModuleOptimizer {
+	private static final int MAX_BLOCK_THRESHOLD = 1000;
+	
 	@Override
 	public String getName() {
 		return "TrivialLoopDeletion";
@@ -34,6 +36,13 @@ public class TrivialLoopDeletion implements Optimizer.ModuleOptimizer {
 	}
 
 	private boolean runForFunction(Function function) {
+		int blockCount = function.getBasicBlocks().size();
+		if (blockCount > MAX_BLOCK_THRESHOLD) {
+			System.out.println("[TrivialLoopDeletion] Function " + function.getName() + " has " + blockCount + 
+				" basic blocks, which exceeds the threshold of " + MAX_BLOCK_THRESHOLD + ". Skipping for performance reasons.");
+			return false;
+		}
+		
 		boolean changed = false;
 		LoopAnalysis.runLoopInfo(function);
 		LoopAnalysis.runLoopIndVarInfo(function);

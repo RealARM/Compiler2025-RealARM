@@ -29,7 +29,7 @@ import java.util.*;
 public class LoopPointerExtract implements Optimizer.ModuleOptimizer {
 
     private final boolean debug = false;
-    
+    private static final int MAX_BLOCK_THRESHOLD = 1000;
     @Override
     public String getName() {
         return "LoopPointerExtract";
@@ -59,6 +59,13 @@ public class LoopPointerExtract implements Optimizer.ModuleOptimizer {
     }
 
     private boolean runForFunction(Function function) {
+        int blockCount = function.getBasicBlocks().size();
+        if (blockCount > MAX_BLOCK_THRESHOLD) {
+            System.out.println("[LoopPtrExtract] Function " + function.getName() + " has " + blockCount + 
+                " basic blocks, which exceeds the threshold of " + MAX_BLOCK_THRESHOLD + ". Skipping for performance reasons.");
+            return false;
+        }
+        
         boolean changed = false;
         
         if (debug) {

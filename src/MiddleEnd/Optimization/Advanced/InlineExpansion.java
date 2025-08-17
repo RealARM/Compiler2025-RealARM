@@ -39,13 +39,10 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         this.functionComplexity = new HashMap<>();
         this.expansionCandidates = new HashSet<>();
         
-        System.out.println("[InlineExpansion] Starting function inline expansion...");
-        
         // 多轮内联展开，直到无法继续
         for (int round = 0; round < MAX_EXPANSION_ROUNDS; round++) {
             boolean roundChanged = performExpansionRound();
             if (!roundChanged) {
-                System.out.println("[InlineExpansion] Converged after " + (round + 1) + " rounds");
                 break;
             }
             hasExpanded = true;
@@ -59,8 +56,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         // 注意：不再在这里提升alloca，而是让后续的Mem2Reg优化来处理
         // 这样可以避免破坏SSA形式和支配关系
         
-        System.out.println("[InlineExpansion] Inline expansion " + 
-                          (hasExpanded ? "completed with changes" : "found no expansion opportunities"));
         
         return hasExpanded;
     }
@@ -78,10 +73,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         if (expansionCandidates.isEmpty()) {
             return false;
         }
-        
-        System.out.println("[InlineExpansion] Found " + expansionCandidates.size() + 
-                          " expansion candidates: " + 
-                          expansionCandidates.stream().map(Function::getName).toList());
         
         // 执行内联展开
         boolean roundChanged = false;
@@ -101,11 +92,9 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         callGraph.clear();
         functionComplexity.clear();
         
-        System.out.println("[InlineExpansion] Analyzing functions:");
         for (Function func : targetModule.functions()) {
             callGraph.put(func, new HashSet<>());
             functionComplexity.put(func, 0);
-            System.out.println("  - Function: " + func.getName() + ", External: " + func.isExternal());
         }
         
         // 构建调用关系和计算复杂度
@@ -121,7 +110,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                     
                     if (inst instanceof CallInstruction callInst) {
                         Function callee = callInst.getCallee();
-                        System.out.println("[InlineExpansion] Found call: " + caller.getName() + " -> " + callee.getName());
                         if (!callee.isExternal()) {
                             callGraph.get(caller).add(callee);
                             callee.addCaller(caller);
@@ -131,7 +119,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                 }
             }
             functionComplexity.put(caller, complexity);
-            System.out.println("[InlineExpansion] Function " + caller.getName() + " complexity: " + complexity);
         }
     }
     
@@ -178,7 +165,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         for (BasicBlock block : func.getBasicBlocks()) {
             for (Instruction inst : block.getInstructions()) {
                 if (inst instanceof PhiInstruction) {
-                    System.out.println("[InlineExpansion] Skipping " + func.getName() + " due to Phi instruction: " + inst.getName());
                     return false;
                 }
             }
@@ -189,7 +175,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             for (BasicBlock block : caller.getBasicBlocks()) {
                 for (Instruction inst : block.getInstructions()) {
                     if (inst instanceof PhiInstruction) {
-                        System.out.println("[InlineExpansion] Skipping " + func.getName() + " due to Phi in caller " + caller.getName());
                         return false;
                     }
                 }
@@ -198,7 +183,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         
         // 检查是否参与短路求值 - 如果调用指令的返回值被用在条件跳转或phi指令中，则不内联
         if (hasShortCircuitUsage(func)) {
-            System.out.println("[InlineExpansion] Skipping " + func.getName() + " due to short-circuit usage");
             return false;
         }
         
@@ -298,9 +282,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             return false;
         }
         
-        System.out.println("[InlineExpansion] Expanding " + callSites.size() + 
-                          " call sites for function: " + function.getName());
-        
         boolean expanded = false;
         for (CallInstruction callSite : callSites) {
             if (expandCallSite(callSite, function)) {
@@ -352,8 +333,7 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             int currentInlineId = ++inlineCounter;
             String inlinePrefix = "inline" + currentInlineId + "_";
             
-            System.out.println("[DEBUG] 开始内联 " + targetFunc.getName() + " 到 " + callerFunc.getName());
-            
+
             // 0. 不再需要特殊处理调用者的alloca，正常复制即可
             
             // 1. 创建临时函数副本
@@ -370,7 +350,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             
             for (int i = 0; i < Math.min(arguments.size(), parameters.size()); i++) {
                 parameterMap.put(parameters.get(i), arguments.get(i));
-                System.out.println("[DEBUG] 参数映射: " + parameters.get(i).getName() + " -> " + arguments.get(i));
             }
             
             // 4. 应用参数映射
@@ -386,7 +365,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
             return true;
             
         } catch (Exception e) {
-            System.err.println("[InlineExpansion] Failed to expand call site: " + e.getMessage());
             return false;
         }
     }
@@ -473,7 +451,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         // 按顺序将内联块插入到继续块之前
         for (BasicBlock inlineBlock : replica.allBlocks) {
             callerFunction.addBasicBlockBefore(inlineBlock, continuationBlock);
-            System.out.println("[DEBUG] 插入内联块: " + inlineBlock.getName() + " 到继续块之前");
         }
         
         // 3. 处理返回值
@@ -517,11 +494,8 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                 
                 Value returnValue = returnInst.getReturnValue();
                 if (returnValue != null) {
-                    System.out.println("[DEBUG] 替换调用指令 " + callSite + " 为返回值 " + returnValue);
-                    System.out.println("[DEBUG] 调用指令的用户数量: " + callSite.getUsers().size());
                     replaceAllUsages(callSite, returnValue);
                 } else {
-                    System.out.println("[DEBUG] 警告: 返回值为null!");
                 }
                 
                 exitBlock.removeInstruction(returnInst);
@@ -544,8 +518,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                     ReturnInstruction returnInst = replica.returnInstructions.get(i);
                     Value returnValue = returnInst.getReturnValue();
                     returnValues.add(returnValue);
-                    System.out.println("[DEBUG] 保存返回值[" + i + "]: " + returnValue + 
-                                     " from block " + replica.exitBlocks.get(i).getName());
                 }
                 
                 // 建立基本块的连接关系
@@ -566,7 +538,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                     Value returnValue = returnValues.get(i);
                     
                     if (returnValue != null) {
-                        System.out.println("[DEBUG] 添加phi incoming: " + returnValue + " from block " + exitBlock.getName());
                         // 使用标准的addIncoming方法，确保正确的前驱关系
                         try {
                             // 确保前驱关系存在
@@ -580,7 +551,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
                         resultPhi.addOperand(returnValue);
                         }
                     } else {
-                        System.out.println("[DEBUG] 警告: 返回值为null for block " + exitBlock.getName());
                     }
                 }
                 
@@ -624,8 +594,6 @@ public class InlineExpansion implements Optimizer.ModuleOptimizer {
         }
         
         if (!toRemove.isEmpty()) {
-            System.out.println("[InlineExpansion] Removing " + toRemove.size() + " orphaned functions: " + 
-                              toRemove.stream().map(Function::getName).toList());
             for (Function func : toRemove) {
                 targetModule.functions().remove(func);
             }

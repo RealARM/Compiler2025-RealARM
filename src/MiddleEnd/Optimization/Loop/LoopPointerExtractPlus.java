@@ -25,6 +25,7 @@ import java.util.*;
 public class LoopPointerExtractPlus implements Optimizer.ModuleOptimizer {
 	private final boolean debug = false;
 	private static long uniqueId = 0;
+	private static final int MAX_BLOCK_THRESHOLD = 1000;
 
 	private static synchronized String generateUniquePtrName(BasicBlock header) {
 		return "loop_ptr_" + System.nanoTime() + "_" + (uniqueId++) + "_" + header.getName();
@@ -53,7 +54,14 @@ public class LoopPointerExtractPlus implements Optimizer.ModuleOptimizer {
 		return changed;
 	}
 
-		private boolean runForFunction(Function function) {
+	private boolean runForFunction(Function function) {
+		int blockCount = function.getBasicBlocks().size();
+		if (blockCount > MAX_BLOCK_THRESHOLD) {
+			System.out.println("[LoopPointerExtractPlus] Function " + function.getName() + " has " + blockCount + 
+				" basic blocks, which exceeds the threshold of " + MAX_BLOCK_THRESHOLD + ". Skipping for performance reasons.");
+			return false;
+		}
+		
 		boolean changed = false;
 		
 		List<Loop> topLoops = LoopAnalysis.analyzeLoops(function);

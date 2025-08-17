@@ -36,6 +36,13 @@ public class LoopSSATransform implements Optimizer.ModuleOptimizer {
 	}
 	
 	private boolean runForFunction(Function function) {
+		int blockCount = function.getBasicBlocks().size();
+		if (blockCount > MAX_BLOCK_THRESHOLD) {
+			System.out.println("[LoopSSATransform] Function " + function.getName() + " has " + blockCount + 
+				" basic blocks, which exceeds the threshold of " + MAX_BLOCK_THRESHOLD + ". Skipping for performance reasons.");
+			return false;
+		}
+		
 		boolean changed = false;
 		// 分析循环与支配关系
 		List<Loop> topLoops = LoopAnalysis.analyzeLoops(function);
@@ -79,6 +86,7 @@ public class LoopSSATransform implements Optimizer.ModuleOptimizer {
 
 	// 为单个指令添加LCSSA phi并重写所有循环外uses
 	private Map<BasicBlock, PhiInstruction> exitPhiMap = new HashMap<>();
+	private int phiCounter = 0; // 添加计数器来生成唯一名称
 	private boolean addPhiAndRenameUses(Instruction inst, Loop loop, Map<BasicBlock, Set<BasicBlock>> dominators) {
 		boolean changed = false;
 		exitPhiMap.clear();
@@ -90,7 +98,7 @@ public class LoopSSATransform implements Optimizer.ModuleOptimizer {
 		for (BasicBlock exit : loop.getExitBlocks()) {
 			Set<BasicBlock> domSet = dominators.get(exit);
 			if (domSet != null && domSet.contains(instBlock) && !exitPhiMap.containsKey(exit)) {
-				PhiInstruction phi = new PhiInstruction(inst.getType(), inst.getName() + "_lcssa");
+				PhiInstruction phi = new PhiInstruction(inst.getType(), inst.getName() + "_lcssa_" + (++phiCounter));
 				exit.addInstructionFirst(phi);
 				// 初始化phi的来边值（所有前驱都设为inst）
 				for (BasicBlock pred : exit.getPredecessors()) {
@@ -176,7 +184,7 @@ public class LoopSSATransform implements Optimizer.ModuleOptimizer {
 		}
 		
 		if (!predecessorValues.isEmpty()) {
-			PhiInstruction phi = new PhiInstruction(predecessorValues.get(0).getType(), "lcssa_merge");
+			PhiInstruction phi = new PhiInstruction(predecessorValues.get(0).getType(), "lcssa_merge_" + (++phiCounter));
 			userBlock.addInstructionFirst(phi);
 			// 添加来边
 			for (int i = 0; i < userBlock.getPredecessors().size() && i < predecessorValues.size(); i++) {
@@ -216,7 +224,7 @@ public class LoopSSATransform implements Optimizer.ModuleOptimizer {
 					}
 					// 在出口块头部插入一个Phi，初值来自各前驱（先全部设为inst，后续步骤再精化）
 					if (!hasExistingLcssaPhi(exit, inst)) {
-						PhiInstruction phi = new PhiInstruction(inst.getType(), inst.getName() + "_lcssa");
+						PhiInstruction phi = new PhiInstruction(inst.getType(), inst.getName() + "_lcssa_" + (++phiCounter));
 						exit.addInstructionFirst(phi);
 						for (BasicBlock pred : exit.getPredecessors()) {
 							phi.addIncoming(inst, pred);
