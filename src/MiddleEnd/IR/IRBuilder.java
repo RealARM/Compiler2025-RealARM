@@ -323,6 +323,15 @@ public class IRBuilder {
         }
         return inst;
     }
+
+    public static PhiInstruction createPhiNoInit(Type type, BasicBlock block) {
+        String name = "phi_" + tmpCounter++;
+        PhiInstruction inst = new PhiInstruction(type, name);
+        if (block != null) {
+            block.addInstructionFirst(inst);
+        }
+        return inst;
+    }
     
     public static void validateAllPhiNodes(Function function) {
         if (function == null) return;

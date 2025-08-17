@@ -68,29 +68,73 @@ public class LoopAnalysis {
     private static void identifyInductionVariable(Loop loop) {
         BasicBlock header = loop.getHeader();
         
+        boolean debug = false; // 临时debug
+        if (debug) {
+            System.out.println("[LoopAnalysis] 识别循环归纳变量，头块: " + header.getName());
+        }
+        
         for (Instruction inst : header.getInstructions()) {
             if (inst instanceof PhiInstruction phi) {
+                if (debug) {
+                    System.out.println("[LoopAnalysis] 检查Phi指令: " + phi.getName());
+                    System.out.println("[LoopAnalysis] Phi操作数数量: " + phi.getOperandCount());
+                }
+                
                 if (isPotentialInductionVariablePhi(phi, loop)) {
+                    if (debug) {
+                        System.out.println("[LoopAnalysis] " + phi.getName() + " 是潜在的归纳变量");
+                    }
+                    
                     Value indVar = phi;
                     Value init = findPhiInitValue(phi, loop);
                     Instruction update = findInductionUpdate(phi, loop);
+                    
+                    if (debug) {
+                        System.out.println("[LoopAnalysis] 初始值: " + init);
+                        System.out.println("[LoopAnalysis] 更新指令: " + update);
+                    }
                     
                     if (update instanceof BinaryInstruction binInst) {
                         Value step = getStepValue(binInst, indVar);
                         Value end = findEndCondition(loop, indVar);
                         
-                        if (init != null && step != null) {
+                        if (debug) {
+                            System.out.println("[LoopAnalysis] 步长: " + step);
+                            System.out.println("[LoopAnalysis] 结束条件: " + end);
+                        }
+                        
+                        if (init != null && step != null && end != null) {
                             loop.setInductionVariableInfo(indVar, init, end, step, update);
+                            if (debug) {
+                                System.out.println("[LoopAnalysis] 成功设置归纳变量信息");
+                            }
                             return;
                         }
+                    }
+                } else {
+                    if (debug) {
+                        System.out.println("[LoopAnalysis] " + phi.getName() + " 不是归纳变量");
                     }
                 }
             }
         }
+        
+        if (debug) {
+            System.out.println("[LoopAnalysis] 未找到归纳变量");
+        }
     }
     
     private static boolean isPotentialInductionVariablePhi(PhiInstruction phi, Loop loop) {
-        if (phi.getOperandCount() != 2) {
+        boolean debug = false; // 临时debug
+        
+        if (debug) {
+            System.out.println("[LoopAnalysis] 检查Phi是否为归纳变量，操作数: " + phi.getOperandCount());
+            System.out.println("[LoopAnalysis] Incoming blocks: " + phi.getIncomingBlocks().size());
+        }
+        
+        // 检查至少有1个输入（可以放宽条件）
+        if (phi.getIncomingBlocks().size() < 1) {
+            if (debug) System.out.println("[LoopAnalysis] Incoming blocks太少");
             return false;
         }
         
@@ -99,6 +143,11 @@ public class LoopAnalysis {
         boolean hasInsideInput = false;
         
         for (BasicBlock incomingBlock : phi.getIncomingBlocks()) {
+            if (debug) {
+                System.out.println("[LoopAnalysis] 检查incoming block: " + incomingBlock.getName() + 
+                                 ", 是否在循环内: " + loop.contains(incomingBlock));
+            }
+            
             if (loop.contains(incomingBlock)) {
                 hasInsideInput = true;
             } else {
@@ -106,12 +155,21 @@ public class LoopAnalysis {
             }
         }
         
-        return hasOutsideInput && hasInsideInput;
+        boolean result = hasOutsideInput && hasInsideInput;
+        if (debug) {
+            System.out.println("[LoopAnalysis] 有循环外输入: " + hasOutsideInput + 
+                             ", 有循环内输入: " + hasInsideInput + ", 结果: " + result);
+        }
+        
+        return result;
     }
     
     private static Value findPhiInitValue(PhiInstruction phi, Loop loop) {
-        for (int i = 0; i < phi.getOperandCount(); i++) {
-            BasicBlock incomingBlock = phi.getIncomingBlocks().get(i);
+        List<BasicBlock> incomingBlocks = phi.getIncomingBlocks();
+        
+        // 安全地遍历incoming blocks和对应的values
+        for (int i = 0; i < incomingBlocks.size() && i < phi.getOperandCount(); i++) {
+            BasicBlock incomingBlock = incomingBlocks.get(i);
             if (!loop.contains(incomingBlock)) {
                 return phi.getOperand(i);
             }
@@ -120,8 +178,11 @@ public class LoopAnalysis {
     }
     
     private static Instruction findInductionUpdate(PhiInstruction phi, Loop loop) {
-        for (int i = 0; i < phi.getOperandCount(); i++) {
-            BasicBlock incomingBlock = phi.getIncomingBlocks().get(i);
+        List<BasicBlock> incomingBlocks = phi.getIncomingBlocks();
+        
+        // 安全地遍历incoming blocks和对应的values
+        for (int i = 0; i < incomingBlocks.size() && i < phi.getOperandCount(); i++) {
+            BasicBlock incomingBlock = incomingBlocks.get(i);
             if (loop.contains(incomingBlock)) {
                 Value updateValue = phi.getOperand(i);
                 if (updateValue instanceof Instruction inst) {
