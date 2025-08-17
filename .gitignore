@@ -38,6 +38,14 @@
 *.jar
 /logs
 *.s
-*.py
 /.vscode
 /transfer_folder
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+*.pywz
+*.pyzw
+*.pyzwz
