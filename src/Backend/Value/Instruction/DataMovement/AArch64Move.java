@@ -3,6 +3,8 @@ import Backend.Value.Base.AArch64Instruction;
 import Backend.Value.Base.AArch64Operand;
 import Backend.Value.Operand.Register.AArch64FPUReg;
 import Backend.Value.Operand.Register.AArch64Reg;
+import Backend.Value.Operand.Register.AArch64CPUReg;
+import Backend.Value.Operand.Constant.AArch64Imm;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -77,13 +79,16 @@ public class AArch64Move extends AArch64Instruction {
         
         sb.append("\t");
         String destStr;
-        if (isImmediate && getDefReg() instanceof Backend.Value.Operand.Register.AArch64CPUReg cpuDest) {
+        if (isImmediate && getDefReg() instanceof AArch64CPUReg cpuDest) {
             boolean use64Bit = false;
-            if (!getOperands().isEmpty() && getOperands().get(0) instanceof Backend.Value.Operand.Constant.AArch64Imm imm) {
+            if (!getOperands().isEmpty() && getOperands().get(0) instanceof AArch64Imm imm) {
                 long immVal = imm.getValue();
                 use64Bit = (immVal < 0) || (immVal > 0xFFFFFFFFL);
             }
             destStr = use64Bit ? cpuDest.getName() : cpuDest.get32BitName();
+            if (moveType == MoveType.MOVK || moveType == MoveType.MOVZ) {
+                destStr = cpuDest.getName();
+            }
         } else {
             destStr = getDefReg().toString();
         }
