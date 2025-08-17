@@ -1145,34 +1145,24 @@ class EvaluationGUI:
         # AC无变化统计和详情
         if perf_comp['unchanged_count'] > 0:
             report += f"⏸️ AC无变化: {perf_comp['unchanged_count']} 个\n"
-
-            print("\n" + "="*60)
-            print("📋 AC无变化测试详情:")
-            print("="*60)
+            
+            # 在报告中显示详细列表
+            report += "   详细列表:\n"
             for i, item in enumerate(perf_comp['unchanged'], 1):
                 time_str = f" ({item['time']:.3f}s)" if item.get('time') is not None else ""
-                print(f"   {i:3d}. {item['name']}: {item['result']}{time_str}")
-            print("="*60)
-            print(f"总计: {len(perf_comp['unchanged'])} 个AC无变化测试\n")
-            
-            # 也在报告中加一行提示
-            report += f"\n💡 详细列表已打印到控制台 (共 {len(perf_comp['unchanged'])} 个)\n"
+                report += f"   {i:3d}. {item['name']}: {item['result']}{time_str}\n"
+            report += "\n"
 
         # WA等无变化统计和详情
         if perf_comp['wa_unchanged_count'] > 0:
             report += f"❌ WA等无变化: {perf_comp['wa_unchanged_count']} 个\n"
-
-            print("\n" + "="*60)
-            print("📋 WA等无变化测试详情:")
-            print("="*60)
+            
+            # 在报告中显示详细列表
+            report += "   详细列表:\n"
             for i, item in enumerate(perf_comp['wa_unchanged'], 1):
                 time_str = f" ({item['time']:.3f}s)" if item.get('time') is not None else ""
-                print(f"   {i:3d}. {item['name']}: {item['result']}{time_str}")
-            print("="*60)
-            print(f"总计: {len(perf_comp['wa_unchanged'])} 个WA等无变化测试\n")
-            
-            # 也在报告中加一行提示
-            report += f"\n💡 详细列表已打印到控制台 (共 {len(perf_comp['wa_unchanged'])} 个)\n"
+                report += f"   {i:3d}. {item['name']}: {item['result']}{time_str}\n"
+            report += "\n"
 
         
         return report

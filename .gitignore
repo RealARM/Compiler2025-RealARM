@@ -49,3 +49,4 @@ __pycache__
 *.pywz
 *.pyzw
 *.pyzwz
+*.db
