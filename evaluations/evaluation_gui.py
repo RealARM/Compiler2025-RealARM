@@ -1153,15 +1153,25 @@ class EvaluationGUI:
                 report += f"   {i:3d}. {item['name']}: {item['result']}{time_str}\n"
             report += "\n"
 
-        # WA等无变化统计和详情
-        if perf_comp['wa_unchanged_count'] > 0:
-            report += f"❌ WA等无变化: {perf_comp['wa_unchanged_count']} 个\n"
-            
-            # 在报告中显示详细列表
+        # 非AC（WA/TLE/PE等）测试汇总——两次任意一次非AC都计入
+        wa_union = []  # 收集非AC测试，并标记当前/上次结果
+        # 1) 两次都非AC
+        for item in perf_comp['wa_unchanged']:
+            wa_union.append({'name': item['name'], 'current': item['result'], 'previous': item['result']})
+
+        # 2) 本次非AC，上次AC  -> regressed
+        for item in perf_comp['regressed']:
+            wa_union.append({'name': item['name'], 'current': item['to'], 'previous': item['from']})
+
+        # 3) 本次AC，上次非AC  -> improved
+        for item in perf_comp['improved']:
+            wa_union.append({'name': item['name'], 'current': item['to'], 'previous': item['from']})
+
+        if wa_union:
+            report += f"❌ 非AC测试（两次至少一次非AC）: {len(wa_union)} 个\n"
             report += "   详细列表:\n"
-            for i, item in enumerate(perf_comp['wa_unchanged'], 1):
-                time_str = f" ({item['time']:.3f}s)" if item.get('time') is not None else ""
-                report += f"   {i:3d}. {item['name']}: {item['result']}{time_str}\n"
+            for i, item in enumerate(wa_union, 1):
+                report += f"   {i:3d}. {item['name']}: 当前 {item['current']}, 上次 {item['previous']}\n"
             report += "\n"
 
         
