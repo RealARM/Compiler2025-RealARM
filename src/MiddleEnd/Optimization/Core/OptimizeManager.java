@@ -101,6 +101,9 @@ public class OptimizeManager {
         addModuleOptimizer(new LoopPointerExtract());
         addModuleOptimizer(new LoopPointerExtractPlus());
 
+        // 循环展开优化
+        addModuleOptimizer(new LoopUnroll());
+
         // 窥孔优化
         addModuleOptimizer(new PeepHole());
         
@@ -121,7 +124,7 @@ public class OptimizeManager {
         addModuleOptimizer(new ConstantFolding());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        addModuleOptimizer(new RemovePhiPass());
+        // addModuleOptimizer(new RemovePhiPass());
     }
     
     public void addModuleOptimizer(ModuleOptimizer optimizer) {
