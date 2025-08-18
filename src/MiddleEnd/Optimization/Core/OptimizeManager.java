@@ -110,6 +110,9 @@ public class OptimizeManager {
         // 全局值编号优化 (GVN)
         addModuleOptimizer(new GVN());
         
+        // Load/Store数据流优化
+        addModuleOptimizer(new LoadStoreFlowOptimizer());
+        
         // 无用代码消除
         addModuleOptimizer(new DCE());
 
@@ -118,7 +121,7 @@ public class OptimizeManager {
         addModuleOptimizer(new ConstantFolding());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        addModuleOptimizer(new RemovePhiPass());
+        // addModuleOptimizer(new RemovePhiPass());
     }
     
     public void addModuleOptimizer(ModuleOptimizer optimizer) {
