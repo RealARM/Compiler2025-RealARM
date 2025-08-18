@@ -12,6 +12,7 @@ import MiddleEnd.Optimization.ControlFlow.*;
 import MiddleEnd.Optimization.Global.*;
 import MiddleEnd.Optimization.Instruction.*;
 import MiddleEnd.Optimization.Memory.*;
+import MiddleEnd.Optimization.Loop.*;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -84,17 +85,24 @@ public class OptimizeManager {
         // 控制流优化
         addModuleOptimizer(new BranchSimplifier());
         
-        // // 循环SSA形式转换（在循环优化之前）
-        // addModuleOptimizer(new LoopSSATransform());
+        // 循环SSA形式转换（在循环优化之前）
+        addModuleOptimizer(new LoopSSATransform());
+
+        // 删除无用循环
+        addModuleOptimizer(new TrivialLoopDeletion());
+
+        // 循环交换优化
+        addModuleOptimizer(new LoopInterchange());
         
-        // // 循环优化
-        // addModuleOptimizer(new LoopInvariantCodeMotion());
+        // 循环优化
+        addModuleOptimizer(new LoopInvariantCodeMotion());
         
-        // // 循环指针访问优化
-        // addModuleOptimizer(new LoopPtrExtract());
-        
-        // // 循环交换优化
-        // addModuleOptimizer(new LoopInterchange());
+        // 循环指针访问优化
+        addModuleOptimizer(new LoopPointerExtract());
+        addModuleOptimizer(new LoopPointerExtractPlus());
+
+        // 窥孔优化
+        addModuleOptimizer(new PeepHole());
         
         // 全局代码移动优化
         addModuleOptimizer(new GCM());
@@ -104,9 +112,13 @@ public class OptimizeManager {
         
         // 无用代码消除
         addModuleOptimizer(new DCE());
+
+        // 常量处理
+        addModuleOptimizer(new ConstantPropagation());
+        addModuleOptimizer(new ConstantFolding());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        // addModuleOptimizer(new RemovePhiPass());
+        addModuleOptimizer(new RemovePhiPass());
     }
     
     public void addModuleOptimizer(ModuleOptimizer optimizer) {

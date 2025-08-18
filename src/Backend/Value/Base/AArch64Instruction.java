@@ -34,8 +34,12 @@ public class AArch64Instruction {
             return; // 不进行替换
         }
         for(int i = 0; i < operands.size(); i++) {
-            if(operands.get(i).equals(armv8Reg1)) {
-                operands.get(i).getUsers().remove(this);
+            AArch64Operand current = operands.get(i);
+            if (current == null) {
+                continue;
+            }
+            if(current.equals(armv8Reg1)) {
+                current.getUsers().remove(this);
                 armv8Reg2.getUsers().add(this);
                 operands.set(i, armv8Reg2);
             }

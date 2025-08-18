@@ -30,19 +30,19 @@ public class BranchInstruction extends Instruction implements TerminatorInstruct
     }
     
     public boolean isUnconditional() {
-        return condition == null;
+        return getOperandCount() == 1;
     }
     
     public Value getCondition() {
-        return condition;
+        return isUnconditional() ? null : getOperand(0);
     }
     
     public BasicBlock getTrueBlock() {
-        return trueBlock;
+        return isUnconditional() ? (BasicBlock) getOperand(0) : (BasicBlock) getOperand(1);
     }
     
     public BasicBlock getFalseBlock() {
-        return falseBlock;
+        return isUnconditional() ? null : (BasicBlock) getOperand(2);
     }
     
     @Override
@@ -53,18 +53,22 @@ public class BranchInstruction extends Instruction implements TerminatorInstruct
     @Override
     public String toString() {
         if (isUnconditional()) {
-            return "br label %" + trueBlock.getName();
+            BasicBlock target = getTrueBlock();
+            return "br label %" + target.getName();
         } else {
-            return "br i1 " + condition.getName() + ", label %" + trueBlock.getName() + ", label %" + falseBlock.getName();
+            Value cond = getCondition();
+            BasicBlock t = getTrueBlock();
+            BasicBlock f = getFalseBlock();
+            return "br i1 " + cond.getName() + ", label %" + t.getName() + ", label %" + f.getName();
         }
     }
     
     @Override
     public BasicBlock[] getSuccessors() {
         if (isUnconditional()) {
-            return new BasicBlock[] { trueBlock };
+            return new BasicBlock[] { getTrueBlock() };
         } else {
-            return new BasicBlock[] { trueBlock, falseBlock };
+            return new BasicBlock[] { getTrueBlock(), getFalseBlock() };
         }
     }
 } 

@@ -440,10 +440,6 @@ public class AArch64Visitor {
             predefines.put(ins, insList);
         }
     }
-    
-    
-
-    
 
     private void parseBrInst(BranchInstruction ins, boolean predefine) {
         ArrayList<AArch64Instruction> insList = predefine ? new ArrayList<>() : null;
@@ -469,6 +465,8 @@ public class AArch64Visitor {
                 Value right = cmpIns.getRight();
                 OpCode predicate = cmpIns.getPredicate();
                 
+                boolean isFloat = cmpIns.isFloatCompare();
+                
                 AArch64Operand leftOp, rightOp;
                 
                 if (left instanceof ConstantInt) {
@@ -482,23 +480,76 @@ public class AArch64Visitor {
                         addInstr(moveInst, insList, predefine);
                     }
                     leftOp = leftReg;
+                } else if (left instanceof ConstantFloat) {
+                    double value = ((ConstantFloat) left).getValue();
+                    AArch64Reg leftReg = new AArch64VirReg(true);
+                    loadFloatConstant(leftReg, value, insList, predefine);
+                    leftOp = leftReg;
                 } else {
                     leftOp = RegList.get(left);
                 }
                 
                 if (right instanceof ConstantInt) {
                     long value = ((ConstantInt) right).getValue();
-                    rightOp = new AArch64Imm(value);
+                    if (isFloat) {
+                        AArch64Reg rightReg = new AArch64VirReg(true);
+                        loadFloatConstant(rightReg, (double) value, insList, predefine);
+                        rightOp = rightReg;
+                    } else {
+                        boolean useCmn = false;
+                        long abs = value;
+                        if (value < 0) { useCmn = true; abs = -value; }
+                        if (!isAddSubImmEncodable(abs)) {
+                            AArch64Reg rightReg = new AArch64VirReg(false);
+                            loadLargeImmediate(rightReg, value, insList, predefine);
+                            rightOp = rightReg;
+                        } else {
+                            rightOp = new AArch64Imm(abs);
+                        }
+                    }
+                } else if (right instanceof ConstantFloat) {
+                    double value = ((ConstantFloat) right).getValue();
+                    AArch64Reg rightReg = new AArch64VirReg(true);
+                    loadFloatConstant(rightReg, value, insList, predefine);
+                    rightOp = rightReg;
                 } else {
                     rightOp = RegList.get(right);
                 }
                 
-                AArch64Compare.CmpType cmpType = AArch64Compare.CmpType.cmp;
-                if (!cmpIns.isFloatCompare() && rightOp instanceof AArch64Imm) {
-                    long value = ((AArch64Imm) rightOp).getValue();
-                    if (value < 0) {
-                        cmpType = AArch64Compare.CmpType.cmn;
-                        rightOp = new AArch64Imm(-value);
+                // Ensure 32-bit integer compare uses sign-extended 64-bit operands
+                if (!isFloat) {
+                    if (leftOp instanceof AArch64Reg && left.getType().isIntegerType()) {
+                        AArch64VirReg extLeft = new AArch64VirReg(false);
+                        AArch64Move mvL = new AArch64Move(extLeft, (AArch64Reg) leftOp, false);
+                        addInstr(mvL, insList, predefine);
+                        AArch64Binary lslL = new AArch64Binary(extLeft, extLeft, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                        addInstr(lslL, insList, predefine);
+                        AArch64Binary asrL = new AArch64Binary(extLeft, extLeft, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                        addInstr(asrL, insList, predefine);
+                        leftOp = extLeft;
+                    }
+                    if (rightOp instanceof AArch64Reg && right.getType().isIntegerType()) {
+                        AArch64VirReg extRight = new AArch64VirReg(false);
+                        AArch64Move mvR = new AArch64Move(extRight, (AArch64Reg) rightOp, false);
+                        addInstr(mvR, insList, predefine);
+                        AArch64Binary lslR = new AArch64Binary(extRight, extRight, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                        addInstr(lslR, insList, predefine);
+                        AArch64Binary asrR = new AArch64Binary(extRight, extRight, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                        addInstr(asrR, insList, predefine);
+                        rightOp = extRight;
+                    }
+                }
+                
+                AArch64Compare.CmpType cmpType;
+                if (isFloat) {
+                    cmpType = AArch64Compare.CmpType.fcmp;
+                } else {
+                    cmpType = AArch64Compare.CmpType.cmp;
+                    if (rightOp instanceof AArch64Imm) {
+                        long imm = ((AArch64Imm) rightOp).getValue();
+                        if (((ConstantInt) right).getValue() < 0) {
+                            cmpType = AArch64Compare.CmpType.cmn;
+                        }
                     }
                 }
                 
@@ -524,6 +575,27 @@ public class AArch64Visitor {
                         break;
                     case SLE:
                         condType = AArch64Tools.CondType.le;
+                        break;
+                    case ULT:
+                        condType = AArch64Tools.CondType.cc;  // 无符号小于 (C==0)
+                        break;
+                    case ULE:
+                        condType = AArch64Tools.CondType.ls;  // 无符号小于等于 (C==0||Z==1)
+                        break;
+                    case UGT:
+                        condType = AArch64Tools.CondType.hi;  // 无符号大于 (C==1&&Z==0)
+                        break;
+                    case UGE:
+                        condType = AArch64Tools.CondType.cs;  // 无符号大于等于 (C==1)
+                        break;
+                    case UNE:
+                        condType = AArch64Tools.CondType.ne;  // 不等于
+                        break;
+                    case ORD:
+                        condType = AArch64Tools.CondType.vc;  // 有序 (V==0)
+                        break;
+                    case UNO:
+                        condType = AArch64Tools.CondType.vs;  // 无序 (V==1)
                         break;
                     default:
                         System.err.println("不支持的比较谓词: " + predicate);
@@ -1611,17 +1683,13 @@ public class AArch64Visitor {
         AArch64Operand rightOp;
         if (right instanceof ConstantInt) {
             long value = ((ConstantInt) right).getValue();
-            if (value > 4095 || value < -4095) {
+            long abs = value < 0 ? -value : value;
+            if (!isAddSubImmEncodable(abs)) {
                 AArch64Reg rightReg = new AArch64VirReg(false);
-                if (value > 65535 || value < -65536) {
-                    loadLargeImmediate(rightReg, value, insList, predefine);
-                } else {
-                    AArch64Move moveInst = new AArch64Move(rightReg, new AArch64Imm(value), true);
-                    addInstr(moveInst, insList, predefine);
-                }
+                loadLargeImmediate(rightReg, value, insList, predefine);
                 rightOp = rightReg;
             } else {
-                rightOp = new AArch64Imm(value);
+                rightOp = new AArch64Imm(abs);
             }
         } else if (right instanceof ConstantFloat) {
             double floatValue = ((ConstantFloat) right).getValue();
@@ -1629,7 +1697,6 @@ public class AArch64Visitor {
             loadFloatConstant(fpuReg, floatValue, insList, predefine);
             rightOp = fpuReg;
         } else {
-            // 使用通用方法获取右操作数寄存器
             boolean rightIsFloat = right.getType() instanceof FloatType;
             AArch64Reg rightReg = getOrCreateRegister(right, rightIsFloat);
             rightOp = rightReg;
@@ -1650,17 +1717,13 @@ public class AArch64Visitor {
             }
         }
         
-        // 创建比较指令
         AArch64Compare.CmpType cmpType;
         
-        // 检查是否可以使用CMN指令优化（当比较一个负数常量时）
-        if (!isFloat && rightOp instanceof AArch64Imm) {
-            long value = ((AArch64Imm) rightOp).getValue();
-            if (value < 0) {
-                // 使用CMN指令，比较负值（相当于CMP reg, -imm）
+        if (!isFloat && right instanceof ConstantInt && rightOp instanceof AArch64Imm) {
+            long k = ((ConstantInt) right).getValue();
+            if (k < 0) {
                 cmpType = AArch64Compare.CmpType.cmn;
-                // 将立即数改为正值
-                rightOp = new AArch64Imm(-value);
+                rightOp = new AArch64Imm(-k);
             } else {
                 cmpType = AArch64Compare.CmpType.cmp;
             }
@@ -2326,5 +2389,10 @@ public class AArch64Visitor {
                                       boolean isLoad, boolean isFloat, 
                                       ArrayList<AArch64Instruction> insList, boolean predefine) {
         return createSafeMemoryInstruction(baseReg, offset, valueReg, isLoad, insList, predefine);
+    }
+
+    private boolean isAddSubImmEncodable(long value) {
+        if (value < 0) return false;
+        return (value <= 4095) || ((value & 0xFFF) == 0 && (value >> 12) <= 4095);
     }
 } 

@@ -113,7 +113,7 @@ public class PhiEliminationUtils {
         }
     }
     
-        private static void breakCycleMoves(BasicBlock bb, List<Instruction> remainingMoves, 
+    private static void breakCycleMoves(BasicBlock bb, List<Instruction> remainingMoves, 
                                       Map<String, Integer> outDegree, boolean debug) {
         if (remainingMoves.isEmpty()) return;
 
