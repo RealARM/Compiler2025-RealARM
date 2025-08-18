@@ -272,8 +272,8 @@ public class RegisterAllocator {
                                                         new AArch64Imm(fpOffset), temporaryRegister);
             block.insertBeforeInst(instruction, loadInstruction);
         } else {
-            // 超出范围，使用x16作为地址寄存器（caller-saved）
-            AArch64PhyReg addressRegister = AArch64CPUReg.getAArch64CPUReg(16);
+            // 超出范围，动态选择地址寄存器，避免与临时寄存器冲突
+            AArch64PhyReg addressRegister = selectAddressRegister(temporaryRegister, instruction);
             RegisterAllocatorHelper.loadLargeImmToReg(block, instruction, addressRegister, fpOffset, false);
             ArrayList<AArch64Operand> addOperands = new ArrayList<>();
             addOperands.add(AArch64CPUReg.getAArch64FPReg());
@@ -301,8 +301,8 @@ public class RegisterAllocator {
                                                            new AArch64Imm(fpOffset));
             RegisterAllocatorHelper.insertAfterInstruction(block, instruction, storeInstruction);
         } else {
-            // 超出范围，使用x16作为地址寄存器（caller-saved）
-            AArch64PhyReg addressRegister = AArch64CPUReg.getAArch64CPUReg(16);
+            // 超出范围，动态选择地址寄存器，避免与临时寄存器冲突
+            AArch64PhyReg addressRegister = selectAddressRegister(temporaryRegister, instruction);
             RegisterAllocatorHelper.loadLargeImmToReg(block, instruction, addressRegister, fpOffset, true);
             ArrayList<AArch64Operand> addOperands = new ArrayList<>();
             addOperands.add(AArch64CPUReg.getAArch64FPReg());
@@ -353,6 +353,37 @@ public class RegisterAllocator {
             // 如果都被使用了，返回默认的x17
             return AArch64CPUReg.getAArch64CPUReg(17);
         }
+    }
+
+    /**
+     * 选择用于地址计算的寄存器，避免与已使用的寄存器冲突
+     */
+    private AArch64PhyReg selectAddressRegister(AArch64PhyReg avoidRegister, AArch64Instruction instruction) {
+        // 候选地址寄存器：x16, x17, x18 (caller-saved寄存器)
+        AArch64PhyReg[] addressCandidates = {
+            AArch64CPUReg.getAArch64CPUReg(16),
+            AArch64CPUReg.getAArch64CPUReg(17),
+            AArch64CPUReg.getAArch64CPUReg(18)
+        };
+        
+        // 选择第一个不冲突且不在指令中使用的寄存器
+        for (AArch64PhyReg candidate : addressCandidates) {
+            if (!candidate.equals(avoidRegister) && 
+                !isRegisterUsedInInstruction(instruction, candidate)) {
+                return candidate;
+            }
+        }
+        
+        // 如果所有候选寄存器都与avoidRegister冲突或在指令中使用，
+        // 选择一个与avoidRegister不同的寄存器作为降级处理
+        for (AArch64PhyReg candidate : addressCandidates) {
+            if (!candidate.equals(avoidRegister)) {
+                return candidate;
+            }
+        }
+        
+        // 极端情况：返回x18作为最后选择（这种情况理论上不应该发生）
+        return AArch64CPUReg.getAArch64CPUReg(18);
     }
 
     /**
