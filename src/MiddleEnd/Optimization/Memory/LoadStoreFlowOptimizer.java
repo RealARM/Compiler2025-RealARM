@@ -477,9 +477,15 @@ public class LoadStoreFlowOptimizer implements ModuleOptimizer {
         if (rootPtr instanceof GlobalVariable) {
             return true;
         }
+
+        // 对于GEP 结果（数组/结构成员等子元素）的 Store 保守认为有副作用，
+        // 因为后续可能通过不同索引再次访问同一内存区域。
+        if (pointer instanceof GetElementPtrInstruction) {
+            return true;
+        }
         
-        // 函数参数的Store可能有副作用
-        if (pointer instanceof Argument) {
+        // 函数参数(或其GEP) 的 Store 可能影响调用者，具有副作用
+        if (rootPtr instanceof Argument) {
             return true;
         }
         
