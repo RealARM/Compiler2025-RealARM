@@ -4,6 +4,7 @@ import Backend.Structure.AArch64Block;
 import Backend.Structure.AArch64Function;
 import Backend.Value.Base.*;
 import Backend.Value.Instruction.Arithmetic.*;
+import Backend.Value.Instruction.DataMovement.*;
 import Backend.Value.Instruction.Memory.*;
 import Backend.Value.Operand.Constant.*;
 import Backend.Value.Operand.Register.*;
@@ -19,10 +20,12 @@ public class RegisterAllocator {
     
     private final AArch64Function targetFunction;
     private RegisterAllocationState currentState;
+
+    private long spillOffset = -8;  // 从FP-8开始分配溢出位置
     
     // 寄存器类型配置
     private static final int INTEGER_REGISTER_COUNT = 8;   // 整型寄存器数量 (x8-x15)
-    private static final int FLOATING_REGISTER_COUNT = 24; // 浮点寄存器数量 (v8-v31)
+    private static final int FLOATING_REGISTER_COUNT = 21; // 浮点寄存器数量 (v8-v28)
     private static final int MAX_ALLOCATION_ROUNDS = 5;    // 最大分配轮次
     
     public RegisterAllocator(AArch64Function function) {
@@ -190,11 +193,11 @@ public class RegisterAllocator {
             AArch64VirReg spillRegister = (AArch64VirReg) spillOperand;
             if (spillRegister.isFloat() != currentState.isFloatingPoint()) continue;
             
-            long stackPosition = targetFunction.getStackSize();
             targetFunction.addStack(null, 8L);
+            // System.out.println("为溢出寄存器 " + spillRegister + " 分配FP偏移: " + spillOffset);
+            rewriteSpilledRegisterAccesses(spillRegister, spillOffset);
             
-            // System.out.println("为溢出寄存器 " + spillRegister + " 分配栈位置: " + stackPosition);
-            rewriteSpilledRegisterAccesses(spillRegister, stackPosition);
+            spillOffset -= 8;  // 下一个溢出寄存器偏移-8
         }
         
         // System.out.println("溢出处理完成");
@@ -204,7 +207,7 @@ public class RegisterAllocator {
 
     private AArch64PhyReg mapColorToPhysicalRegister(AArch64VirReg virtualRegister, int color) {
         if (virtualRegister.isFloat()) {
-            // 浮点寄存器: v8-v31
+            // 浮点寄存器: v8-v30
             if (color >= 0 && color < FLOATING_REGISTER_COUNT) {
                 return AArch64FPUReg.getAArch64FloatReg(color + 8);
             }
@@ -220,7 +223,7 @@ public class RegisterAllocator {
     }
     
 
-    private void rewriteSpilledRegisterAccesses(AArch64VirReg spilledRegister, long stackOffset) {
+    private void rewriteSpilledRegisterAccesses(AArch64VirReg spilledRegister, long fpOffset) {
         for (AArch64Block block : targetFunction.getBlocks()) {
             List<AArch64Instruction> instructionList = new ArrayList<>(block.getInstructions());
             
@@ -244,15 +247,13 @@ public class RegisterAllocator {
                 
                 if (containsSpilledUse || containsSpilledDef) {
                     if (containsSpilledUse) {
-                        // 为使用插入加载指令
-                        insertLoadInstructionForSpilledUse(block, instruction, spilledRegister, 
-                        stackOffset + instruction.getCalleeParamOffset());
+                        // 为使用插入加载指令，直接使用FP偏移
+                        insertLoadInstructionForSpilledUse(block, instruction, spilledRegister, fpOffset);
                     }
                     
                     if (containsSpilledDef) {
-                        // 为定义插入存储指令
-                        insertStoreInstructionForSpilledDef(block, instruction, spilledRegister, 
-                        stackOffset + instruction.getCalleeParamOffset());
+                        // 为定义插入存储指令，直接使用FP偏移
+                        insertStoreInstructionForSpilledDef(block, instruction, spilledRegister, fpOffset);
                     }
                 }
             }
@@ -261,25 +262,21 @@ public class RegisterAllocator {
     
 
     private void insertLoadInstructionForSpilledUse(AArch64Block block, AArch64Instruction instruction, 
-                                                   AArch64VirReg spilledRegister, long stackOffset) {
-        AArch64VirReg temporaryRegister = new AArch64VirReg(spilledRegister.isFloat());
+                                                   AArch64VirReg spilledRegister, long fpOffset) {
+        // 选择可用的临时寄存器，避免在同一指令中重复使用
+        AArch64PhyReg temporaryRegister = selectAvailableTemporaryRegister(instruction, spilledRegister);
         
-        if (stackOffset >= -256 && stackOffset <= 255) {
-            // 在有符号偏移范围内
-            AArch64Load loadInstruction = new AArch64Load(AArch64CPUReg.getAArch64SpReg(), 
-                                                        new AArch64Imm(stackOffset), temporaryRegister);
-            block.insertBeforeInst(instruction, loadInstruction);
-        } else if (stackOffset >= 0 && stackOffset <= 32760 && (stackOffset % 8 == 0)) {
-            // 在无符号偏移范围内
-            AArch64Load loadInstruction = new AArch64Load(AArch64CPUReg.getAArch64SpReg(), 
-                                                        new AArch64Imm(stackOffset), temporaryRegister);
+        if (fpOffset >= -256 && fpOffset <= 255) {
+            // 在有符号偏移范围内，使用FP作为基址
+            AArch64Load loadInstruction = new AArch64Load(AArch64CPUReg.getAArch64FPReg(), 
+                                                        new AArch64Imm(fpOffset), temporaryRegister);
             block.insertBeforeInst(instruction, loadInstruction);
         } else {
-            // 超出范围，分解为ADD+LOAD
-            AArch64VirReg addressRegister = new AArch64VirReg(false);
-            RegisterAllocatorHelper.loadLargeImmToReg(block, instruction, addressRegister, stackOffset, false);
+            // 超出范围，动态选择地址寄存器，避免与临时寄存器冲突
+            AArch64PhyReg addressRegister = selectAddressRegister(temporaryRegister, instruction);
+            RegisterAllocatorHelper.loadLargeImmToReg(block, instruction, addressRegister, fpOffset, false);
             ArrayList<AArch64Operand> addOperands = new ArrayList<>();
-            addOperands.add(AArch64CPUReg.getAArch64SpReg());
+            addOperands.add(AArch64CPUReg.getAArch64FPReg());
             addOperands.add(addressRegister);
             AArch64Binary addInstruction = new AArch64Binary(addOperands, addressRegister, 
                                                            AArch64Binary.AArch64BinaryType.add);
@@ -293,26 +290,22 @@ public class RegisterAllocator {
     
 
     private void insertStoreInstructionForSpilledDef(AArch64Block block, AArch64Instruction instruction, 
-                                                    AArch64VirReg spilledRegister, long stackOffset) {
-        AArch64VirReg temporaryRegister = new AArch64VirReg(spilledRegister.isFloat());
+                                                    AArch64VirReg spilledRegister, long fpOffset) {
+        // 选择可用的临时寄存器，避免在同一指令中重复使用
+        AArch64PhyReg temporaryRegister = selectAvailableTemporaryRegister(instruction, spilledRegister);
         instruction.replaceDefReg(temporaryRegister);
         
-        if (stackOffset >= -256 && stackOffset <= 255) {
-            // 在有符号偏移范围内
-            AArch64Store storeInstruction = new AArch64Store(temporaryRegister, AArch64CPUReg.getAArch64SpReg(), 
-                                                           new AArch64Imm(stackOffset));
-            RegisterAllocatorHelper.insertAfterInstruction(block, instruction, storeInstruction);
-        } else if (stackOffset >= 0 && stackOffset <= 32760 && (stackOffset % 8 == 0)) {
-            // 在无符号偏移范围内
-            AArch64Store storeInstruction = new AArch64Store(temporaryRegister, AArch64CPUReg.getAArch64SpReg(), 
-                                                           new AArch64Imm(stackOffset));
+        if (fpOffset >= -256 && fpOffset <= 255) {
+            // 在有符号偏移范围内，使用FP作为基址
+            AArch64Store storeInstruction = new AArch64Store(temporaryRegister, AArch64CPUReg.getAArch64FPReg(), 
+                                                           new AArch64Imm(fpOffset));
             RegisterAllocatorHelper.insertAfterInstruction(block, instruction, storeInstruction);
         } else {
-            // 超出范围，分解为ADD+STORE
-            AArch64VirReg addressRegister = new AArch64VirReg(false);
-            RegisterAllocatorHelper.loadLargeImmToReg(block, instruction, addressRegister, stackOffset, true);
+            // 超出范围，动态选择地址寄存器，避免与临时寄存器冲突
+            AArch64PhyReg addressRegister = selectAddressRegister(temporaryRegister, instruction);
+            RegisterAllocatorHelper.loadLargeImmToReg(block, instruction, addressRegister, fpOffset, true);
             ArrayList<AArch64Operand> addOperands = new ArrayList<>();
-            addOperands.add(AArch64CPUReg.getAArch64SpReg());
+            addOperands.add(AArch64CPUReg.getAArch64FPReg());
             addOperands.add(addressRegister);
             AArch64Binary addInstruction = new AArch64Binary(addOperands, addressRegister, 
                                                            AArch64Binary.AArch64BinaryType.add);
@@ -321,5 +314,94 @@ public class RegisterAllocator {
             AArch64Store storeInstruction = new AArch64Store(temporaryRegister, addressRegister, new AArch64Imm(0));
             RegisterAllocatorHelper.insertAfterInstruction(block, instruction, storeInstruction);
         }
+    }
+    
+    /**
+     * 为溢出寄存器选择可用的临时寄存器，避免在同一指令中重复使用
+     */
+    private AArch64PhyReg selectAvailableTemporaryRegister(AArch64Instruction instruction, AArch64VirReg spilledRegister) {
+        if (spilledRegister.isFloat()) {
+            // 浮点寄存器：可以使用v29, v30, v31作为临时寄存器
+            AArch64PhyReg[] fpTempRegs = {
+                AArch64FPUReg.getAArch64FloatReg(31),
+                AArch64FPUReg.getAArch64FloatReg(30),
+                AArch64FPUReg.getAArch64FloatReg(29)
+            };
+            
+            // 检查指令中已经使用了哪些临时寄存器
+            for (AArch64PhyReg tempReg : fpTempRegs) {
+                if (!isRegisterUsedInInstruction(instruction, tempReg)) {
+                    return tempReg;
+                }
+            }
+            // 如果都被使用了，返回默认的v31
+            return AArch64FPUReg.getAArch64FloatReg(31);
+        } else {
+            // 整型寄存器：可以使用x16, x17, x18作为临时寄存器（caller-saved）
+            AArch64PhyReg[] intTempRegs = {
+                AArch64CPUReg.getAArch64CPUReg(17),
+                AArch64CPUReg.getAArch64CPUReg(16),
+                AArch64CPUReg.getAArch64CPUReg(18)
+            };
+            
+            // 检查指令中已经使用了哪些临时寄存器
+            for (AArch64PhyReg tempReg : intTempRegs) {
+                if (!isRegisterUsedInInstruction(instruction, tempReg)) {
+                    return tempReg;
+                }
+            }
+            // 如果都被使用了，返回默认的x17
+            return AArch64CPUReg.getAArch64CPUReg(17);
+        }
+    }
+
+    /**
+     * 选择用于地址计算的寄存器，避免与已使用的寄存器冲突
+     */
+    private AArch64PhyReg selectAddressRegister(AArch64PhyReg avoidRegister, AArch64Instruction instruction) {
+        // 候选地址寄存器：x16, x17, x18 (caller-saved寄存器)
+        AArch64PhyReg[] addressCandidates = {
+            AArch64CPUReg.getAArch64CPUReg(16),
+            AArch64CPUReg.getAArch64CPUReg(17),
+            AArch64CPUReg.getAArch64CPUReg(18)
+        };
+        
+        // 选择第一个不冲突且不在指令中使用的寄存器
+        for (AArch64PhyReg candidate : addressCandidates) {
+            if (!candidate.equals(avoidRegister) && 
+                !isRegisterUsedInInstruction(instruction, candidate)) {
+                return candidate;
+            }
+        }
+        
+        // 如果所有候选寄存器都与avoidRegister冲突或在指令中使用，
+        // 选择一个与avoidRegister不同的寄存器作为降级处理
+        for (AArch64PhyReg candidate : addressCandidates) {
+            if (!candidate.equals(avoidRegister)) {
+                return candidate;
+            }
+        }
+        
+        // 极端情况：返回x18作为最后选择（这种情况理论上不应该发生）
+        return AArch64CPUReg.getAArch64CPUReg(18);
+    }
+
+    /**
+     * 检查寄存器是否在指令中被使用
+     */
+    private boolean isRegisterUsedInInstruction(AArch64Instruction instruction, AArch64PhyReg register) {
+        // 检查定义寄存器
+        if (register.equals(instruction.getDefReg())) {
+            return true;
+        }
+        
+        // 检查操作数
+        for (AArch64Operand operand : instruction.getOperands()) {
+            if (register.equals(operand)) {
+                return true;
+            }
+        }
+        
+        return false;
     }
 } 
