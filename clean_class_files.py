@@ -4,6 +4,12 @@
 清理.class文件的脚本
 递归删除指定目录及其子目录中的所有.class文件
 """
+# 使用方法：
+# 1. 将该文件放在项目根目录下
+# 2. 在项目根目录下执行 python clean_class_files.py
+# 3. 如果需要预览模式，可以执行 python clean_class_files.py --dry-run
+# 4. 如果需要递归搜索子目录，可以执行 python clean_class_files.py -r
+# 5. 如果需要自动确认删除，可以执行 python clean_class_files.py -y
 
 import os
 import sys
