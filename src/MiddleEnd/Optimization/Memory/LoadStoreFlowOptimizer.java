@@ -104,11 +104,8 @@ public class LoadStoreFlowOptimizer implements ModuleOptimizer {
             } else if (inst instanceof CallInstruction call) {
                 info.memInsts.add(call);
                 
-                // 检查是否为有副作用的函数调用
-                if (call.getCallee().getName().equals("@memset") ||
-                    call.getCallee().getName().equals("@putarray") ||
-                    call.getCallee().getName().equals("@putfarray") ||
-                    !call.getCallee().mayHaveSideEffect()) {
+                // 检查是否为安全（无副作用）的库函数调用
+                if (isLibrarySafeFunction(call)) {
                     continue; // 安全函数，跳过
                 }
                 
@@ -250,6 +247,15 @@ public class LoadStoreFlowOptimizer implements ModuleOptimizer {
             if (PointerAliasInspector.checkAlias(ptr, ptrInst) != PointerAliasInspector.AliasResult.NO) {
                 conflictStores.addAll(info.memIn.get(ptrInst));
             }
+        }
+        
+        // 禁止对全局内存的Load做前向替换，保守保证正确性
+        Value loadRoot = PointerAliasInspector.getRoot(ptr);
+        if (loadRoot instanceof GlobalVariable) {
+            if (!conflictStores.isEmpty()) {
+                conflictStores.forEach(s -> storeCount.put(s, storeCount.get(s) + 1));
+            }
+            return;
         }
         
         // 检查是否与函数调用冲突
@@ -421,10 +427,14 @@ public class LoadStoreFlowOptimizer implements ModuleOptimizer {
      */
     private boolean isLibrarySafeFunction(CallInstruction call) {
         String funcName = call.getCallee().getName();
-        return funcName.equals("@memset") ||
+        if (funcName.equals("@memset") ||
                funcName.equals("@putarray") ||
-               funcName.equals("@putfarray") ||
-               !call.getCallee().mayHaveSideEffect();
+               funcName.equals("@putfarray")) {
+            return true;
+        }
+        // 仅当为外部函数且显式标注无副作用时，才认为安全。
+        // 内部/用户函数保守视为可能有副作用。
+        return call.getCallee().isExternal() && !call.getCallee().mayHaveSideEffect();
     }
     
     /**
