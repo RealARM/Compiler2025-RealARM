@@ -72,6 +72,14 @@ public class LoadStoreFlowOptimizer implements ModuleOptimizer {
     private void runForFunction(Function function) {
         if (function.isExternal()) return;
         
+        // 跳过基本块数过多的函数，避免性能问题
+        if (function.getBasicBlocks().size() > 4000) {
+            System.out.println("[LoadStoreFlowOptimizer] Function " + function.getName() + 
+                             " has " + function.getBasicBlocks().size() + 
+                             " basic blocks, which exceeds the threshold of 4000. Skipping for performance reasons.");
+            return;
+        }
+        
         // 计算支配关系
         dominatorMap = DominatorAnalysis.computeDominators(function);
         
