@@ -574,6 +574,104 @@ class EvaluationGUI:
         summary_text.insert(1.0, summary_info)
         summary_text.config(state='disabled')
         
+        # ========== 增强：表格排序与日志查看 支持 ==========
+        def _get_result_rank(value: str) -> int:
+            # 结果排序：AC(0) < PE(1) < WA(2) < 其它(3)
+            text = value or ''
+            if 'AC' in text:
+                return 0
+            if 'PE' in text:
+                return 1
+            if 'WA' in text:
+                return 2
+            return 3
+        
+        def _parse_score_time(value: str) -> float:
+            # 统一解析 分数/时间 列：可能是 "12.3" 或 "0.456s" 或 "N/A"
+            if value is None:
+                return float('inf')
+            text = str(value).strip()
+            if not text or text.upper() == 'N/A':
+                return float('inf')
+            if text.endswith('s'):
+                text = text[:-1]
+            try:
+                return float(text)
+            except Exception:
+                return float('inf')
+        
+        def sort_treeview(tree: ttk.Treeview, column: str, key_type: str = 'str'):
+            # 读取当前列的反向状态并切换
+            reverse_state = getattr(tree, '_sort_reverse', {})
+            reverse = reverse_state.get(column, False)
+            
+            def key_func(item_id):
+                cell = tree.set(item_id, column)
+                if key_type == 'int':
+                    try:
+                        return int(cell)
+                    except Exception:
+                        return 10**9
+                if key_type == 'float':
+                    try:
+                        return float(cell)
+                    except Exception:
+                        return float('inf')
+                if key_type == 'score_time':
+                    return _parse_score_time(cell)
+                if key_type == 'result':
+                    return _get_result_rank(cell)
+                # 默认字符串，不区分大小写
+                return (cell or '').lower()
+            
+            items = list(tree.get_children(''))
+            items.sort(key=key_func, reverse=reverse)
+            for idx, iid in enumerate(items):
+                tree.move(iid, '', idx)
+            # 切换排序方向
+            reverse_state[column] = not reverse
+            tree._sort_reverse = reverse_state
+        
+        def bind_sorting_for_tree(tree: ttk.Treeview):
+            # 初始反向状态容器
+            tree._sort_reverse = {}
+            # 为各列绑定排序
+            tree.heading('No', text='编号',
+                         command=lambda t=tree: sort_treeview(t, 'No', 'int'))
+            tree.heading('Name', text='测试名称',
+                         command=lambda t=tree: sort_treeview(t, 'Name', 'str'))
+            tree.heading('Result', text='结果',
+                         command=lambda t=tree: sort_treeview(t, 'Result', 'result'))
+            tree.heading('Score/Time', text='分数/时间',
+                         command=lambda t=tree: sort_treeview(t, 'Score/Time', 'score_time'))
+        
+        def open_log_viewer(test_name: str, log_text: str):
+            log_window = tk.Toplevel(detail_window)
+            log_window.title(f"📝 日志 - {test_name}")
+            log_window.geometry("800x600")
+            self.center_window(log_window, 800, 600)
+            
+            text_widget = scrolledtext.ScrolledText(log_window, wrap=tk.WORD, font=('Consolas', 10))
+            text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            text_widget.insert(1.0, log_text if log_text else "(无日志)")
+            text_widget.config(state='disabled')
+        
+        def on_tree_row_double_click(event):
+            tree = event.widget
+            if not isinstance(tree, ttk.Treeview):
+                return
+            item_id = tree.identify_row(event.y)
+            if not item_id:
+                return
+            name = tree.set(item_id, 'Name')
+            log_map = getattr(tree, '_item_to_log', {})
+            log_text = log_map.get(item_id)
+            if not log_text:
+                messagebox.showinfo("日志", f"{name} 没有可用日志")
+                return
+            open_log_viewer(name, log_text)
+        # ========== 增强功能 结束 ==========
+        
         # 各测试部分标签页
         sections = [
             ('🧪 Functional', record.functional_tests),
@@ -599,6 +697,9 @@ class EvaluationGUI:
                 test_tree.column('Result', width=80)
                 test_tree.column('Score/Time', width=120)
                 
+                # 存储每行对应日志
+                test_tree._item_to_log = {}
+                
                 for test in tests:
                     # 对于Performance测试，优先显示时间
                     if section_name.startswith('⚡ Performance') and test.time is not None:
@@ -612,13 +713,22 @@ class EvaluationGUI:
                     tag = 'success' if test.result == 'AC' else 'warning' if test.result == 'PE' else 'error'
                     item_id = test_tree.insert('', tk.END, values=(test.no, test.name, test.result, score_time))
                     
-                    # 配置标签样式
+                    # 配置标签样式显示带emoji的结果
                     if test.result == 'AC':
                         test_tree.set(item_id, 'Result', '✅ AC')
                     elif test.result == 'WA':
                         test_tree.set(item_id, 'Result', '❌ WA')
                     elif test.result == 'PE':
                         test_tree.set(item_id, 'Result', '⚠️ PE')
+                    
+                    # 记录日志映射
+                    test_tree._item_to_log[item_id] = test.log
+                
+                # 绑定列头排序
+                bind_sorting_for_tree(test_tree)
+                
+                # 双击行查看日志
+                test_tree.bind('<Double-1>', on_tree_row_double_click)
                 
                 # 添加滚动条
                 test_scrollbar = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=test_tree.yview)
