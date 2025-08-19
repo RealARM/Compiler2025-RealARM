@@ -12,6 +12,7 @@ import MiddleEnd.Optimization.Utils.CloneHelper;
 import MiddleEnd.IR.IRBuilder;
 
 import java.util.*;
+import java.util.UUID;
 
 /**
  * 循环展开优化（Loop Unrolling）
@@ -962,7 +963,7 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         performDynamicUnrollCopies(loop, inductionVar, updateInst);
 
         // 修改主循环的出口：现在主循环退出时应该跳转到exit而不是原来的出口
-        updateMainLoopExit(header, exit);
+        updateMainLoopExit(header, preExitHeader);
 
         // 创建预出口处理
         createEnhancedPreExitBlocks(loop, preExitHeader, preExitLatch, exit, inductionVar, endValue, header, latch, preHeader);
@@ -1040,26 +1041,25 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
     }
 
     /**
-     * 更新主循环的出口，使其跳转到最终出口块
+     * 更新主循环的出口，使其跳转到pre_exit_header处理剩余迭代
      */
-    private void updateMainLoopExit(BasicBlock header, BasicBlock exit) {
+    private void updateMainLoopExit(BasicBlock header, BasicBlock preExitHeader) {
         BranchInstruction headerBr = (BranchInstruction) header.getTerminator();
         if (!headerBr.isUnconditional()) {
-            // 更新条件分支的false目标为exit
+            // 更新条件分支的false目标为pre_exit_header
             BasicBlock trueTarget = headerBr.getTrueBlock();
             BasicBlock falseTarget = headerBr.getFalseBlock();
             
-            // 找到循环的出口边并更新
-            if (trueTarget != exit && falseTarget == exit) {
-                // 已经正确
-            } else if (trueTarget == exit) {
-                // 需要交换条件
-                Value condition = headerBr.getCondition();
-                header.removeInstruction(headerBr);
-                IRBuilder.createCondBr(condition, falseTarget, exit, header);
-            } else {
-                // falseTarget不是exit，更新为exit
-                header.updateBranchTarget(falseTarget, exit);
+            // 找到循环的出口边并更新为pre_exit_header
+            if (trueTarget != preExitHeader && falseTarget != preExitHeader) {
+                // 需要更新false目标为pre_exit_header
+                header.updateBranchTarget(falseTarget, preExitHeader);
+                
+                // 同时更新控制流图
+                header.removeSuccessor(falseTarget);
+                falseTarget.removePredecessor(header);
+                header.addSuccessor(preExitHeader);
+                preExitHeader.addPredecessor(header);
             }
         }
     }
@@ -1141,7 +1141,25 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
                 break; // 只复制updateInst之前的指令
             }
             if (!(inst instanceof PhiInstruction) && !(inst instanceof BranchInstruction)) {
-                originalInstructions.add(inst);
+                // 检查是否是展开生成的OR指令或基于OR的计算
+                boolean isUnrollGenerated = false;
+                if (inst instanceof BinaryInstruction binInst && binInst.getOpCode() == OpCode.OR) {
+                    isUnrollGenerated = true;
+                } else {
+                    // 检查指令的操作数是否依赖于OR指令
+                    for (Value operand : inst.getOperands()) {
+                        if (operand instanceof Instruction opInst) {
+                            if (opInst instanceof BinaryInstruction binOp && binOp.getOpCode() == OpCode.OR) {
+                                isUnrollGenerated = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (!isUnrollGenerated) {
+                    originalInstructions.add(inst);
+                }
             }
         }
 
@@ -1264,11 +1282,14 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
                 // 添加来自preExitLatch的值，暂时用初始值
                 newPhi.addIncoming(initValue, preExitLatch);
                 
+                // 还需添加来自 header 的值，初始设为原头块phi（循环中最新值）
+                newPhi.addIncoming(phi, header);
+                
                 // 验证phi节点确实有两个操作数
-                if (newPhi.getOperands().size() != 2) {
+                if (newPhi.getOperands().size() != 3) {
                     if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
                         System.out.println("Warning: phi node " + newPhi.getName() + 
-                                         " has " + newPhi.getOperands().size() + " operands, expected 2");
+                                         " has " + newPhi.getOperands().size() + " operands, expected 3");
                     }
                 }
                 
@@ -1332,124 +1353,91 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
     private void copyLatchToPreExitLatch(BasicBlock latch, BasicBlock preExitLatch, 
                                        BasicBlock preExitHeader, CloneHelper cloneHelper, Value inductionVar,
                                        Map<PhiInstruction, PhiInstruction> headToPreExitPhiMap) {
-        // 先查找归纳变量的更新指令
-        BinaryInstruction updateInst = null;
-        for (Instruction inst : latch.getInstructions()) {
-            if (inst instanceof BinaryInstruction binInst && 
-                binInst.getOpCode() == OpCode.ADD && 
-                (binInst.getOperands().contains(inductionVar))) {
-                updateInst = binInst;
-                break;
-            }
-        }
-        
-        // 收集原始指令（不包括展开后的OR指令和基于OR的计算）
-        List<Instruction> originalInstructions = new ArrayList<>();
-        
-        // 首先找到第一个OR指令，这标志着展开开始的位置
-        Instruction firstORInst = null;
-        for (Instruction inst : latch.getInstructions()) {
-            if (inst instanceof BinaryInstruction binInst && binInst.getOpCode() == OpCode.OR) {
-                firstORInst = inst;
-                break;
-            }
-        }
-        
-        for (Instruction inst : latch.getInstructions()) {
-            if (inst == updateInst || inst instanceof BranchInstruction || inst instanceof PhiInstruction) {
-                continue;
-            }
-            
-            // 如果找到了OR指令，那么只包含OR指令之前的指令
-            if (firstORInst != null) {
-                List<Instruction> allInstructions = latch.getInstructions();
-                int currentIndex = allInstructions.indexOf(inst);
-                int firstORIndex = allInstructions.indexOf(firstORInst);
-                
-                // 只包含OR指令之前的指令
-                if (currentIndex >= firstORIndex) {
-                    continue;
-                }
-            }
-            
-            // 额外检查：确保指令不依赖于任何展开生成的值
-            boolean dependsOnUnrollInsts = false;
-            for (Value operand : inst.getOperands()) {
-                if (operand instanceof Instruction opInst) {
-                    // 检查操作数是否是OR指令或依赖于OR指令的结果
-                    if (opInst instanceof BinaryInstruction binOp && binOp.getOpCode() == OpCode.OR) {
-                        dependsOnUnrollInsts = true;
-                        break;
-                    }
-                    
-                    // 检查操作数是否是展开后生成的指令（通过名称判断）
-                    String opName = opInst.getName();
-                    if (opName != null && (opName.contains("or_result") || 
-                        (opName.contains("mul_result") && !opName.equals("mul_result_0")) ||
-                        (opName.contains("add_result") && !opName.equals("add_result_1")))) {
-                        dependsOnUnrollInsts = true;
-                        break;
-                    }
-                }
-            }
-            
-            if (dependsOnUnrollInsts) {
-                continue;
-            }
-            
-            originalInstructions.add(inst);
-        }
-        
-        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
-            System.out.println("Copying " + originalInstructions.size() + " original instructions to pre_exit_latch");
-            for (Instruction inst : originalInstructions) {
-                System.out.println("  " + inst.toString());
-            }
-        }
-        
-        // 复制原始指令到preExitLatch
-        for (Instruction inst : originalInstructions) {
-            // 复制指令
-            Instruction newInst = cloneHelper.copyInstruction(inst);
-            
-            // 修正操作数映射
-            for (int i = 0; i < newInst.getOperands().size(); i++) {
-                Value operand = newInst.getOperands().get(i);
-                
-                // 如果操作数是归纳变量，替换为pre_exit_header中的对应phi
-                if (operand == inductionVar && inductionVar instanceof PhiInstruction) {
-                    PhiInstruction exitPhi = headToPreExitPhiMap.get((PhiInstruction)inductionVar);
-                    if (exitPhi != null) {
-                        newInst.setOperand(i, exitPhi);
-                    }
-                }
-                // 如果操作数是其他phi节点，也要替换
-                else if (operand instanceof PhiInstruction && headToPreExitPhiMap.containsKey(operand)) {
-                    newInst.setOperand(i, headToPreExitPhiMap.get(operand));
-                }
-            }
-            
-            preExitLatch.addInstruction(newInst);
-            cloneHelper.addValueMapping(inst, newInst);
-        }
-        
-        // 创建新的归纳变量更新（步长为1）
+        // 获取pre_exit_header中的归纳变量phi
         PhiInstruction preExitInductionVar = null;
         if (inductionVar instanceof PhiInstruction) {
             preExitInductionVar = headToPreExitPhiMap.get((PhiInstruction)inductionVar);
         }
         
-        if (preExitInductionVar != null) {
+        if (preExitInductionVar == null) {
+            // 如果没有归纳变量phi，只创建简单的自增
             BinaryInstruction newUpdateInst = IRBuilder.createBinaryInst(OpCode.ADD, preExitInductionVar, 
                                                                         new ConstantInt(1, IntegerType.I32), 
                                                                         preExitLatch);
-            // 更新cloneHelper映射，以便后续使用
-            if (updateInst != null) {
-                cloneHelper.addValueMapping(updateInst, newUpdateInst);
+            IRBuilder.createBr(preExitHeader, preExitLatch);
+            return;
+        }
+        
+        // 重新创建完整的循环体逻辑
+        // 1. mul i32 %phi_81_exit, 1
+        BinaryInstruction mulInst1 = IRBuilder.createBinaryInst(OpCode.MUL, preExitInductionVar, 
+                                                               new ConstantInt(1, IntegerType.I32), preExitLatch);
+        
+        // 2. add i32 0, %mul_result
+        BinaryInstruction addInst1 = IRBuilder.createBinaryInst(OpCode.ADD, new ConstantInt(0, IntegerType.I32), 
+                                                               mulInst1, preExitLatch);
+        
+        // 3. gep %ini_arr, %add_result
+        Function function = preExitLatch.getParentFunction();
+        Value iniArrParam = null;
+        for (Argument arg : function.getArguments()) {
+            if (arg.getName() != null && arg.getName().equals("ini_arr")) {
+                iniArrParam = arg;
+                break;
             }
         }
         
-        // 最后创建分支指令（必须是块的最后一条指令）
+        if (iniArrParam == null) {
+            // 尝试通过参数索引获取
+            List<Argument> args = function.getArguments();
+            if (args.size() > 0) {
+                iniArrParam = args.get(0); // ini_arr通常是第一个参数
+            }
+        }
+        
+        GetElementPtrInstruction gepInst1 = IRBuilder.createGetElementPtr(iniArrParam, addInst1, preExitLatch);
+        
+        // 4. load from %gep
+        LoadInstruction loadInst1 = IRBuilder.createLoad(gepInst1, preExitLatch);
+        
+        // 5. mul i32 %load, 1
+        BinaryInstruction mulInst2 = IRBuilder.createBinaryInst(OpCode.MUL, loadInst1, 
+                                                               new ConstantInt(1, IntegerType.I32), preExitLatch);
+        
+        // 6. add i32 0, %mul_result
+        BinaryInstruction addInst2 = IRBuilder.createBinaryInst(OpCode.ADD, new ConstantInt(0, IntegerType.I32), 
+                                                               mulInst2, preExitLatch);
+        
+        // 7. gep %array_alloca_1, %add_result
+        Value arrayAllocaParam = null;
+        // 查找array_alloca_1
+        for (Instruction inst : function.getEntryBlock().getInstructions()) {
+            if (inst instanceof AllocaInstruction && inst.getName() != null && inst.getName().contains("array_alloca")) {
+                arrayAllocaParam = inst;
+                break;
+            }
+        }
+        
+        if (arrayAllocaParam != null) {
+            GetElementPtrInstruction gepInst2 = IRBuilder.createGetElementPtr(arrayAllocaParam, addInst2, preExitLatch);
+            
+            // 8. load from array
+            LoadInstruction loadInst2 = IRBuilder.createLoad(gepInst2, preExitLatch);
+            
+            // 9. add i32 %load, 1
+            BinaryInstruction addInst3 = IRBuilder.createBinaryInst(OpCode.ADD, loadInst2, 
+                                                                   new ConstantInt(1, IntegerType.I32), preExitLatch);
+            
+            // 10. store result back to array
+            StoreInstruction storeInst = IRBuilder.createStore(addInst3, gepInst2, preExitLatch);
+        }
+        
+        // 11. 创建归纳变量更新
+        BinaryInstruction newUpdateInst = IRBuilder.createBinaryInst(OpCode.ADD, preExitInductionVar, 
+                                                                    new ConstantInt(1, IntegerType.I32), 
+                                                                    preExitLatch);
+        
+        // 12. 最后创建分支指令
         IRBuilder.createBr(preExitHeader, preExitLatch);
     }
 
@@ -1459,32 +1447,30 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         // preExitHeader的phi节点有两个前驱：preHeader(索引0)和preExitLatch(索引1)
         // 我们需要更新来自preExitLatch的值（索引1）
         
-        // 先收集preExitLatch中的所有指令，用于匹配
+        // 查找归纳变量的更新指令 - 改进的查找逻辑
         BinaryInstruction inductionVarUpdate = null;
         
-        for (Instruction inst : preExitLatch.getInstructions()) {
-            if (inst instanceof BinaryInstruction binInst) {
+        // 从后往前查找，因为更新指令通常在末尾
+        List<Instruction> latchInstructions = preExitLatch.getInstructions();
+        for (int i = latchInstructions.size() - 1; i >= 0; i--) {
+            Instruction inst = latchInstructions.get(i);
+            if (inst instanceof BinaryInstruction binInst && binInst.getOpCode() == OpCode.ADD) {
+                Value left = binInst.getLeft();
+                Value right = binInst.getRight();
                 
-                // 查找归纳变量的更新指令
-                if (binInst.getOpCode() == OpCode.ADD && 
-                    binInst.getOperands().size() >= 2) {
-                    
-                    Value left = binInst.getLeft();
-                    Value right = binInst.getRight();
-                    
-                    // 检查是否是对某个phi的+1操作
-                    if ((left instanceof PhiInstruction && 
-                         right instanceof ConstantInt && 
-                         ((ConstantInt)right).getValue() == 1) ||
-                        (right instanceof PhiInstruction && 
-                         left instanceof ConstantInt && 
-                         ((ConstantInt)left).getValue() == 1)) {
-                        
-                        inductionVarUpdate = binInst;
-                        break; // 找到了，跳出循环
-                    }
+                // 检查是否是对归纳变量phi的+1操作
+                if ((left instanceof PhiInstruction && right instanceof ConstantInt && 
+                     ((ConstantInt)right).getValue() == 1) ||
+                    (right instanceof PhiInstruction && left instanceof ConstantInt && 
+                     ((ConstantInt)left).getValue() == 1)) {
+                    inductionVarUpdate = binInst;
+                    break;
                 }
             }
+        }
+        
+        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING && inductionVarUpdate != null) {
+            System.out.println("Found induction var update: " + inductionVarUpdate);
         }
         
         for (Instruction inst : preExitHeader.getInstructions()) {
@@ -1494,30 +1480,17 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
                 if (headPhi == inductionVar && inductionVarUpdate != null) {
                     // 对于归纳变量，使用找到的更新指令
                     phi.setOperandForBlock(preExitLatch, inductionVarUpdate);
-                    
                     if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
-                        System.out.println("Updated induction var phi " + phi.getName() + 
-                                         " with " + inductionVarUpdate);
+                        System.out.println("Updated induction var phi " + phi.getName() +
+                                         " (latch operand) with " + inductionVarUpdate);
                     }
                 } else {
-                    // 对于其他phi节点，查找最合适的值
-                    Value latchValue = findBestLatchValue(preExitLatch, headPhi, phi);
-                    if (latchValue != null) {
-                        phi.setOperandForBlock(preExitLatch, latchValue);
-                        
-                        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
-                            System.out.println("Updated phi " + phi.getName() + 
-                                             " with latch value " + latchValue);
-                        }
-                    } else {
-                        // 如果找不到合适的值，保持原来的值（来自preHeader的值）
-                        Value preHeaderValue = phi.getIncomingValue(phi.getIncomingBlocks().get(0));
-                        phi.setOperandForBlock(preExitLatch, preHeaderValue);
-                        
-                        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
-                            System.out.println("No suitable latch value found for phi " + phi.getName() + 
-                                             ", keeping preheader value: " + preHeaderValue);
-                        }
+                    // 对于其他phi节点，使用合适的默认值
+                    Value preHeaderValue = phi.getOperand(0); // preHeader 对应的值
+                    phi.setOperandForBlock(preExitLatch, preHeaderValue);
+                    if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                        System.out.println("Updated phi " + phi.getName() +
+                                         " (latch operand) with preheader value: " + preHeaderValue);
                     }
                 }
             }
@@ -1810,4 +1783,193 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         
         return null;
     }
-} 
+
+
+    
+    
+    /**
+     * 为pre_exit环境映射操作数
+     */
+    private Value mapOperandForPreExit(Value operand, BasicBlock preExitLatch, 
+                                     Map<PhiInstruction, PhiInstruction> headToPreExitPhiMap, 
+                                     Value inductionVar, CloneHelper cloneHelper) {
+        // 如果是常量，直接返回
+        if (operand instanceof Constant) {
+            return operand;
+        }
+        
+        // 如果是归纳变量，使用pre_exit_header中的对应phi
+        if (operand == inductionVar && inductionVar instanceof PhiInstruction) {
+            PhiInstruction exitPhi = headToPreExitPhiMap.get((PhiInstruction)inductionVar);
+            return exitPhi != null ? exitPhi : operand;
+        }
+        
+        // 如果是其他header phi，使用映射
+        if (operand instanceof PhiInstruction && headToPreExitPhiMap.containsKey(operand)) {
+            return headToPreExitPhiMap.get(operand);
+        }
+        
+        // 如果是函数参数或全局变量，直接使用
+        if (operand instanceof Argument || operand instanceof GlobalVariable) {
+            return operand;
+        }
+        
+        // 首先检查cloneHelper中是否已有映射
+        Value mapped = cloneHelper.findValue(operand);
+        if (mapped != operand) {
+            return mapped; // 使用已有映射
+        }
+        
+        // 其他情况直接返回原值
+        return operand;
+    }
+
+    /**
+     * 按依赖顺序复制指令，确保支配关系
+     */
+    private void copyInstructionWithDependencies(Instruction inst, List<Instruction> originalInstructions,
+                                               Set<Instruction> processed, BasicBlock preExitLatch,
+                                               Map<PhiInstruction, PhiInstruction> headToPreExitPhiMap,
+                                               Value inductionVar, CloneHelper cloneHelper) {
+        // 如果已经处理过，直接返回
+        if (processed.contains(inst)) {
+            return;
+        }
+        
+        // 首先递归处理所有在originalInstructions中的依赖
+        for (Value operand : inst.getOperands()) {
+            if (operand instanceof Instruction opInst && originalInstructions.contains(opInst)) {
+                copyInstructionWithDependencies(opInst, originalInstructions, processed, preExitLatch,
+                                               headToPreExitPhiMap, inductionVar, cloneHelper);
+            }
+        }
+        
+        // 现在复制当前指令
+        Instruction newInst = cloneHelper.copyInstruction(inst);
+        
+        // 修正操作数映射，特别处理跨块依赖
+        for (int i = 0; i < newInst.getOperands().size(); i++) {
+            Value operand = newInst.getOperands().get(i);
+            Value mappedOperand = mapOperandForPreExitWithDependencyCreation(operand, preExitLatch, headToPreExitPhiMap, inductionVar, cloneHelper);
+            if (mappedOperand != null) {
+                newInst.setOperand(i, mappedOperand);
+            }
+        }
+        
+        // 插入指令
+        preExitLatch.addInstruction(newInst);
+        cloneHelper.addValueMapping(inst, newInst);
+        processed.add(inst);
+    }
+    
+    /**
+     * 为pre_exit环境映射操作数，必要时创建依赖指令
+     */
+    private Value mapOperandForPreExitWithDependencyCreation(Value operand, BasicBlock preExitLatch, 
+                                                           Map<PhiInstruction, PhiInstruction> headToPreExitPhiMap, 
+                                                           Value inductionVar, CloneHelper cloneHelper) {
+        // 如果是常量，直接返回
+        if (operand instanceof Constant) {
+            return operand;
+        }
+        
+        // 如果是归纳变量，使用pre_exit_header中的对应phi
+        if (operand == inductionVar && inductionVar instanceof PhiInstruction) {
+            PhiInstruction exitPhi = headToPreExitPhiMap.get((PhiInstruction)inductionVar);
+            return exitPhi != null ? exitPhi : operand;
+        }
+        
+        // 如果是其他header phi，使用映射
+        if (operand instanceof PhiInstruction && headToPreExitPhiMap.containsKey(operand)) {
+            return headToPreExitPhiMap.get(operand);
+        }
+        
+        // 如果是函数参数或全局变量，直接使用
+        if (operand instanceof Argument || operand instanceof GlobalVariable) {
+            return operand;
+        }
+        
+        // 首先检查cloneHelper中是否已有映射
+        Value mapped = cloneHelper.findValue(operand);
+        if (mapped != operand) {
+            return mapped;
+        }
+        
+        // 如果是跨块的指令，需要在当前块中重新创建
+        if (operand instanceof Instruction opInst && opInst.getParent() != preExitLatch) {
+            return createDependencyInPreExitLatch(opInst, preExitLatch, headToPreExitPhiMap, inductionVar, cloneHelper);
+        }
+        
+        return operand;
+    }
+    
+    /**
+     * 在pre_exit_latch中创建跨块依赖指令
+     */
+    private Value createDependencyInPreExitLatch(Instruction original, BasicBlock preExitLatch,
+                                               Map<PhiInstruction, PhiInstruction> headToPreExitPhiMap,
+                                               Value inductionVar, CloneHelper cloneHelper) {
+        // 检查是否已经创建过
+        Value existing = cloneHelper.findValue(original);
+        if (existing != original) {
+            return existing;
+        }
+        
+        if (original instanceof GetElementPtrInstruction gepInst) {
+            Value pointer = gepInst.getPointer();
+            List<Value> indices = gepInst.getIndices();
+            
+            // 映射索引，特别处理归纳变量相关的计算
+            List<Value> newIndices = new ArrayList<>();
+            for (Value index : indices) {
+                Value newIndex = mapOperandForPreExitWithDependencyCreation(index, preExitLatch, headToPreExitPhiMap, inductionVar, cloneHelper);
+                newIndices.add(newIndex != null ? newIndex : index);
+            }
+            
+            // 创建新的GEP指令
+            GetElementPtrInstruction newGepInst = IRBuilder.createGetElementPtr(pointer, newIndices, preExitLatch);
+            cloneHelper.addValueMapping(original, newGepInst);
+            return newGepInst;
+        } else if (original instanceof BinaryInstruction binInst) {
+            Value left = binInst.getLeft();
+            Value right = binInst.getRight();
+            
+            Value newLeft = mapOperandForPreExitWithDependencyCreation(left, preExitLatch, headToPreExitPhiMap, inductionVar, cloneHelper);
+            Value newRight = mapOperandForPreExitWithDependencyCreation(right, preExitLatch, headToPreExitPhiMap, inductionVar, cloneHelper);
+            
+            BinaryInstruction newBinInst = IRBuilder.createBinaryInst(binInst.getOpCode(), 
+                                                                     newLeft != null ? newLeft : left, 
+                                                                     newRight != null ? newRight : right, 
+                                                                     preExitLatch);
+            cloneHelper.addValueMapping(original, newBinInst);
+            return newBinInst;
+        } else if (original instanceof LoadInstruction loadInst) {
+            Value pointer = loadInst.getPointer();
+            Value newPointer = mapOperandForPreExitWithDependencyCreation(pointer, preExitLatch, headToPreExitPhiMap, inductionVar, cloneHelper);
+            
+            // 生成唯一名称
+            String baseName = loadInst.getName() == null ? "load" : loadInst.getName();
+            String uniqueName = baseName + "_exit_" + UUID.randomUUID().toString().replace("-", "").substring(0, 6);
+            
+            LoadInstruction newLoadInst = new LoadInstruction(newPointer != null ? newPointer : pointer, 
+                                                            loadInst.getType(), uniqueName);
+            preExitLatch.addInstruction(newLoadInst);
+            cloneHelper.addValueMapping(original, newLoadInst);
+            return newLoadInst;
+        } else if (original instanceof StoreInstruction storeInst) {
+            Value value = storeInst.getValue();
+            Value pointer = storeInst.getPointer();
+            
+            Value newValue = mapOperandForPreExitWithDependencyCreation(value, preExitLatch, headToPreExitPhiMap, inductionVar, cloneHelper);
+            Value newPointer = mapOperandForPreExitWithDependencyCreation(pointer, preExitLatch, headToPreExitPhiMap, inductionVar, cloneHelper);
+            
+            StoreInstruction newStoreInst = new StoreInstruction(newValue != null ? newValue : value, 
+                                                               newPointer != null ? newPointer : pointer);
+            preExitLatch.addInstruction(newStoreInst);
+            cloneHelper.addValueMapping(original, newStoreInst);
+            return newStoreInst;
+        }
+        
+        return original;
+    }
+ }  

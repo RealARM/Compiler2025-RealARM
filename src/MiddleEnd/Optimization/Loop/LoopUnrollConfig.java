@@ -11,7 +11,7 @@ public class LoopUnrollConfig {
     
     // 动态循环展开配置
     public static final int DYNAMIC_UNROLL_FACTOR = 4;
-    public static final int MAX_DYNAMIC_LOOP_SIZE = 50;
+    public static final int MAX_DYNAMIC_LOOP_SIZE = 50;  // 重新启用动态展开
     public static final int DYNAMIC_UNROLL_THRESHOLD = 3;
     
     // 代码大小限制
@@ -31,7 +31,7 @@ public class LoopUnrollConfig {
     
     // 调试和分析
     public static final boolean ENABLE_UNROLL_STATISTICS = false;
-    public static final boolean VERBOSE_UNROLL_LOGGING = false;
+    public static final boolean VERBOSE_UNROLL_LOGGING = true;
     
     private LoopUnrollConfig() {
         // 工具类，不允许实例化
