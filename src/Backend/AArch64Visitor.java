@@ -294,6 +294,7 @@ public class AArch64Visitor {
                 operands.add(AArch64CPUReg.getAArch64SpReg());
                 operands.add(offsetOp);
                 AArch64Binary addInst = new AArch64Binary(operands, allocaReg, AArch64Binary.AArch64BinaryType.add);
+                addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                 addInstr(addInst, null, predefine);
             } else if (offsetOp instanceof AArch64Imm) {
                 AArch64Binary addInst = new AArch64Binary(
@@ -302,6 +303,7 @@ public class AArch64Visitor {
                     (AArch64Imm)offsetOp, 
                     AArch64Binary.AArch64BinaryType.add
                 );
+                addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                 addInstr(addInst, null, predefine);
             }
         }
@@ -416,23 +418,7 @@ public class AArch64Visitor {
             
             AArch64Binary binaryInst = new AArch64Binary(operands, destReg, binaryType);
             addInstr(binaryInst, insList, predefine);
-            // 强制 32 位整数乘法回绕，截取低 32 位并恢复符号
-            if (binaryType == AArch64Binary.AArch64BinaryType.mul &&
-                ins.getType() instanceof MiddleEnd.IR.Type.IntegerType &&
-                ((MiddleEnd.IR.Type.IntegerType) ins.getType()).getBitWidth() == 32) {
 
-                ArrayList<AArch64Operand> maskOps = new ArrayList<>();
-                maskOps.add(destReg);
-                maskOps.add(new AArch64Imm(0xffffffffL));
-                AArch64Binary maskInst = new AArch64Binary(maskOps, destReg, AArch64Binary.AArch64BinaryType.and);
-                addInstr(maskInst, insList, predefine);
-
-                AArch64Binary lslInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                addInstr(lslInst, insList, predefine);
-
-                AArch64Binary asrInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                addInstr(asrInst, insList, predefine);
-            }
         
         }
         
@@ -515,6 +501,8 @@ public class AArch64Visitor {
                 } else {
                     rightOp = RegList.get(right);
                 }
+                
+
                 
                 AArch64Compare.CmpType cmpType;
                 if (isFloat) {
@@ -789,6 +777,7 @@ public class AArch64Visitor {
                 operands.add(AArch64CPUReg.getAArch64SpReg());
                 operands.add(sizeOp);
                 AArch64Binary addInst = new AArch64Binary(operands, AArch64CPUReg.getAArch64SpReg(), AArch64Binary.AArch64BinaryType.sub);
+                addInst.setUse32BitMode(false); // 栈指针操作使用64位寄存器
                 addInstr(addInst, insList, predefine);
             } else {
                 AArch64Binary addInst = new AArch64Binary(
@@ -797,6 +786,7 @@ public class AArch64Visitor {
                     (AArch64Imm)sizeOp, 
                     AArch64Binary.AArch64BinaryType.sub
                 );
+                addInst.setUse32BitMode(false); // 栈指针操作使用64位寄存器
                 addInstr(addInst, insList, predefine);
             }
         }
@@ -918,15 +908,7 @@ public class AArch64Visitor {
                     AArch64Move moveReturnInst = new AArch64Move(resultReg, returnReg, false);
                     addInstr(moveReturnInst, insList, predefine);
                     
-                    // 为getint函数调用添加32位到64位的符号扩展
-                    if (functionName.equals("getint") && ins.getCallee().getReturnType().isIntegerType()) {
-                        // getint返回的已经是32位值，高32位自动为0，只需要进行符号扩展
-                        AArch64Binary lslInst = new AArch64Binary(resultReg, resultReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                        addInstr(lslInst, insList, predefine);
                         
-                        AArch64Binary asrInst = new AArch64Binary(resultReg, resultReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                        addInstr(asrInst, insList, predefine);
-                    }
                 }
             } else {
                 System.err.println("错误: 返回寄存器为空，跳过移动返回值");
@@ -941,6 +923,7 @@ public class AArch64Visitor {
                 operands.add(AArch64CPUReg.getAArch64SpReg());
                 operands.add(sizeOp);
                 AArch64Binary addInst = new AArch64Binary(operands, AArch64CPUReg.getAArch64SpReg(), AArch64Binary.AArch64BinaryType.add);
+                addInst.setUse32BitMode(false); // 栈指针操作使用64位寄存器
                 addInstr(addInst, insList, predefine);
             } else {
                 AArch64Binary addInst = new AArch64Binary(
@@ -949,6 +932,7 @@ public class AArch64Visitor {
                     (AArch64Imm)sizeOp, 
                     AArch64Binary.AArch64BinaryType.add
                 );
+                addInst.setUse32BitMode(false); // 栈指针操作使用64位寄存器
                 addInstr(addInst, insList, predefine);
             }
         }
@@ -986,47 +970,8 @@ public class AArch64Visitor {
         } else if (RegList.containsKey(source)) {
             srcReg = RegList.get(source);
         } else {
-            if (source instanceof Instruction) {
-                parseInstruction((Instruction) source, true);
-                srcReg = RegList.get(source);
-            } else if (source instanceof Argument) {
-                AArch64Reg argReg = curAArch64Function.getRegArg(source);
-                if (argReg != null) {
-                    srcReg = argReg;
-                } else if (curAArch64Function.getStackArg(source) != null) {
-                    AArch64VirReg tempReg = new AArch64VirReg(false);
-                    long stackParamOffset = curAArch64Function.getStackArg(source);
-                    AArch64Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
-                    if (paramOffsetOp instanceof AArch64Reg) {
-                        AArch64VirReg addrReg = new AArch64VirReg(false);
-                        ArrayList<AArch64Operand> operands = new ArrayList<>();
-                        operands.add(AArch64CPUReg.getAArch64FPReg());
-                        operands.add(paramOffsetOp);
-                        AArch64Binary addInst = new AArch64Binary(operands, addrReg, AArch64Binary.AArch64BinaryType.add);
-                        addInstr(addInst, insList, predefine);
-                        AArch64Load loadParamInst = new AArch64Load(addrReg, new AArch64Imm(0), tempReg);
-                        addInstr(loadParamInst, insList, predefine);
-                    } else {
-                        AArch64Load loadParamInst = new AArch64Load(AArch64CPUReg.getAArch64FPReg(), paramOffsetOp, tempReg);
-                        addInstr(loadParamInst, insList, predefine);
-                    }
-                    srcReg = tempReg;
-                } else {
-                    boolean valueIsFloat = ((Argument) source).getType() instanceof FloatType;
-                    srcReg = getOrCreateRegister(source, valueIsFloat);
-                }
-                RegList.put(source, srcReg);
-            } else if (source instanceof GlobalVariable) {
-                AArch64Label label = new AArch64Label(removeLeadingAt(((GlobalVariable) source).getName()));
-                AArch64VirReg tempReg = new AArch64VirReg(false);
-                loadGlobalAddress(tempReg, label, insList, predefine);
-                srcReg = tempReg;
-                RegList.put(source, srcReg);
-            } else {
-                boolean valueIsFloat = source.getType() instanceof FloatType;
-                srcReg = getOrCreateRegister(source, valueIsFloat);
-                RegList.put(source, srcReg);
-            }
+            srcReg = null;
+            // System.out.println("error no virReg: " + source);
         }
         
         boolean isFloat = targetType.isFloatType();
@@ -1156,6 +1101,7 @@ public class AArch64Visitor {
                     operands.add(AArch64CPUReg.getAArch64FPReg());
                     operands.add(paramOffsetOp);
                     AArch64Binary addInst = new AArch64Binary(operands, addrReg, AArch64Binary.AArch64BinaryType.add);
+                    addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                     addInstr(addInst, insList, predefine);
                     
                     AArch64Load loadParamInst = new AArch64Load(addrReg, new AArch64Imm(0), baseReg);
@@ -1230,9 +1176,11 @@ public class AArch64Visitor {
                 addOperands.add(AArch64CPUReg.getAArch64SpReg());
                 addOperands.add(offsetOp);
                 AArch64Binary addInst = new AArch64Binary(addOperands, baseReg, AArch64Binary.AArch64BinaryType.add);
+                addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                 addInstr(addInst, insList, predefine);
             } else {
                 AArch64Binary addInst = new AArch64Binary(baseReg, AArch64CPUReg.getAArch64SpReg(), (AArch64Imm)offsetOp, AArch64Binary.AArch64BinaryType.add);
+                addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                 addInstr(addInst, insList, predefine);
             }
         } else if (pointer instanceof Argument) {
@@ -1253,6 +1201,7 @@ public class AArch64Visitor {
                     operands.add(AArch64CPUReg.getAArch64FPReg());
                     operands.add(paramOffsetOp);
                     AArch64Binary addInst = new AArch64Binary(operands, addrReg, AArch64Binary.AArch64BinaryType.add);
+                    addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                     addInstr(addInst, insList, predefine);
                     
                     AArch64Load loadParamInst = new AArch64Load(addrReg, new AArch64Imm(0), baseReg);
@@ -1306,12 +1255,14 @@ public class AArch64Visitor {
                         
                         if (offsetOp instanceof AArch64Imm) {
                             AArch64Binary addInst = new AArch64Binary(destReg, destReg, (AArch64Imm)offsetOp, AArch64Binary.AArch64BinaryType.add);
+                            addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                             addInstr(addInst, insList, predefine);
                         } else {
                             ArrayList<AArch64Operand> addOperands = new ArrayList<>();
                             addOperands.add(destReg);
                             addOperands.add(offsetOp);
                             AArch64Binary addInst = new AArch64Binary(addOperands, destReg, AArch64Binary.AArch64BinaryType.add);
+                            addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                             addInstr(addInst, insList, predefine);
                         }
                     }
@@ -1332,6 +1283,7 @@ public class AArch64Visitor {
                         if (isPowerOfTwo(elementSize)) {
                             int shiftAmount = (int)(Math.log(elementSize) / Math.log(2));
                             AArch64Binary lslInst = new AArch64Binary(tempReg, indexReg, new AArch64Imm(shiftAmount), AArch64Binary.AArch64BinaryType.lsl);
+                            lslInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                             addInstr(lslInst, insList, predefine);
                         } else {
                             if (elementSize > 65535 || elementSize < -65536) {
@@ -1346,6 +1298,7 @@ public class AArch64Visitor {
                             mulOperands.add(tempReg);
                             
                             AArch64Binary mulInst = new AArch64Binary(mulOperands, tempReg, AArch64Binary.AArch64BinaryType.mul);
+                            mulInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                             addInstr(mulInst, insList, predefine);
                         }
                     } else {
@@ -1358,6 +1311,7 @@ public class AArch64Visitor {
                     addOperands.add(tempReg);
                     
                     AArch64Binary addInst = new AArch64Binary(addOperands, destReg, AArch64Binary.AArch64BinaryType.add);
+                    addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                     addInstr(addInst, insList, predefine);
                 }
             }
@@ -1595,6 +1549,7 @@ public class AArch64Visitor {
                     operands.add(AArch64CPUReg.getAArch64FPReg());
                     operands.add(paramOffsetOp);
                     AArch64Binary addInst = new AArch64Binary(operands, addrReg, AArch64Binary.AArch64BinaryType.add);
+                    addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
                     addInstr(addInst, insList, predefine);
                     
                     AArch64Load loadParamInst = new AArch64Load(addrReg, new AArch64Imm(0), baseReg);
@@ -1679,20 +1634,7 @@ public class AArch64Visitor {
             AArch64Reg leftReg = getOrCreateRegister(left, leftIsFloat);
             leftOp = leftReg;
                 
-            // 如果左操作数是寄存器中的整数变量，需要进行符号扩展
-            if (!isFloat && leftOp instanceof AArch64Reg && left.getType().isIntegerType()) {
-                AArch64Reg extendedLeftReg = new AArch64VirReg(false);
-                AArch64Move moveInst = new AArch64Move(extendedLeftReg, (AArch64Reg)leftOp, false);
-                addInstr(moveInst, insList, predefine);
-                
-                AArch64Binary lslInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                addInstr(lslInst, insList, predefine);
-                
-                AArch64Binary asrInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                addInstr(asrInst, insList, predefine);
-                
-                leftOp = extendedLeftReg;
-            }
+
         }
         
         AArch64Operand rightOp;
@@ -1716,20 +1658,7 @@ public class AArch64Visitor {
             AArch64Reg rightReg = getOrCreateRegister(right, rightIsFloat);
             rightOp = rightReg;
                 
-            // 如果右操作数是寄存器中的整数变量，需要进行符号扩展
-            if (!isFloat && rightOp instanceof AArch64Reg && right.getType().isIntegerType()) {
-                AArch64Reg extendedRightReg = new AArch64VirReg(false);
-                AArch64Move moveInst = new AArch64Move(extendedRightReg, (AArch64Reg)rightOp, false);
-                addInstr(moveInst, insList, predefine);
-                
-                AArch64Binary lslInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                addInstr(lslInst, insList, predefine);
-                
-                AArch64Binary asrInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                addInstr(asrInst, insList, predefine);
-                
-                rightOp = extendedRightReg;
-            }
+
         }
         
         AArch64Compare.CmpType cmpType;
@@ -2128,6 +2057,7 @@ public class AArch64Visitor {
         addOperands.add(destReg);
         addOperands.add(new AArch64Label(":lo12:" + label.getLabelName()));
         AArch64Binary addInst = new AArch64Binary(addOperands, destReg, AArch64Binary.AArch64BinaryType.add);
+        addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
         addInstr(addInst, insList, predefine);
     }
     
@@ -2376,6 +2306,7 @@ public class AArch64Visitor {
             addOperands.add(baseReg);
             addOperands.add(offsetOp);
             AArch64Binary addInst = new AArch64Binary(addOperands, addrReg, AArch64Binary.AArch64BinaryType.add);
+            addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
             addInstr(addInst, insList, predefine);
             
             if (isLoad) {

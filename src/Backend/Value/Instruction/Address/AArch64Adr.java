@@ -11,10 +11,12 @@ public class AArch64Adr extends AArch64Instruction {
     
     public AArch64Adr(AArch64Reg destReg, AArch64Label label) {
         super(destReg, new ArrayList<>(Arrays.asList(label)));
+        // ADR指令始终使用64位寄存器（地址必须是64位）
     }
 
     @Override
     public String toString() {
+        // 地址操作始终使用64位寄存器格式
         return "adr\t" + getDefReg() + ", " + getOperands().get(0);
     }
 } 

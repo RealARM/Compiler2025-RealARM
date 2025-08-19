@@ -166,7 +166,7 @@ public class AArch64MyLib {
         sb.append("\tlsl x8, x8, #3\n");
         sb.append("\tadd x9, x9, x8\n");
         //符号扩展思密达
-        sb.append("\tsxtw x10, w10\n");
+        // sb.append("\tsxtw x10, w10\n");
         //扩展完再给我存
         sb.append("\tstr x10, [x9]\n");
         sb.append("\tldr x8, [sp, #272]\n");

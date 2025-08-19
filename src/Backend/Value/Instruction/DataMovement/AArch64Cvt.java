@@ -53,8 +53,8 @@ public class AArch64Cvt extends AArch64Instruction {
         switch (conversionType) {
             case SCVTF:
             case UCVTF:
-                // 整数转浮点，源是整数(w/x)，目标是浮点(s)
-                srcRegStr = srcReg.toString();
+                // 整数转浮点，源是整数(w)，目标是浮点(s)
+                srcRegStr = srcReg.to32BitString();  // 使用32位w寄存器
                 if (dstReg instanceof Backend.Value.Operand.Register.AArch64FPUReg) {
                     dstRegStr = ((Backend.Value.Operand.Register.AArch64FPUReg) dstReg).getSingleName();
                 } else {
@@ -66,13 +66,13 @@ public class AArch64Cvt extends AArch64Instruction {
             case FCVTPS:
             case FCVTNS:
             case FCVTZU:
-                // 浮点转整数，源是浮点(s/d)，目标是整数(w/x)
+                // 浮点转整数，源是浮点(s/d)，目标是整数(w)
                 if (srcReg instanceof Backend.Value.Operand.Register.AArch64FPUReg) {
                     srcRegStr = ((Backend.Value.Operand.Register.AArch64FPUReg) srcReg).getSingleName();
                 } else {
                     srcRegStr = srcReg.toString();
                 }
-                dstRegStr = dstReg.toString();
+                dstRegStr = dstReg.to32BitString();  // 使用32位w寄存器
                 break;
             case FCVT_S2D:
                 // 单精度到双精度转换：fcvt d, s
