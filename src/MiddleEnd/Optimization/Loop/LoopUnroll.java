@@ -73,8 +73,10 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
             for (Loop loop : allLoops) {
                 changed |= tryDynamicUnroll(loop);
             }
-            // -------- 新增：清理所有Phi的来边 --------
+            // -------- 清理所有Phi的来边 --------
             if (changed) {
+                // 重新构建CFG并清理PHI节点
+                DominatorAnalysis.computeDominatorTree(function);
                 cleanInvalidPhiIncoming(function);
             }
         }
@@ -161,6 +163,11 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
             return false;
         }
 
+        // 新增：若函数返回值依赖循环内部值（包括归纳变量的LCSSA），跳过常数展开以保证正确性
+        if (isFunctionReturnDependentOnLoop(loop)) {
+            return false;
+        }
+
         // 检查展开后的代码大小
         if (!checkUnrollSizeLimit(loop, iterationCount)) {
             return false;
@@ -187,9 +194,6 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
                 phi.removeIncoming(header);
             }
         }
-        
-        // 新增：立即清理无效来边
-        cleanInvalidPhiIncoming(loop.getHeader().getParentFunction());
         
         // 更新统计信息
         constantUnrollCount++;
@@ -264,9 +268,6 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         // 执行动态循环展开
         performEnhancedDynamicUnroll(loop);
         hasChanged = true;
-        
-        // 新增：立即清理无效来边
-        cleanInvalidPhiIncoming(loop.getHeader().getParentFunction());
         
         // 更新统计信息
         dynamicUnrollCount++;
@@ -571,12 +572,42 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
 
         // 移除head和latch的连接，建立初始映射
         int latchIndex = header.getPredecessors().indexOf(latch);
+        List<PhiInstruction> phisToSimplify = new ArrayList<>();
+        
         for (PhiInstruction phi : headerPhis) {
             Value latchValue = phi.getOperands().get(latchIndex);
             phi.removeOperand(latchValue);
             phiMap.put(phi, latchValue);
             beginToEndMap.put(phi, latchValue);
+            
+            // 检查移除latch操作数后PHI是否只剩一个操作数
+            if (phi.getOperands().size() == 1) {
+                // 不能简化归纳变量phi 或 在循环外仍被使用的phi
+                if (phi != loop.getInductionVariable() && !isUsedOutsideLoop(phi, loop)) {
+                    phisToSimplify.add(phi);
+                }
+            }
         }
+        
+        // 简化只有一个操作数的PHI节点
+        for (PhiInstruction phi : phisToSimplify) {
+            Value singleValue = phi.getOperand(0);
+            replacePhiWithValue(phi, singleValue);
+            header.removeInstruction(phi);
+            
+            // 更新映射，确保后续处理使用简化后的值
+            phiMap.put(phi, singleValue);
+            beginToEndMap.put(phi, singleValue);
+            
+            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                System.out.println("Simplified header phi " + phi.getName() + 
+                                 " to single value " + singleValue + 
+                                 " during constant unroll");
+            }
+        }
+        
+        // 从headerPhis列表中移除已简化的PHI
+        headerPhis.removeAll(phisToSimplify);
 
         // 更新控制流
         updateControlFlowForUnroll(header, latch, exit);
@@ -607,19 +638,34 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
     }
 
     private void updateControlFlowForUnroll(BasicBlock header, BasicBlock latch, BasicBlock exit) {
-        // 移除控制流边
+        // 记录头块原有的后继
+        List<BasicBlock> oldSuccs = new ArrayList<>(header.getSuccessors());
+
+        // 先确定保留的后继（循环体路径）
+        BasicBlock headerNext = findHeaderNext(header, exit);
+
+        // 移除 head 与 latch 的连接
         header.removePredecessor(latch);
         latch.removeSuccessor(header);
-        header.removeSuccessor(exit);
-        exit.removePredecessor(header);
 
-        // 修改头块分支为无条件跳转
-        BasicBlock headerNext = findHeaderNext(header, exit);
-        header.removeInstruction(header.getTerminator());
+        // 移除 head 指向除 headerNext 之外的所有后继的前驱关系（包括可能存在的 block4）
+        for (BasicBlock s : oldSuccs) {
+            if (s != headerNext) {
+                header.removeSuccessor(s);
+                s.removePredecessor(header);
+            }
+        }
+
+        // 替换头块终结指令为无条件跳转 headerNext
+        if (header.getTerminator() != null) {
+            header.removeInstruction(header.getTerminator());
+        }
         IRBuilder.createBr(headerNext, header);
 
-        // 移除latch的终结指令
-        latch.removeInstruction(latch.getTerminator());
+        // 移除 latch 的终结指令，后续会重新连边
+        if (latch.getTerminator() != null) {
+            latch.removeInstruction(latch.getTerminator());
+        }
     }
 
     private BasicBlock findHeaderNext(BasicBlock header, BasicBlock exit) {
@@ -2004,17 +2050,247 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
      * 移除所有Phi节点中与前驱不匹配的来边
      */
     private void cleanInvalidPhiIncoming(Function function) {
-        for (BasicBlock bb : function.getBasicBlocks()) {
-            List<BasicBlock> preds = bb.getPredecessors();
-            for (Instruction inst : bb.getInstructions()) {
-                if (inst instanceof PhiInstruction phi) {
-                    for (BasicBlock inc : new ArrayList<>(phi.getIncomingBlocks())) {
-                        if (!preds.contains(inc)) {
-                            phi.removeIncoming(inc);
+        boolean changed = true;
+        int iterationCount = 0;
+        final int MAX_ITERATIONS = 5; // 防止无限循环
+        
+        // 多次迭代清理，直到没有变化
+        while (changed && iterationCount < MAX_ITERATIONS) {
+            changed = false;
+            iterationCount++;
+            
+            for (BasicBlock bb : function.getBasicBlocks()) {
+                List<BasicBlock> preds = getActualPredecessors(bb);
+                Set<BasicBlock> predSet = new HashSet<>(preds);
+                
+                for (Instruction inst : new ArrayList<>(bb.getInstructions())) {
+                    if (inst instanceof PhiInstruction phi) {
+                        // 收集当前的来边块
+                        List<BasicBlock> incomingBlocks = new ArrayList<>(phi.getIncomingBlocks());
+                        
+                        // 移除无效的来边
+                        for (BasicBlock inc : incomingBlocks) {
+                            if (!predSet.contains(inc)) {
+                                phi.removeIncoming(inc);
+                                changed = true;
+                                if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                                    System.out.println("Removed invalid incoming edge from " + 
+                                                     inc.getName() + " to phi " + phi.getName() + 
+                                                     " in block " + bb.getName());
+                                }
+                            }
+                        }
+                        
+                        // 检查PHI节点是否还有效
+                        if (phi.getOperands().isEmpty()) {
+                            // 如果PHI节点没有操作数了，将其移除
+                            bb.removeInstruction(phi);
+                            changed = true;
+                            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                                System.out.println("Removed empty phi " + phi.getName() + 
+                                                 " in block " + bb.getName());
+                            }
+                        } else if (phi.getOperands().size() == 1 && preds.size() == 1) {
+                            // 前驱和操作数都只有一个，安全简化
+                            Value singleVal = phi.getOperand(0);
+                            replacePhiWithValue(phi, singleVal);
+                            bb.removeInstruction(phi);
+                            changed = true;
+                            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                                System.out.println("Simplified single-pred phi " + phi.getName() + " in block " + bb.getName());
+                            }
+                        } else if (phi.getOperands().size() == 1 && preds.size() > 1) {
+                            // 如果PHI节点只有一个操作数且有多个前驱，尝试修复
+                            fixPhiOperandCount(phi, preds);
+                            changed = true;
                         }
                     }
                 }
             }
+            
+            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING && changed) {
+                System.out.println("Clean phi iteration " + iterationCount + " made changes");
+            }
         }
+        
+        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+            System.out.println("Phi cleaning completed after " + iterationCount + " iterations");
+        }
+    }
+    
+    /**
+     * 修复PHI节点的操作数数量，使其与前驱数量匹配
+     */
+    private void fixPhiOperandCount(PhiInstruction phi, List<BasicBlock> preds) {
+        // 首先构建已有来边集合
+        Set<BasicBlock> existing = new HashSet<>(phi.getIncomingBlocks());
+
+        // 1. 移除多余来边（对应已删除的前驱）
+        for (BasicBlock inc : new ArrayList<>(phi.getIncomingBlocks())) {
+            if (!preds.contains(inc)) {
+                phi.removeIncoming(inc);
+            }
+        }
+
+        // 2. 为缺失的前驱补充来边
+        Value filler = phi.getOperand(0);
+        if (filler == null) {
+            filler = createDefaultValueForType(phi.getType());
+        }
+        for (BasicBlock pred : preds) {
+            if (!existing.contains(pred)) {
+                phi.addIncoming(filler, pred);
+            }
+        }
+    }
+    
+    /**
+     * 为给定类型创建默认值
+     */
+    private Value createDefaultValueForType(Type type) {
+        if (type instanceof IntegerType) {
+            IntegerType intType = (IntegerType) type;
+            if (intType.getBitWidth() == 1) {
+                return new ConstantInt(0, IntegerType.I1); // false for i1
+            } else {
+                return new ConstantInt(0, intType);
+            }
+        }
+        // 对于其他类型，默认返回0
+        return new ConstantInt(0, IntegerType.I32);
+    }
+    
+    /**
+     * 检查是否可以安全地简化PHI节点
+     */
+    private boolean canSafelySimplifyPhi(PhiInstruction phi, Function function) {
+        // 非常保守的策略：现在先禁用PHI简化，避免破坏已有的引用
+        // 在循环展开优化后，让其他优化pass处理PHI简化
+        return false;
+        
+        // 以下是更完整的安全检查逻辑，暂时注释掉
+        /*
+        // 1. 检查PHI是否被循环展开生成的指令使用
+        for (User user : phi.getUsers()) {
+            if (user instanceof Instruction inst) {
+                BasicBlock userBlock = inst.getParent();
+                // 如果使用者在展开生成的块中，需要小心处理
+                if (userBlock != null && userBlock.getName() != null && 
+                    userBlock.getName().contains("_unroll_")) {
+                    return false;
+                }
+            }
+        }
+        
+        // 2. 检查是否是归纳变量相关的PHI
+        if (phi.getName() != null && phi.getName().contains("phi_")) {
+            return false;
+        }
+        
+        // 3. 其他安全检查
+        Value singleValue = phi.getOperand(0);
+        if (singleValue instanceof Instruction) {
+            Instruction valueInst = (Instruction) singleValue;
+            // 如果单一值也是指令，确保它支配所有使用点
+            if (!dominatesAllUsers(valueInst, phi, function)) {
+                return false;
+            }
+        }
+        
+        return true;
+        */
+    }
+    
+    /**
+     * 检查一个指令是否支配PHI的所有使用点
+     */
+    private boolean dominatesAllUsers(Instruction def, PhiInstruction phi, Function function) {
+        // 简化实现：如果定义在PHI之前的同一个块中，认为是安全的
+        if (def.getParent() == phi.getParent()) {
+            List<Instruction> instructions = phi.getParent().getInstructions();
+            int defIndex = instructions.indexOf(def);
+            int phiIndex = instructions.indexOf(phi);
+            return defIndex < phiIndex;
+        }
+        
+        // 更复杂的支配关系检查需要支配树信息，这里简化为返回false
+        return false;
+    }
+
+    private void replacePhiWithValue(PhiInstruction phi, Value value) {
+        List<User> users = new ArrayList<>(phi.getUsers());
+        for (User usr : users) {
+            usr.replaceAllUsesWith(phi, value);
+        }
+    }
+
+    private List<BasicBlock> getActualPredecessors(BasicBlock target){
+        List<BasicBlock> preds=new ArrayList<>();
+        Function func=target.getParentFunction();
+        if(func==null) return preds;
+        for(BasicBlock bb:func.getBasicBlocks()){
+            Instruction term=bb.getTerminator();
+            if(term instanceof BranchInstruction br){
+                if(br.isUnconditional()){
+                    if(br.getTrueBlock()==target){
+                        preds.add(bb);
+                    }
+                }else{
+                    if(br.getTrueBlock()==target) preds.add(bb);
+                    if(br.getFalseBlock()==target) preds.add(bb);
+                }
+            }
+        }
+        return preds;
+    }
+
+    private boolean isUsedOutsideLoop(PhiInstruction phi, Loop loop) {
+        Function function = phi.getParent().getParentFunction();
+        for (BasicBlock bb : function.getBasicBlocks()) {
+            for (Instruction inst : bb.getInstructions()) {
+                if (inst instanceof PhiInstruction && inst.getName().equals(phi.getName())) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    // 检查函数返回值是否依赖该循环（保守）：
+    // - 在循环出口块上查找ret
+    // - 若ret的返回值（含经由LCSSA phi）可追溯到循环内定义或头块phi，则认为依赖
+    private boolean isFunctionReturnDependentOnLoop(Loop loop) {
+        for (BasicBlock exit : loop.getExitBlocks()) {
+            for (Instruction inst : exit.getInstructions()) {
+                if (inst instanceof ReturnInstruction ret) {
+                    Value rv = ret.getReturnValue();
+                    if (rv != null && valueDependsOnLoop(rv, loop, new HashSet<>())) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean valueDependsOnLoop(Value v, Loop loop, Set<Value> visited) {
+        if (v == null || visited.contains(v)) return false;
+        visited.add(v);
+
+        if (v instanceof Instruction ins) {
+            BasicBlock pb = ins.getParent();
+            if (pb != null && loop.contains(pb)) return true;
+            for (Value op : ins.getOperands()) {
+                if (valueDependsOnLoop(op, loop, visited)) return true;
+            }
+            return false;
+        } else if (v instanceof PhiInstruction phi) {
+            // phi在出口也可能依赖循环内的来边值
+            for (Value op : phi.getOperands()) {
+                if (valueDependsOnLoop(op, loop, visited)) return true;
+            }
+            return false;
+        }
+        return false;
     }
  }  

@@ -111,7 +111,7 @@ public class OptimizeManager {
         // addModuleOptimizer(new LoopInterchange());
         
         // 循环展开
-        // addModuleOptimizer(new LoopUnroll());
+        addModuleOptimizer(new LoopUnroll());
 
         // 循环优化
         addModuleOptimizer(new LoopInvariantCodeMotion());
