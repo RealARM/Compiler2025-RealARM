@@ -93,16 +93,16 @@ public class OptimizeManager {
 
         // 循环交换优化
         // addModuleOptimizer(new LoopInterchange());
-        
-        // 循环优化
-        addModuleOptimizer(new LoopInvariantCodeMotion());
-        
-        // // 循环指针访问优化
-        addModuleOptimizer(new LoopPointerExtract());
-        addModuleOptimizer(new LoopPointerExtractPlus());
 
         // 循环展开优化
         addModuleOptimizer(new LoopUnroll());
+        
+        // 循环优化
+        addModuleOptimizer(new LoopInvariantCodeMotion());
+
+        // // 循环指针访问优化
+        addModuleOptimizer(new LoopPointerExtract());
+        addModuleOptimizer(new LoopPointerExtractPlus());
 
         // // 窥孔优化
         addModuleOptimizer(new PeepHole());
@@ -124,7 +124,7 @@ public class OptimizeManager {
         addModuleOptimizer(new ConstantFolding());
         
         // // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        // // addModuleOptimizer(new RemovePhiPass());
+        addModuleOptimizer(new RemovePhiPass());
     }
     
     public void addModuleOptimizer(ModuleOptimizer optimizer) {
