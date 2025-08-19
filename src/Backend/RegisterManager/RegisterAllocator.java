@@ -203,20 +203,25 @@ public class RegisterAllocator {
     
 
     private AArch64PhyReg mapColorToPhysicalRegister(AArch64VirReg virtualRegister, int color) {
+        AArch64PhyReg physicalRegister = null;
+        
         if (virtualRegister.isFloat()) {
             // 浮点寄存器: v8-v31
             if (color >= 0 && color < FLOATING_REGISTER_COUNT) {
-                return AArch64FPUReg.getAArch64FloatReg(color + 8);
+                physicalRegister = AArch64FPUReg.getAArch64FloatReg(color + 8);
             }
         } else {
             // 整型寄存器: x19-x26
             if (color >= 0 && color < INTEGER_REGISTER_COUNT) {
-                return AArch64CPUReg.getAArch64CPUReg(color + 19);
+                physicalRegister = AArch64CPUReg.getAArch64CPUReg(color + 19);
             }
         }
         
-        System.err.println("无法为寄存器 " + virtualRegister + " 映射物理寄存器，颜色: " + color);
-        return null;
+        if (physicalRegister == null) {
+            System.err.println("无法为寄存器 " + virtualRegister + " 映射物理寄存器，颜色: " + color);
+        }
+        
+        return physicalRegister;
     }
     
 
@@ -283,6 +288,7 @@ public class RegisterAllocator {
             addOperands.add(addressRegister);
             AArch64Binary addInstruction = new AArch64Binary(addOperands, addressRegister, 
                                                            AArch64Binary.AArch64BinaryType.add);
+            addInstruction.setUse32BitMode(false); // 地址计算使用64位寄存器
             block.insertBeforeInst(instruction, addInstruction);
             // 使用零偏移加载
             AArch64Load loadInstruction = new AArch64Load(addressRegister, new AArch64Imm(0), temporaryRegister);
@@ -316,6 +322,7 @@ public class RegisterAllocator {
             addOperands.add(addressRegister);
             AArch64Binary addInstruction = new AArch64Binary(addOperands, addressRegister, 
                                                            AArch64Binary.AArch64BinaryType.add);
+            addInstruction.setUse32BitMode(false); // 地址计算使用64位寄存器
             RegisterAllocatorHelper.insertAfterInstruction(block, instruction, addInstruction);
             // 使用零偏移存储
             AArch64Store storeInstruction = new AArch64Store(temporaryRegister, addressRegister, new AArch64Imm(0));

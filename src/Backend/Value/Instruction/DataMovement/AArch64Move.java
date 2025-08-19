@@ -4,6 +4,7 @@ import Backend.Value.Base.AArch64Operand;
 import Backend.Value.Operand.Register.AArch64FPUReg;
 import Backend.Value.Operand.Register.AArch64Reg;
 import Backend.Value.Operand.Register.AArch64CPUReg;
+import Backend.Value.Operand.Register.AArch64VirReg;
 import Backend.Value.Operand.Constant.AArch64Imm;
 
 import java.util.ArrayList;
@@ -13,6 +14,7 @@ public class AArch64Move extends AArch64Instruction {
     private final boolean isImmediate;
     private final MoveType moveType;
     private int shift = 0; // 移位值，用于MOVZ/MOVK指令
+    private boolean use32BitMode = false; // 指令级别的32位模式标志
 
     public AArch64Move(AArch64Reg destReg, AArch64Operand operand, boolean isImmediate) {
         super(destReg, new ArrayList<>(Collections.singletonList(operand)));
@@ -22,6 +24,7 @@ public class AArch64Move extends AArch64Instruction {
         }
         this.isImmediate = isImmediate;
         this.moveType = MoveType.MOV;
+        
     }
 
     public AArch64Move(AArch64Reg destReg, AArch64Operand operand, boolean isImmediate, MoveType moveType) {
@@ -32,6 +35,7 @@ public class AArch64Move extends AArch64Instruction {
         }
         this.isImmediate = isImmediate;
         this.moveType = moveType;
+        
     }
 
     public void setShift(int shift) {
@@ -40,6 +44,14 @@ public class AArch64Move extends AArch64Instruction {
 
     public int getShift() {
         return shift;
+    }
+
+    public void setUse32BitMode(boolean use32Bit) {
+        this.use32BitMode = use32Bit;
+    }
+
+    public boolean isUse32BitMode() {
+        return this.use32BitMode;
     }
 
     public enum MoveType {
@@ -55,6 +67,18 @@ public class AArch64Move extends AArch64Instruction {
 
     public boolean isImmediate() {
         return isImmediate;
+    }
+
+    private String getRegisterString(AArch64Reg reg) {
+        if (reg instanceof AArch64CPUReg) {
+            AArch64CPUReg cpuReg = (AArch64CPUReg) reg;
+            return use32BitMode ? cpuReg.to32BitString() : cpuReg.to64BitString();
+        } else if (reg instanceof AArch64VirReg) {
+            AArch64VirReg virReg = (AArch64VirReg) reg;
+            return use32BitMode ? virReg.to32BitString() : virReg.to64BitString();
+        } else {
+            return reg.toString();
+        }
     }
 
     @Override
@@ -79,18 +103,24 @@ public class AArch64Move extends AArch64Instruction {
         
         sb.append("\t");
         String destStr;
-        if (isImmediate && getDefReg() instanceof AArch64CPUReg cpuDest) {
-            boolean use64Bit = false;
-            if (!getOperands().isEmpty() && getOperands().get(0) instanceof AArch64Imm imm) {
+        if (isImmediate && getDefReg() instanceof AArch64CPUReg) {
+            AArch64CPUReg cpuDest = (AArch64CPUReg) getDefReg();
+            boolean use64Bit = !use32BitMode; // 使用指令级别的模式设置
+            if (!getOperands().isEmpty() && getOperands().get(0) instanceof AArch64Imm) {
+                AArch64Imm imm = (AArch64Imm) getOperands().get(0);
                 long immVal = imm.getValue();
-                use64Bit = (immVal < 0) || (immVal > 0xFFFFFFFFL);
+                // 如果值超出32位范围，强制使用64位
+                if ((immVal < 0) || (immVal > 0xFFFFFFFFL)) {
+                    use64Bit = true;
+                }
             }
-            destStr = use64Bit ? cpuDest.getName() : cpuDest.get32BitName();
+            destStr = use64Bit ? cpuDest.to64BitString() : cpuDest.to32BitString();
             if (moveType == MoveType.MOVK || moveType == MoveType.MOVZ) {
-                destStr = cpuDest.getName();
+                destStr = cpuDest.to64BitString();
             }
         } else {
-            destStr = getDefReg().toString();
+            // 对于非立即数的情况，使用统一的寄存器字符串生成方法
+            destStr = getRegisterString(getDefReg());
         }
         sb.append(destStr);
         sb.append(",\t");
@@ -102,7 +132,12 @@ public class AArch64Move extends AArch64Instruction {
             if (operand == null) {
                 throw new RuntimeException("Move instruction operand is null");
             } else {
-                sb.append(operand.toString());
+                // 对于寄存器操作数，也使用统一的字符串生成方法
+                if (operand instanceof AArch64Reg && !shouldUseFmov) {
+                    sb.append(getRegisterString((AArch64Reg) operand));
+                } else {
+                    sb.append(operand.toString());
+                }
             }
         }
 

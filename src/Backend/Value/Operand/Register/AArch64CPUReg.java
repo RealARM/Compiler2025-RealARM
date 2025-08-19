@@ -114,19 +114,43 @@ public class AArch64CPUReg extends AArch64PhyReg {
     public String getName() {
         return this.name;
     }
-
-    @Override
-    public String toString() {
+    
+    /**
+     * 获取64位寄存器名称
+     */
+    public String to64BitString() {
         return this.name;
     }
-
-    public String get32BitName() {
+    
+    /**
+     * 获取32位寄存器名称
+     */
+    public String to32BitString() {
+        // SP、FP、LR等特殊寄存器始终使用64位名称
+        if (isSpecialRegister()) {
+            return this.name;
+        }
+        
         if (index == 31) return "wsp";
         if (index == 32) return "wzr";
         return "w" + index;
     }
+
+    @Override
+    public String toString() {
+        // 默认使用64位输出
+        return to64BitString();
+    }
     
     public boolean is64Bit() {
         return this.name.startsWith("x") || this.name.equals("sp") || this.name.equals("xzr");
+    }
+    
+    /**
+     * 判断是否是特殊寄存器（SP、FP、LR等，这些寄存器应该始终使用64位）
+     */
+    private boolean isSpecialRegister() {
+        // SP(31), FP(29), LR(30)
+        return index == 29 || index == 30 || index == 31;
     }
 } 

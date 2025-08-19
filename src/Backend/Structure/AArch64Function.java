@@ -137,6 +137,7 @@ public class AArch64Function {
             addOperands.add(baseReg);
             addOperands.add(tempAddrReg);
             AArch64Binary addInst = new AArch64Binary(addOperands, tempAddrReg, AArch64Binary.AArch64BinaryType.add);
+            addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
             block.addAArch64Instruction(addInst);
             
             // 使用计算得到的地址进行内存访问
