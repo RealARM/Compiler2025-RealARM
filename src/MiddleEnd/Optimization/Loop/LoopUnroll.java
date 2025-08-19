@@ -157,6 +157,11 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
             return false;
         }
 
+        // 额外检查：展开后函数总体指令数是否会超过阈值，防止代码膨胀导致编译卡死
+        if (!checkFunctionSizeLimit(loop, iterationCount)) {
+            return false;
+        }
+
         // 检查子循环的出口
         if (!validateSubLoopExits(loop)) {
             return false;
@@ -409,6 +414,22 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         }
         
         return size;
+    }
+
+    /**
+     * 检查在执行展开之后函数整体指令数量是否超过限制
+     */
+    private boolean checkFunctionSizeLimit(Loop loop, int iterationCount) {
+        Function function = loop.getHeader().getParentFunction();
+        int currentSize = 0;
+        for (BasicBlock bb : function.getBasicBlocks()) {
+            currentSize += bb.getInstructions().size();
+        }
+
+        int loopSize = calculateLoopSize(loop);
+        // 展开 iterationCount-1 次会新增 (iterationCount-1)*loopSize 指令数量（粗略估计）
+        long projectedSize = (long) currentSize + (long) loopSize * (iterationCount - 1);
+        return projectedSize <= LoopUnrollConfig.MAX_FUNCTION_SIZE_AFTER_UNROLL;
     }
 
     /**
