@@ -90,34 +90,40 @@ public class OptimizeManager {
 
         // 删除无用循环
         addModuleOptimizer(new TrivialLoopDeletion());
-        
-        // 循环优化
-        addModuleOptimizer(new LoopInvariantCodeMotion());
-        
-        // 循环指针访问优化
-        addModuleOptimizer(new LoopPointerExtract());
-        addModuleOptimizer(new LoopPointerExtractPlus());
-        
+
         // 循环交换优化
         // addModuleOptimizer(new LoopInterchange());
 
-        // 窥孔优化
+        // 循环展开优化
+        addModuleOptimizer(new LoopUnroll());
+        
+        // 循环优化
+        addModuleOptimizer(new LoopInvariantCodeMotion());
+
+        // // 循环指针访问优化
+        addModuleOptimizer(new LoopPointerExtract());
+        addModuleOptimizer(new LoopPointerExtractPlus());
+
+        // // 窥孔优化
         addModuleOptimizer(new PeepHole());
         
-        // 全局代码移动优化
+        // // 全局代码移动优化
         addModuleOptimizer(new GCM());
         
-        // 全局值编号优化 (GVN)
+        // // 全局值编号优化 (GVN)
         addModuleOptimizer(new GVN());
         
-        // 无用代码消除
+        // // Load/Store数据流优化
+        addModuleOptimizer(new LoadStoreFlowOptimizer());
+        
+        // // 无用代码消除
         addModuleOptimizer(new DCE());
 
-        // 常量处理
+        // // 常量处理
         addModuleOptimizer(new ConstantPropagation());
         addModuleOptimizer(new ConstantFolding());
         
-        // PHI指令消除（在进入后端前将PHI转换为Move指令）
+        // // PHI指令消除（在进入后端前将PHI转换为Move指令）
         addModuleOptimizer(new RemovePhiPass());
     }
     
