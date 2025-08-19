@@ -76,6 +76,21 @@ public class ConstantExpressionEvaluator {
             else if (convInst.getConversionType() == OpCode.FPTOSI && operandConst instanceof ConstantFloat) {
                 return new ConstantInt((int) ((ConstantFloat) operandConst).getValue());
             }
+            else if (convInst.getConversionType() == OpCode.ZEXT && operandConst instanceof ConstantInt) {
+                Type srcType = operandConst.getType();
+                if (srcType instanceof IntegerType && targetType instanceof IntegerType) {
+                    int srcBits = ((IntegerType) srcType).getBitWidth();
+                    int val = ((ConstantInt) operandConst).getValue();
+                    int masked;
+                    if (srcBits >= 32) {
+                        masked = val;
+                    } else {
+                        int mask = (srcBits == 0) ? 0 : ((1 << srcBits) - 1);
+                        masked = val & mask;
+                    }
+                    return new ConstantInt(masked, (IntegerType) targetType);
+                }
+            }
         }
         
         return null;

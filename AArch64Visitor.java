@@ -516,6 +516,30 @@ public class AArch64Visitor {
                     rightOp = RegList.get(right);
                 }
                 
+                // Ensure 32-bit integer compare uses sign-extended 64-bit operands
+                if (!isFloat) {
+                    if (leftOp instanceof AArch64Reg && left.getType().isIntegerType()) {
+                        AArch64VirReg extLeft = new AArch64VirReg(false);
+                        AArch64Move mvL = new AArch64Move(extLeft, (AArch64Reg) leftOp, false);
+                        addInstr(mvL, insList, predefine);
+                        AArch64Binary lslL = new AArch64Binary(extLeft, extLeft, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                        addInstr(lslL, insList, predefine);
+                        AArch64Binary asrL = new AArch64Binary(extLeft, extLeft, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                        addInstr(asrL, insList, predefine);
+                        leftOp = extLeft;
+                    }
+                    if (rightOp instanceof AArch64Reg && right.getType().isIntegerType()) {
+                        AArch64VirReg extRight = new AArch64VirReg(false);
+                        AArch64Move mvR = new AArch64Move(extRight, (AArch64Reg) rightOp, false);
+                        addInstr(mvR, insList, predefine);
+                        AArch64Binary lslR = new AArch64Binary(extRight, extRight, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+                        addInstr(lslR, insList, predefine);
+                        AArch64Binary asrR = new AArch64Binary(extRight, extRight, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+                        addInstr(asrR, insList, predefine);
+                        rightOp = extRight;
+                    }
+                }
+                
                 AArch64Compare.CmpType cmpType;
                 if (isFloat) {
                     cmpType = AArch64Compare.CmpType.fcmp;

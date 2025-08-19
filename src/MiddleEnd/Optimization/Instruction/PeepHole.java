@@ -5,6 +5,8 @@ import MiddleEnd.Optimization.Core.Optimizer;
 import MiddleEnd.IR.Value.*;
 import MiddleEnd.IR.Value.Instructions.*;
 import MiddleEnd.IR.OpCode;
+import MiddleEnd.IR.Type.IntegerType;
+import MiddleEnd.IR.IRBuilder;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -13,304 +15,421 @@ import java.util.List;
  * 窥孔优化
  */
 public class PeepHole implements Optimizer.ModuleOptimizer {
-    
-    @Override
-    public String getName() {
-        return "PeepHole";
-    }
-    
-    @Override
-    public boolean run(Module module) {
-        boolean changed = false;
-        
-        for (Function function : module.functions()) {
-            if (function.isExternal()) {
-                continue;
-            }
-            
-            changed |= optimizeBranchSameTarget(function);
-            changed |= optimizeCascadingBranches(function);
-            changed |= optimizeConsecutiveStores(function);
-            changed |= optimizeStoreLoad(function);
-            // changed |= optimizeConstantCompare(function);
-        }
-        
-        return changed;
-    }
-    
-    /**
-     * 简化相同目标的条件分支 (类似于 br %x, %block A, %block A)
-     * 将 br cond, target, target 替换为 br target
-     */
-    private boolean optimizeBranchSameTarget(Function function) {
-        boolean changed = false;
-        
-        for (BasicBlock block : function.getBasicBlocks()) {
-            Instruction terminator = block.getTerminator();
-            if (terminator instanceof BranchInstruction branch && !branch.isUnconditional()) {
-                BasicBlock trueBlock = branch.getTrueBlock();
-                BasicBlock falseBlock = branch.getFalseBlock();
-                
-                if (trueBlock == falseBlock) {
-                    BranchInstruction newBranch = new BranchInstruction(trueBlock);
-                    block.removeInstruction(terminator);
-                    block.addInstruction(newBranch);
-                    changed = true;
-                }
-            }
-        }
-        
-        return changed;
-    }
-    
-    /**
-     * 合并级联条件分支 (类似于 br %x %block A, %block B; Block B: br %x %block C, %block D)
-     * 如果条件相同，可以直接从第一个块跳转到最终目标
-     */
-    private boolean optimizeCascadingBranches(Function function) {
-        boolean changed = false;
-        
-        for (BasicBlock block : function.getBasicBlocks()) {
-            Instruction terminator = block.getTerminator();
-            if (!(terminator instanceof BranchInstruction branch) || branch.isUnconditional()) {
-                continue;
-            }
-            
-            Value condition = branch.getCondition();
-            BasicBlock trueBlock = branch.getTrueBlock();
-            BasicBlock falseBlock = branch.getFalseBlock();
-            
-            if (trueBlock.getInstructions().size() == 1) {
-                Instruction trueTerm = trueBlock.getTerminator();
-                if (trueTerm instanceof BranchInstruction trueBranch && 
-                        !trueBranch.isUnconditional() && 
-                        trueBranch.getCondition() == condition) {
-                    branch.setOperand(1, trueBranch.getTrueBlock());
-                    changed = true;
-                }
-            }
-            
-            if (falseBlock.getInstructions().size() == 1) {
-                Instruction falseTerm = falseBlock.getTerminator();
-                if (falseTerm instanceof BranchInstruction falseBranch && 
-                        !falseBranch.isUnconditional() && 
-                        falseBranch.getCondition() == condition) {
-                    branch.setOperand(2, falseBranch.getFalseBlock());
-                    changed = true;
-                }
-            }
-        }
-        
-        return changed;
-    }
-    
-    /**
-     * 连续对同一地址的store指令，消除前面的store
-     * store A -> ptr, store B -> ptr ==> store B -> ptr
-     */
-    private boolean optimizeConsecutiveStores(Function function) {
-        boolean changed = false;
-        
-        for (BasicBlock block : function.getBasicBlocks()) {
-            List<Instruction> instructions = new ArrayList<>(block.getInstructions());
-            List<StoreInstruction> toRemove = new ArrayList<>();
-            
-            for (int i = 0; i < instructions.size() - 1; i++) {
-                Instruction curr = instructions.get(i);
-                
-                if (!(curr instanceof StoreInstruction currStore)) {
-                    continue;
-                }
-                
-                Value currPointer = currStore.getPointer();
-                
-                for (int j = i + 1; j < instructions.size(); j++) {
-                    Instruction next = instructions.get(j);
-                    
-                    if (next instanceof CallInstruction) {
-                        break;
-                    }
-                    
-                    if (next instanceof StoreInstruction nextStore &&
-                            nextStore.getPointer() == currPointer) {
-                        toRemove.add(currStore);
-                        break;
-                    }
-                    
-                    if (next instanceof LoadInstruction load &&
-                            load.getPointer() == currPointer) {
-                        break;
-                    }
-                }
-            }
-            
-            for (StoreInstruction inst : toRemove) {
-                inst.removeFromParent();
-                changed = true;
-            }
-        }
-        
-        return changed;
-    }
-    
-    /**
-     * store后立即load优化
-     * store A -> ptr; load B <- ptr ==> 用A替换B的所有使用
-     */
-    private boolean optimizeStoreLoad(Function function) {
-        boolean changed = false;
-        
-        for (BasicBlock block : function.getBasicBlocks()) {
-            List<Instruction> instructions = new ArrayList<>(block.getInstructions());
-            
-            for (int i = 0; i < instructions.size() - 1; i++) {
-                Instruction curr = instructions.get(i);
-                
-                if (!(curr instanceof StoreInstruction currStore)) {
-                    continue;
-                }
-                
-                Value storedValue = currStore.getValue();
-                Value storePointer = currStore.getPointer();
-                
-                Instruction next = instructions.get(i + 1);
-                if (next instanceof LoadInstruction loadInst && 
-                        loadInst.getPointer() == storePointer) {
-                    replaceAllUses(loadInst, storedValue);
-                    loadInst.removeFromParent();
-                    changed = true;
-                }
-            }
-        }
-        
-        return changed;
-    }
-    
-    /**
-     * 常数比较优化
-     * 识别以下模式：
-     * a = icmp ne/eq/... const1, const2
-     * zext a to b
-     * c = icmp ne b, 0
-     * br c blocka, blockb
-     * 
-     * 这种模式可以直接在编译时计算结果，替换为无条件跳转
-     */
-    private boolean optimizeConstantCompare(Function function) {
-        boolean changed = false;
-        
-        for (BasicBlock block : function.getBasicBlocks()) {
-            Instruction terminator = block.getTerminator();
-            if (!(terminator instanceof BranchInstruction branch) || branch.isUnconditional()) {
-                continue;
-            }
-            
-            Value condition = branch.getCondition();
-            if (!(condition instanceof CompareInstruction secondCmp)) {
-                continue;
-            }
-            
-            if (secondCmp.getPredicate() != OpCode.NE) {
-                continue;
-            }
-            
-            if (!(secondCmp.getRight() instanceof ConstantInt rightConst) || rightConst.getValue() != 0) {
-                continue;
-            }
-            
-            Value zextResult = secondCmp.getLeft();
-            if (!(zextResult instanceof ConversionInstruction convInst)) {
-                continue;
-            }
-            
-            if (convInst.getConversionType() != OpCode.ZEXT) {
-                continue;
-            }
-            
-            Value firstCmpResult = convInst.getSource();
-            if (!(firstCmpResult instanceof CompareInstruction firstCmp)) {
-                continue;
-            }
-            
-            if (!(firstCmp.getLeft() instanceof ConstantInt firstLeft && 
-                  firstCmp.getRight() instanceof ConstantInt firstRight)) {
-                continue;
-            }
-            
-            int leftValue = firstLeft.getValue();
-            int rightValue = firstRight.getValue();
-            boolean compareResult;
-            
-            switch (firstCmp.getPredicate()) {
-                case EQ:
-                    compareResult = (leftValue == rightValue);
-                    break;
-                case NE:
-                    compareResult = (leftValue != rightValue);
-                    break;
-                case SGT:
-                    compareResult = (leftValue > rightValue);
-                    break;
-                case SGE:
-                    compareResult = (leftValue >= rightValue);
-                    break;
-                case SLT:
-                    compareResult = (leftValue < rightValue);
-                    break;
-                case SLE:
-                    compareResult = (leftValue <= rightValue);
-                    break;
-                default:
-                    continue;
-            }
-            
-            BasicBlock target = compareResult ? branch.getTrueBlock() : branch.getFalseBlock();
-            BranchInstruction newBranch = new BranchInstruction(target);
-            
-            block.removeInstruction(terminator);
-            block.addInstruction(newBranch);
-            
-            cleanupUnusedInstructions(secondCmp, convInst, firstCmp);
-            
-            changed = true;
-        }
-        
-        return changed;
-    }
-    
-    private void cleanupUnusedInstructions(CompareInstruction secondCmp, 
-                                         ConversionInstruction convInst, 
-                                         CompareInstruction firstCmp) {
-        secondCmp.removeFromParent();
-        convInst.removeFromParent();
-        firstCmp.removeFromParent();
-    }
-    
-    private void replaceAllUses(Value oldValue, Value newValue) {
-        List<User> users = new ArrayList<>(oldValue.getUsers());
-        
-        for (User user : users) {
-            for (int i = 0; i < user.getOperandCount(); i++) {
-                if (user.getOperand(i) == oldValue) {
-                    user.setOperand(i, newValue);
-                }
-            }
-        }
-    }
-    
-    private void replaceInstruction(Instruction oldInst, Value newValue) {
-        ArrayList<User> users = new ArrayList<>(oldInst.getUsers());
-        
-        for (User user : users) {
-            for (int i = 0; i < user.getOperandCount(); i++) {
-                if (user.getOperand(i) == oldInst) {
-                    user.setOperand(i, newValue);
-                }
-            }
-        }
-        
-        if (oldInst.getUsers().isEmpty()) {
-            oldInst.removeFromParent();
-        }
-    }
+	
+	@Override
+	public String getName() {
+		return "PeepHole";
+	}
+	
+	@Override
+	public boolean run(Module module) {
+		boolean changed = false;
+		
+		for (Function function : module.functions()) {
+			if (function.isExternal()) {
+				continue;
+			}
+			
+			changed |= optimizeBranchSameTarget(function);
+			changed |= optimizeCascadingBranches(function);
+			changed |= optimizeConsecutiveStores(function);
+			changed |= optimizeStoreLoad(function);
+			changed |= optimizeSRemPowerOfTwo(function);
+			// changed |= optimizeConstantCompare(function);
+		}
+		
+		return changed;
+	}
+	
+	/**
+	 * 简化相同目标的条件分支 (类似于 br %x, %block A, %block A)
+	 * 将 br cond, target, target 替换为 br target
+	 */
+	private boolean optimizeBranchSameTarget(Function function) {
+		boolean changed = false;
+		
+		for (BasicBlock block : function.getBasicBlocks()) {
+			Instruction terminator = block.getTerminator();
+			if (terminator instanceof BranchInstruction branch && !branch.isUnconditional()) {
+				BasicBlock trueBlock = branch.getTrueBlock();
+				BasicBlock falseBlock = branch.getFalseBlock();
+				
+				if (trueBlock == falseBlock) {
+					BranchInstruction newBranch = new BranchInstruction(trueBlock);
+					block.removeInstruction(terminator);
+					block.addInstruction(newBranch);
+					changed = true;
+				}
+			}
+		}
+		
+		return changed;
+	}
+	
+	/**
+	 * 合并级联条件分支 (类似于 br %x %block A, %block B; Block B: br %x %block C, %block D)
+	 * 如果条件相同，可以直接从第一个块跳转到最终目标
+	 */
+	private boolean optimizeCascadingBranches(Function function) {
+		boolean changed = false;
+		
+		for (BasicBlock block : function.getBasicBlocks()) {
+			Instruction terminator = block.getTerminator();
+			if (!(terminator instanceof BranchInstruction branch) || branch.isUnconditional()) {
+				continue;
+			}
+			
+			Value condition = branch.getCondition();
+			BasicBlock trueBlock = branch.getTrueBlock();
+			BasicBlock falseBlock = branch.getFalseBlock();
+			
+			if (trueBlock.getInstructions().size() == 1) {
+				Instruction trueTerm = trueBlock.getTerminator();
+				if (trueTerm instanceof BranchInstruction trueBranch && 
+						!trueBranch.isUnconditional() && 
+						trueBranch.getCondition() == condition) {
+					branch.setOperand(1, trueBranch.getTrueBlock());
+					changed = true;
+				}
+			}
+			
+			if (falseBlock.getInstructions().size() == 1) {
+				Instruction falseTerm = falseBlock.getTerminator();
+				if (falseTerm instanceof BranchInstruction falseBranch && 
+						!falseBranch.isUnconditional() && 
+						falseBranch.getCondition() == condition) {
+					branch.setOperand(2, falseBranch.getFalseBlock());
+					changed = true;
+				}
+			}
+		}
+		
+		return changed;
+	}
+	
+	/**
+	 * 连续对同一地址的store指令，消除前面的store
+	 * store A -> ptr, store B -> ptr ==> store B -> ptr
+	 */
+	private boolean optimizeConsecutiveStores(Function function) {
+		boolean changed = false;
+		
+		for (BasicBlock block : function.getBasicBlocks()) {
+			List<Instruction> instructions = new ArrayList<>(block.getInstructions());
+			List<StoreInstruction> toRemove = new ArrayList<>();
+			
+			for (int i = 0; i < instructions.size() - 1; i++) {
+				Instruction curr = instructions.get(i);
+				
+				if (!(curr instanceof StoreInstruction currStore)) {
+					continue;
+				}
+				
+				Value currPointer = currStore.getPointer();
+				
+				for (int j = i + 1; j < instructions.size(); j++) {
+					Instruction next = instructions.get(j);
+					
+					if (next instanceof CallInstruction) {
+						break;
+					}
+					
+					if (next instanceof StoreInstruction nextStore &&
+							nextStore.getPointer() == currPointer) {
+						toRemove.add(currStore);
+						break;
+					}
+					
+					if (next instanceof LoadInstruction load &&
+							load.getPointer() == currPointer) {
+						break;
+					}
+				}
+			}
+			
+			for (StoreInstruction inst : toRemove) {
+				inst.removeFromParent();
+				changed = true;
+			}
+		}
+		
+		return changed;
+	}
+	
+	/**
+	 * store后立即load优化
+	 * store A -> ptr; load B <- ptr ==> 用A替换B的所有使用
+	 */
+	private boolean optimizeStoreLoad(Function function) {
+		boolean changed = false;
+		
+		for (BasicBlock block : function.getBasicBlocks()) {
+			List<Instruction> instructions = new ArrayList<>(block.getInstructions());
+			
+			for (int i = 0; i < instructions.size() - 1; i++) {
+				Instruction curr = instructions.get(i);
+				
+				if (!(curr instanceof StoreInstruction currStore)) {
+					continue;
+				}
+				
+				Value storedValue = currStore.getValue();
+				Value storePointer = currStore.getPointer();
+				
+				Instruction next = instructions.get(i + 1);
+				if (next instanceof LoadInstruction loadInst && 
+						loadInst.getPointer() == storePointer) {
+					replaceAllUses(loadInst, storedValue);
+					loadInst.removeFromParent();
+					changed = true;
+				}
+			}
+		}
+		
+		return changed;
+	}
+	
+	/**
+	 * srem i32 x, 2^n 以及 srem i32 x, 2^n-1 的优化
+	 * - 对 2^n：使用无分支的符号校正与掩码法
+	 * - 对 2^n-1：对 |x| 进行 Mersenne 折叠约简，再根据符号无分支还原符号
+	 */
+	private boolean optimizeSRemPowerOfTwo(Function function) {
+		boolean changed = false;
+		
+		for (BasicBlock block : function.getBasicBlocks()) {
+			List<Instruction> instructions = new ArrayList<>(block.getInstructions());
+			for (Instruction inst : instructions) {
+				if (!(inst instanceof BinaryInstruction bin) || bin.getOpCode() != OpCode.REM) {
+					continue;
+				}
+				Value dividend = bin.getLeft();
+				Value divisor = bin.getRight();
+				if (!(divisor instanceof ConstantInt cdiv)) {
+					continue;
+				}
+				if (!(dividend.getType() instanceof IntegerType intTy)) {
+					continue;
+				}
+				int bitWidth = intTy.getBitWidth();
+				int d = cdiv.getValue();
+				if (d == 0) continue;
+				
+				// 情况A：除数为 2^n
+				if (d > 0 && isPowerOfTwo(d)) {
+					int n = Integer.numberOfTrailingZeros(d);
+					int signShift = bitWidth - 1;
+					int maskVal = d - 1;
+					ConstantInt cShiftSign = new ConstantInt(signShift, intTy);
+					ConstantInt cMask = new ConstantInt(maskVal, intTy);
+					ConstantInt cShiftN = new ConstantInt(n, intTy);
+					
+					// negMask = (x >> (w-1)) & mask
+					BinaryInstruction sign = new BinaryInstruction(OpCode.ASHR, dividend, cShiftSign, intTy);
+					sign.insertBefore(inst);
+					BinaryInstruction negMask = new BinaryInstruction(OpCode.AND, sign, cMask, intTy);
+					negMask.insertBefore(inst);
+					// t = (x + negMask) & mask
+					BinaryInstruction addT = new BinaryInstruction(OpCode.ADD, dividend, negMask, intTy);
+					addT.insertBefore(inst);
+					BinaryInstruction t = new BinaryInstruction(OpCode.AND, addT, cMask, intTy);
+					t.insertBefore(inst);
+					// r = t - negMask
+					BinaryInstruction r = new BinaryInstruction(OpCode.SUB, t, negMask, intTy);
+					r.insertBefore(inst);
+					replaceInstruction(bin, r);
+					changed = true;
+					continue;
+				}
+				
+				// 情况B：除数为 2^n - 1
+				if (d > 0 && isPowerOfTwo(d + 1)) {
+					int n = Integer.numberOfTrailingZeros(d + 1);
+					if (d == 1) {
+						// x % 1 == 0
+						ConstantInt zero = ConstantInt.getZero(intTy);
+						replaceInstruction(bin, zero);
+						changed = true;
+						continue;
+					}
+					ConstantInt cMask = new ConstantInt(d, intTy); // m = 2^n-1
+					ConstantInt cShiftN = new ConstantInt(n, intTy);
+					ConstantInt cShiftSign = new ConstantInt(bitWidth - 1, intTy);
+					
+					// 计算 |x|：absX = (x ^ negMaskAll) - negMaskAll
+					BinaryInstruction negAll = new BinaryInstruction(OpCode.ASHR, dividend, cShiftSign, intTy); // -1 或 0
+					negAll.insertBefore(inst);
+					BinaryInstruction xXor = new BinaryInstruction(OpCode.XOR, dividend, negAll, intTy);
+					xXor.insertBefore(inst);
+					BinaryInstruction absX = new BinaryInstruction(OpCode.SUB, xXor, negAll, intTy);
+					absX.insertBefore(inst);
+					
+					// r = absX; 进行k轮 Mersenne 折叠: r = (r & m) + (r >> n)
+					Value rVal = absX;
+					int k = Math.max(2, (bitWidth + n - 1) / n); // 至少2轮，保证收敛
+					for (int i = 0; i < k; i++) {
+						BinaryInstruction rAnd = new BinaryInstruction(OpCode.AND, rVal, cMask, intTy);
+						rAnd.insertBefore(inst);
+						BinaryInstruction rShr = new BinaryInstruction(OpCode.LSHR, rVal, cShiftN, intTy);
+						rShr.insertBefore(inst);
+						BinaryInstruction rAdd = new BinaryInstruction(OpCode.ADD, rAnd, rShr, intTy);
+						rAdd.insertBefore(inst);
+						rVal = rAdd;
+					}
+					// 若 r >= m，则 r -= m  （无分支）
+					CompareInstruction ge = new CompareInstruction(OpCode.ICMP, OpCode.SGE, rVal, cMask);
+					ge.insertBefore(inst);
+					ConversionInstruction geZext = IRBuilder.createConversion(ge, intTy, OpCode.ZEXT, null);
+					geZext.insertBefore(inst);
+					BinaryInstruction condSub = new BinaryInstruction(OpCode.MUL, geZext, cMask, intTy);
+					condSub.insertBefore(inst);
+					BinaryInstruction rAdj = new BinaryInstruction(OpCode.SUB, rVal, condSub, intTy);
+					rAdj.insertBefore(inst);
+					
+					// 将 rAdj 按原符号取反：rSigned = (rAdj ^ negAll) - negAll
+					BinaryInstruction rXor = new BinaryInstruction(OpCode.XOR, rAdj, negAll, intTy);
+					rXor.insertBefore(inst);
+					BinaryInstruction rSigned = new BinaryInstruction(OpCode.SUB, rXor, negAll, intTy);
+					rSigned.insertBefore(inst);
+					
+					replaceInstruction(bin, rSigned);
+					changed = true;
+				}
+			}
+		}
+		
+		return changed;
+	}
+	
+	private boolean isPowerOfTwo(int v) {
+		return v > 0 && (v & (v - 1)) == 0;
+	}
+	
+	/**
+	 * 常数比较优化
+	 * 识别以下模式：
+	 * a = icmp ne/eq/... const1, const2
+	 * zext a to b
+	 * c = icmp ne b, 0
+	 * br c blocka, blockb
+	 * 
+	 * 这种模式可以直接在编译时计算结果，替换为无条件跳转
+	 */
+	private boolean optimizeConstantCompare(Function function) {
+		boolean changed = false;
+		
+		for (BasicBlock block : function.getBasicBlocks()) {
+			Instruction terminator = block.getTerminator();
+			if (!(terminator instanceof BranchInstruction branch) || branch.isUnconditional()) {
+				continue;
+			}
+			
+			Value condition = branch.getCondition();
+			if (!(condition instanceof CompareInstruction secondCmp)) {
+				continue;
+			}
+			
+			if (secondCmp.getPredicate() != OpCode.NE) {
+				continue;
+			}
+			
+			if (!(secondCmp.getRight() instanceof ConstantInt rightConst) || rightConst.getValue() != 0) {
+				continue;
+			}
+			
+			Value zextResult = secondCmp.getLeft();
+			if (!(zextResult instanceof ConversionInstruction convInst)) {
+				continue;
+			}
+			
+			if (convInst.getConversionType() != OpCode.ZEXT) {
+				continue;
+			}
+			
+			Value firstCmpResult = convInst.getSource();
+			if (!(firstCmpResult instanceof CompareInstruction firstCmp)) {
+				continue;
+			}
+			
+			if (!(firstCmp.getLeft() instanceof ConstantInt firstLeft && 
+			      firstCmp.getRight() instanceof ConstantInt firstRight)) {
+				continue;
+			}
+			
+			int leftValue = firstLeft.getValue();
+			int rightValue = firstRight.getValue();
+			boolean compareResult;
+			
+			switch (firstCmp.getPredicate()) {
+				case EQ:
+					compareResult = (leftValue == rightValue);
+					break;
+				case NE:
+					compareResult = (leftValue != rightValue);
+					break;
+				case SGT:
+					compareResult = (leftValue > rightValue);
+					break;
+				case SGE:
+					compareResult = (leftValue >= rightValue);
+					break;
+				case SLT:
+					compareResult = (leftValue < rightValue);
+					break;
+				case SLE:
+					compareResult = (leftValue <= rightValue);
+					break;
+				default:
+					continue;
+			}
+			
+			BasicBlock target = compareResult ? branch.getTrueBlock() : branch.getFalseBlock();
+			BranchInstruction newBranch = new BranchInstruction(target);
+			
+			block.removeInstruction(terminator);
+			block.addInstruction(newBranch);
+			
+			cleanupUnusedInstructions(secondCmp, convInst, firstCmp);
+			
+			changed = true;
+		}
+		
+		return changed;
+	}
+	
+	private void cleanupUnusedInstructions(CompareInstruction secondCmp, 
+										  ConversionInstruction convInst, 
+										  CompareInstruction firstCmp) {
+		secondCmp.removeFromParent();
+		convInst.removeFromParent();
+		firstCmp.removeFromParent();
+	}
+	
+	private void replaceAllUses(Value oldValue, Value newValue) {
+		List<User> users = new ArrayList<>(oldValue.getUsers());
+		
+		for (User user : users) {
+			for (int i = 0; i < user.getOperandCount(); i++) {
+				if (user.getOperand(i) == oldValue) {
+					user.setOperand(i, newValue);
+				}
+			}
+		}
+	}
+	
+	private void replaceInstruction(Instruction oldInst, Value newValue) {
+		ArrayList<User> users = new ArrayList<>(oldInst.getUsers());
+		
+		for (User user : users) {
+			for (int i = 0; i < user.getOperandCount(); i++) {
+				if (user.getOperand(i) == oldInst) {
+					user.setOperand(i, newValue);
+				}
+			}
+		}
+		
+		if (oldInst.getUsers().isEmpty()) {
+			oldInst.removeFromParent();
+		}
+	}
 }

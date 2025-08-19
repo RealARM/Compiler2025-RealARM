@@ -1,464 +1,200 @@
 package MiddleEnd.Optimization.Loop;
 
-import MiddleEnd.IR.IRBuilder;
 import MiddleEnd.IR.Module;
-import MiddleEnd.Optimization.Core.Optimizer;
-import MiddleEnd.Optimization.Analysis.*;
-import MiddleEnd.IR.Value.*;
-import MiddleEnd.IR.Value.Instructions.*;
+import MiddleEnd.IR.Value.Function;
+import MiddleEnd.Optimization.Core.Optimizer.ModuleOptimizer;
+import MiddleEnd.Optimization.Analysis.LoopAnalysis;
+import MiddleEnd.Optimization.Analysis.Loop;
+import MiddleEnd.IR.Value.BasicBlock;
+import MiddleEnd.IR.Value.Value;
+import MiddleEnd.IR.Value.Constant;
+import MiddleEnd.IR.Value.ConstantInt;
+import MiddleEnd.IR.Value.Instructions.BranchInstruction;
+import MiddleEnd.IR.Value.Instructions.CompareInstruction;
+import MiddleEnd.IR.Value.Instructions.BinaryInstruction;
+import MiddleEnd.IR.Value.Instructions.PhiInstruction;
+import MiddleEnd.IR.IRBuilder;
 import MiddleEnd.IR.OpCode;
-import MiddleEnd.IR.Type.*;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
-/**
- * 循环交换优化Pass
- * 将嵌套循环的执行顺序交换，以提高缓存局部性和性能
- */
-public class LoopInterchange implements Optimizer.ModuleOptimizer {
-    
-    private final Map<Value, Value> iterVarToEndMap = new HashMap<>();
-    private final Map<Value, Set<Loop>> endToLoopMap = new HashMap<>();
-    
-    private final IRBuilder builder = new IRBuilder();
-    
-    private static final int MAX_BLOCK_THRESHOLD = 1000;
+public class LoopInterchange implements ModuleOptimizer {
+	@Override
+	public String getName() {
+		return "LoopInterchange";
+	}
 
-    @Override
-    public boolean run(Module module) {
-        boolean changed = false;
-        
-        iterVarToEndMap.clear();
-        endToLoopMap.clear();
-        
-        for (Function function : module.functions()) {
-            if (!function.isExternal()) {
-                changed |= processFunction(function);
-            }
-        }
-        
-        return changed;
-    }
-    
-    private boolean processFunction(Function function) {
-        if (function == null) {
-            return false;
-        }
-        
-        int blockCount = function.getBasicBlocks().size();
-        if (blockCount > MAX_BLOCK_THRESHOLD) {
-            System.out.println("[LoopInterchange] Function " + function.getName() + " has " + blockCount + 
-                " basic blocks, which exceeds the threshold of " + MAX_BLOCK_THRESHOLD + ". Skipping for performance reasons.");
-            return false;
-        }
-        
-        runRequiredAnalysis(function);
-        
-        List<Loop> dfsOrderLoops = getAllLoopsDFS(function);
-        if (isEmpty(dfsOrderLoops)) {
-            return false;
-        }
-        
-        for (Loop loop : dfsOrderLoops) {
-            if (loop != null) {
-                analyzeLoopVariables(loop);
-            }
-        }
-        
-        boolean changed = false;
-        for (Loop loop : dfsOrderLoops) {
-            if (loop != null) {
-                changed |= tryLoopInterchange(loop);
-            }
-        }
-        
-        return changed;
-    }
-    
-    private void runRequiredAnalysis(Function function) {
-        LoopAnalysis.runLoopInfo(function);
-    }
-    
-    private List<Loop> getAllLoopsDFS(Function function) {
-        List<Loop> dfsOrderLoops = new ArrayList<>();
-        List<Loop> topLoops = LoopAnalysis.getTopLevelLoops(function);
-        
-        if (!isEmpty(topLoops)) {
-            for (Loop loop : topLoops) {
-                if (loop != null) {
-                    dfsOrderLoops.addAll(getDFSLoops(loop));
-                }
-            }
-        }
-        
-        return dfsOrderLoops;
-    }
-    
-    private List<Loop> getDFSLoops(Loop loop) {
-        List<Loop> allLoops = new ArrayList<>();
-        for (Loop subLoop : loop.getSubLoops()) {
-            if (subLoop != null) {
-                allLoops.addAll(getDFSLoops(subLoop));
-            }
-        }
-        allLoops.add(loop);
-        return allLoops;
-    }
-    
-    private void analyzeLoopVariables(Loop loop) {
-        if (!isSimpleForLoop(loop)) {
-            return;
-        }
-        
-        BasicBlock header = loop.getHeader();
-        if (header == null || header.getPredecessors().size() != 2) {
-            return;
-        }
-        
-        List<BasicBlock> latchBlocks = loop.getLatchBlocks();
-        if (isEmpty(latchBlocks) || latchBlocks.size() != 1) {
-            return;
-        }
-        
-        BranchInstruction headerBr = findTerminator(header);
-        if (headerBr == null || headerBr.isUnconditional()) {
-            return;
-        }
-        
-        Value condition = headerBr.getCondition();
-        if (!(condition instanceof BinaryInstruction)) {
-            return;
-        }
-        
-        BinaryInstruction condInst = (BinaryInstruction) condition;
-        if (!isComparisonOp(condInst.getOpCode())) {
-            return;
-        }
-        
-        PhiInstruction indVar = null;
-        Value endValue = null;
-        
-        Value left = condInst.getLeft();
-        Value right = condInst.getRight();
-        
-        if (left instanceof PhiInstruction && header.getInstructions().contains(left)) {
-            indVar = (PhiInstruction) left;
-            endValue = right;
-        }
-        else if (right instanceof PhiInstruction && header.getInstructions().contains(right)) {
-            indVar = (PhiInstruction) right;
-            endValue = left;
-        }
-        
-        if (indVar == null || endValue == null) {
-            return;
-        }
-        
-        if (indVar.getOperandCount() != 2) {
-            return;
-        }
-        
-        iterVarToEndMap.put(indVar, endValue);
-        
-        if (!endToLoopMap.containsKey(endValue)) {
-            endToLoopMap.put(endValue, new HashSet<>());
-        }
-        endToLoopMap.get(endValue).add(loop);
-    }
-    
-    private boolean isSimpleForLoop(Loop loop) {
-        if (loop.getHeader() == null) {
-            return false;
-        }
-        
-        if (isEmpty(loop.getLatchBlocks())) {
-            return false;
-        }
-        
-        if (isEmpty(loop.getExitBlocks()) || loop.getExitBlocks().size() != 1) {
-            return false;
-        }
-        
-        return true;
-    }
-    
-    private BranchInstruction findTerminator(BasicBlock block) {
-        List<Instruction> instructions = block.getInstructions();
-        if (isEmpty(instructions)) {
-            return null;
-        }
-        
-        Instruction lastInst = instructions.get(instructions.size() - 1);
-        if (lastInst instanceof BranchInstruction) {
-            return (BranchInstruction) lastInst;
-        }
-        
-        return null;
-    }
-    
-    private boolean isComparisonOp(OpCode op) {
-        return op == OpCode.ICMP || op == OpCode.FCMP ||
-               op == OpCode.EQ || op == OpCode.NE ||
-               op == OpCode.SGT || op == OpCode.SGE ||
-               op == OpCode.SLT || op == OpCode.SLE ||
-               op == OpCode.UEQ || op == OpCode.UNE ||
-               op == OpCode.UGT || op == OpCode.UGE ||
-               op == OpCode.ULT || op == OpCode.ULE;
-    }
-    
-    private boolean tryLoopInterchange(Loop loop) {
-        PhiInstruction indVar = getInductionVar(loop);
-        
-        if (indVar == null || !iterVarToEndMap.containsKey(indVar)) {
-            return false;
-        }
-        
-        BasicBlock header = loop.getHeader();
-        if (header == null || header.getPredecessors().size() != 2) {
-            return false;
-        }
-        
-        List<BasicBlock> latchBlocks = loop.getLatchBlocks();
-        if (isEmpty(latchBlocks) || latchBlocks.size() != 1) {
-            return false;
-        }
-        BasicBlock latch = latchBlocks.get(0);
-        
-        int latchIdx = header.getPredecessors().indexOf(latch);
-        if (latchIdx < 0) {
-            return false;
-        }
-        BasicBlock preHeader = header.getPredecessors().get(1 - latchIdx);
-        
-        Value initValue = getInitValue(indVar, header, latch);
-        if (initValue == null || initValue instanceof Constant) {
-            return false;
-        }
-        
-        if (!iterVarToEndMap.containsKey(initValue)) {
-            return false;
-        }
-        
-        Set<Loop> outerLoops = endToLoopMap.get(initValue);
-        if (isEmpty(outerLoops)) {
-            return false;
-        }
-        
-        for (Loop outerLoop : outerLoops) {
-            if (outerLoop == null) continue;
-            
-            if (canInterchangeLoops(loop, outerLoop, preHeader)) {
-                return performInterchange(loop, outerLoop);
-            }
-        }
-        
-        return false;
-    }
-    
-    private boolean canInterchangeLoops(Loop innerLoop, Loop outerLoop, BasicBlock preHeader) {
-        if (isEmpty(outerLoop.getExitBlocks()) || outerLoop.getExitBlocks().size() != 1) {
-            return false;
-        }
-        
-        BasicBlock outerExitBlock = outerLoop.getExitBlocks().iterator().next();
-        if (outerExitBlock != preHeader) {
-            return false;
-        }
-        
-        Value outerStep = getStepValue(outerLoop);
-        Value innerStep = getStepValue(innerLoop);
-        return areStepValuesCompatible(outerStep, innerStep);
-    }
-    
-    private PhiInstruction getInductionVar(Loop loop) {
-        BasicBlock header = loop.getHeader();
-        if (header == null) {
-            return null;
-        }
-        
-        BranchInstruction br = findTerminator(header);
-        if (br == null || br.isUnconditional()) {
-            return null;
-        }
-        
-        Value condition = br.getCondition();
-        if (!(condition instanceof BinaryInstruction)) {
-            return null;
-        }
-        
-        BinaryInstruction condInst = (BinaryInstruction) condition;
-        Value left = condInst.getLeft();
-        Value right = condInst.getRight();
-        
-        if (left instanceof PhiInstruction && header.getInstructions().contains(left)) {
-            return (PhiInstruction) left;
-        } else if (right instanceof PhiInstruction && header.getInstructions().contains(right)) {
-            return (PhiInstruction) right;
-        }
-        
-        return null;
-    }
-    
-    private Value getInitValue(PhiInstruction phi, BasicBlock header, BasicBlock latch) {
-        if (phi == null || phi.getOperandCount() != 2) {
-            return null;
-        }
-        
-        List<BasicBlock> incomingBlocks = phi.getIncomingBlocks();
-        if (isEmpty(incomingBlocks)) {
-            return null;
-        }
-        
-        int latchIndex = incomingBlocks.indexOf(latch);
-        if (latchIndex >= 0) {
-            return phi.getOperand(1 - latchIndex);
-        }
-        
-        return null;
-    }
-    
-    private Value getStepValue(Loop loop) {
-        PhiInstruction indVar = getInductionVar(loop);
-        if (indVar == null) {
-            return null;
-        }
-        
-        BasicBlock header = loop.getHeader();
-        List<BasicBlock> latchBlocks = loop.getLatchBlocks();
-        if (header == null || isEmpty(latchBlocks)) {
-            return null;
-        }
-        
-        BasicBlock latch = latchBlocks.get(0);
-        if (latch == null) {
-            return null;
-        }
-        
-        List<BasicBlock> incomingBlocks = indVar.getIncomingBlocks();
-        if (isEmpty(incomingBlocks)) {
-            return null;
-        }
-        
-        int latchIndex = incomingBlocks.indexOf(latch);
-        if (latchIndex < 0) {
-            return null;
-        }
-        
-        Value stepExpr = indVar.getOperand(latchIndex);
-        if (!(stepExpr instanceof BinaryInstruction)) {
-            return null;
-        }
-        
-        BinaryInstruction binInst = (BinaryInstruction) stepExpr;
-        if (binInst.getOpCode() != OpCode.ADD) {
-            return null;
-        }
-        
-        if (binInst.getLeft() == indVar) {
-            return binInst.getRight();
-        } else if (binInst.getRight() == indVar) {
-            return binInst.getLeft();
-        }
-        
-        return null;
-    }
-    
-    private boolean areStepValuesCompatible(Value step1, Value step2) {
-        if (step1 == null || step2 == null) {
-            return false;
-        }
-        
-        if (step1 instanceof ConstantInt && step2 instanceof ConstantInt) {
-            return ((ConstantInt) step1).getValue() == ((ConstantInt) step2).getValue();
-        }
-        
-        return step1 == step2;
-    }
-    
-    private boolean performInterchange(Loop innerLoop, Loop outerLoop) {
-        PhiInstruction innerVar = getInductionVar(innerLoop);
-        PhiInstruction outerVar = getInductionVar(outerLoop);
-        if (innerVar == null || outerVar == null) {
-            return false;
-        }
-        
-        Value innerEnd = iterVarToEndMap.get(innerVar);
-        Value outerEnd = iterVarToEndMap.get(outerVar);
-        if (innerEnd == null || outerEnd == null) {
-            return false;
-        }
-        
-        BasicBlock innerHeader = innerLoop.getHeader();
-        BasicBlock outerHeader = outerLoop.getHeader();
-        if (innerHeader == null || outerHeader == null) {
-            return false;
-        }
-        
-        BranchInstruction innerBr = findTerminator(innerHeader);
-        BranchInstruction outerBr = findTerminator(outerHeader);
-        if (innerBr == null || outerBr == null) {
-            return false;
-        }
-        
-        Value innerCond = innerBr.getCondition();
-        Value outerCond = outerBr.getCondition();
-        if (!(innerCond instanceof BinaryInstruction) || !(outerCond instanceof BinaryInstruction)) {
-            return false;
-        }
-        
-        BinaryInstruction innerCondInst = (BinaryInstruction) innerCond;
-        BinaryInstruction outerCondInst = (BinaryInstruction) outerCond;
-        
-        return swapLoopBounds(innerLoop, outerLoop, innerVar, outerVar, innerCondInst, outerEnd);
-    }
-    
-    private boolean swapLoopBounds(Loop innerLoop, Loop outerLoop, 
-                                 PhiInstruction innerVar, PhiInstruction outerVar, 
-                                 BinaryInstruction innerCondInst, Value outerEnd) {
-        BasicBlock innerHeader = innerLoop.getHeader();
-        BasicBlock outerHeader = outerLoop.getHeader();
-        
-        Value outerInit = getInitValue(outerVar, outerHeader, outerLoop.getLatchBlocks().get(0));
-        Value innerInit = getInitValue(innerVar, innerHeader, innerLoop.getLatchBlocks().get(0));
-        
-        if (outerInit == null || innerInit == null) {
-            return false;
-        }
-        
-        ConstantInt zeroInit = ConstantInt.getZero(IntegerType.I32);
-        
-        if (innerCondInst.getLeft() == innerVar) {
-            innerCondInst.setOperand(1, outerEnd);
-        } else {
-            innerCondInst.setOperand(0, outerEnd);
-        }
-        
-        for (int i = 0; i < innerVar.getOperandCount(); i++) {
-            if (innerVar.getOperand(i) == innerInit) {
-                innerVar.setOperand(i, zeroInit);
-                break;
-            }
-        }
-        
-        System.out.println("[LoopInterchange] Interchanged loops in " + innerHeader.getParentFunction().getName());
-        return true;
-    }
-    
-    private <T> boolean isEmpty(List<T> list) {
-        return list == null || list.isEmpty();
-    }
-    
-    private <T> boolean isEmpty(Set<T> set) {
-        return set == null || set.isEmpty();
-    }
+	@Override
+	public boolean run(Module module) {
+		boolean changed = false;
+		for (Function function : module.functions()) {
+			changed |= runOnFunction(function);
+		}
+		return changed;
+	}
 
-    @Override
-    public String getName() {
-        return "LoopInterchange";
-    }
-} 
+	private boolean runOnFunction(Function function) {
+		boolean changed = false;
+		LoopAnalysis.runLoopInfo(function);
+		LoopAnalysis.analyzeInductionVariables(function);
+
+		List<Loop> dfsLoops = LoopAnalysis.getAllLoopsInDFSOrder(function);
+
+		for (Loop loop : dfsLoops) {
+			changed |= tryInterchange(loop);
+		}
+		return changed;
+	}
+
+	private boolean tryInterchange(Loop loop) {
+		if (loop == null) return false;
+		if (!isSimpleCountedLoop(loop)) return false;
+
+		BasicBlock header = loop.getHeader();
+		if (header == null) return false;
+		if (loop.getLatchBlocks().size() != 1) return false;
+
+		if (!isPerfectlyNestedWithSingleInner(loop)) return false;
+
+		Loop inner = loop.getSubLoops().get(0);
+
+		if (!(loop.getInductionVariable() instanceof PhiInstruction outerPhi)) return false;
+		if (!(inner.getInductionVariable() instanceof PhiInstruction innerPhi)) return false;
+
+		if (!(loop.getStepValue() instanceof ConstantInt outerStep)) return false;
+		if (!(inner.getStepValue() instanceof ConstantInt innerStep)) return false;
+		if (outerStep.getValue() != innerStep.getValue()) return false;
+		if (!(loop.getInitValue() instanceof ConstantInt outerInit)) return false;
+		if (!(inner.getInitValue() instanceof ConstantInt innerInit)) return false;
+		if (!(loop.getEndValue() instanceof ConstantInt outerEnd)) return false;
+		if (!(inner.getEndValue() instanceof ConstantInt innerEnd)) return false;
+		if (!(loop.getUpdateInstruction() instanceof BinaryInstruction outerUpdate)) return false;
+		if (!(inner.getUpdateInstruction() instanceof BinaryInstruction innerUpdate)) return false;
+		if (outerUpdate.getOpCode() != OpCode.ADD) return false;
+		if (innerUpdate.getOpCode() != OpCode.ADD) return false;
+
+		CompareInstruction outerCmp = getHeaderCompare(loop);
+		CompareInstruction innerCmp = getHeaderCompare(inner);
+		if (outerCmp == null || innerCmp == null) return false;
+		if (!outerCmp.isRelationalCompare() || !innerCmp.isRelationalCompare()) return false;
+
+		BasicBlock outerHeader = loop.getHeader();
+		BasicBlock innerHeader = inner.getHeader();
+		BasicBlock outerPreheader = loop.getPreheader();
+		BasicBlock innerPreheader = inner.getPreheader();
+		if (outerPreheader == null || innerPreheader == null) return false;
+
+		BranchInstruction outerBr = null;
+		if (outerHeader.getTerminator() instanceof BranchInstruction ob && !ob.isUnconditional()) {
+			outerBr = ob;
+		}
+		BranchInstruction innerBr = null;
+		if (innerHeader.getTerminator() instanceof BranchInstruction ib && !ib.isUnconditional()) {
+			innerBr = ib;
+		}
+		if (outerBr == null || innerBr == null) return false;
+
+		boolean changed = false;
+
+		// 1) 重写外层比较：使用 innerPhi 与 innerEnd，并保持与原比较相同的自变量位置关系
+		CompareInstruction newOuterCmp = createCmpLike(outerCmp, outerPhi, innerPhi, innerEnd);
+		newOuterCmp.insertBefore(outerBr);
+		outerBr.setOperand(0, newOuterCmp);
+		changed = true;
+
+		// 2) 重写内层比较：使用 outerPhi 与 outerEnd
+		CompareInstruction newInnerCmp = createCmpLike(innerCmp, innerPhi, outerPhi, outerEnd);
+		newInnerCmp.insertBefore(innerBr);
+		innerBr.setOperand(0, newInnerCmp);
+
+		// 3) 交换 PHI 的来自各自前置头的初值
+		outerPhi.addOrUpdateIncoming(innerInit, outerPreheader);
+		innerPhi.addOrUpdateIncoming(outerInit, innerPreheader);
+
+		// 4) 调整更新指令：将“自变量”替换为对方 iv，将常量步长替换为对方 step
+		rewriteAddUpdate(outerUpdate, outerPhi, innerPhi, innerStep);
+		rewriteAddUpdate(innerUpdate, innerPhi, outerPhi, outerStep);
+
+		System.out.println("[LoopInterchange] Interchanged (outer:" + loop.getHeader().getName() + ", inner:" + inner.getHeader().getName() + ")");
+		return changed;
+	}
+
+	private CompareInstruction createCmpLike(CompareInstruction origin, Value originIv, Value newIv, Value newEnd) {
+		Value left = origin.getOperand(0);
+		Value right = origin.getOperand(1);
+		if (left == originIv) {
+			return IRBuilder.createCompare(origin.getCompareType(), origin.getPredicate(), newIv, newEnd, null);
+		} else if (right == originIv) {
+			return IRBuilder.createCompare(origin.getCompareType(), origin.getPredicate(), newEnd, newIv, null);
+		}
+		// Fallback: place as left
+		return IRBuilder.createCompare(origin.getCompareType(), origin.getPredicate(), newIv, newEnd, null);
+	}
+
+	private void rewriteAddUpdate(BinaryInstruction addInst, Value oldIv, Value newIv, ConstantInt newStep) {
+		Value left = addInst.getOperand(0);
+		Value right = addInst.getOperand(1);
+		if (left == oldIv) {
+			addInst.setOperand(0, newIv);
+			addInst.setOperand(1, newStep);
+		} else if (right == oldIv) {
+			addInst.setOperand(1, newIv);
+			addInst.setOperand(0, newStep);
+		}
+	}
+
+	private CompareInstruction getHeaderCompare(Loop l) {
+		if (l == null || l.getHeader() == null) return null;
+		if (!(l.getHeader().getTerminator() instanceof BranchInstruction br) || br.isUnconditional()) return null;
+		Value cond = br.getCondition();
+		if (cond instanceof CompareInstruction cmp) return cmp;
+		return null;
+	}
+
+	private boolean isPerfectlyNestedWithSingleInner(Loop outer) {
+		List<Loop> subLoops = outer.getSubLoops();
+		if (subLoops.size() != 1) return false;
+		Loop inner = subLoops.get(0);
+
+		if (!isSimpleCountedLoop(inner)) return false;
+		if (inner.getLatchBlocks().size() != 1) return false;
+
+		if (outer.getPreheader() == null) return false;
+		if (inner.getPreheader() == null) return false;
+
+		Set<BasicBlock> outerBlocks = outer.getBlocks();
+		Set<BasicBlock> innerBlocks = inner.getBlocks();
+		Set<BasicBlock> outerLatchSet = new HashSet<>(outer.getLatchBlocks());
+		for (BasicBlock block : outerBlocks) {
+			if (block == outer.getHeader()) continue;
+			if (outerLatchSet.contains(block)) continue;
+			if (!innerBlocks.contains(block)) return false;
+		}
+
+		return true;
+	}
+
+	private boolean isSimpleCountedLoop(Loop loop) {
+		if (loop == null) return false;
+		if (!loop.hasInductionVariable()) return false;
+		Value init = loop.getInitValue();
+		Value end = loop.getEndValue();
+		Value step = loop.getStepValue();
+		if (init == null || end == null || step == null) return false;
+		if (!(step instanceof ConstantInt constInt)) return false;
+		if (constInt.getValue() == 0) return false;
+
+		BasicBlock header = loop.getHeader();
+		if (header != null && header.getTerminator() instanceof BranchInstruction br && !br.isUnconditional()) {
+			Value cond = br.getCondition();
+			if (cond instanceof CompareInstruction cmp) {
+				boolean relational = cmp.isRelationalCompare();
+				if (!relational) return false;
+			}
+		}
+		return true;
+	}
+}
