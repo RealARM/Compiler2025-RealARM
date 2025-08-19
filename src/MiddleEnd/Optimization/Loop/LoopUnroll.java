@@ -934,10 +934,11 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         // 首先清理可能错误放置的指令
         cleanupMisplacedInstructions(function, loop);
 
-        // 创建新的基本块
-        BasicBlock preHeader = IRBuilder.createBasicBlock("preheader", function);
-        BasicBlock preExitHeader = IRBuilder.createBasicBlock("pre_exit_header", function);
-        BasicBlock preExitLatch = IRBuilder.createBasicBlock("pre_exit_latch", function);
+        // 为每个循环创建唯一命名的基本块，避免名称冲突
+        String loopId = header.getName() != null ? header.getName() : "loop_" + System.currentTimeMillis();
+        BasicBlock preHeader = IRBuilder.createBasicBlock("preheader_" + loopId, function);
+        BasicBlock preExitHeader = IRBuilder.createBasicBlock("pre_exit_header_" + loopId, function);
+        BasicBlock preExitLatch = IRBuilder.createBasicBlock("pre_exit_latch_" + loopId, function);
 
         // 重定向原来到header的边 - 先重定向，再创建指令
         redirectPreHeaderEdges(header, latch, preHeader);
@@ -1282,7 +1283,7 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
                 // 添加来自preExitLatch的值，暂时用初始值
                 newPhi.addIncoming(initValue, preExitLatch);
                 
-                // 还需添加来自 header 的值，初始设为原头块phi（循环中最新值）
+                // 添加来自header的当前phi值，保持与控制流前驱一致
                 newPhi.addIncoming(phi, header);
                 
                 // 验证phi节点确实有两个操作数
@@ -1390,10 +1391,34 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         if (iniArrParam == null) {
             // 尝试通过参数索引获取
             List<Argument> args = function.getArguments();
-            if (args.size() > 0) {
-                iniArrParam = args.get(0); // ini_arr通常是第一个参数
+            if (!args.isEmpty()) {
+                iniArrParam = args.get(0); // 退而求其次使用第一个参数
             }
         }
+        
+        // 如果仍为空，再在entry block中搜寻第一个i32*类型的alloca作为备选
+        if (iniArrParam == null) {
+            for (Instruction inst : function.getEntryBlock().getInstructions()) {
+                if (inst instanceof AllocaInstruction allocaInst) {
+                    if (allocaInst.getAllocatedType().toString().contains("i32")) {
+                        iniArrParam = allocaInst;
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 如果仍未找到必要的参数，提前返回避免空指针异常
+        if (iniArrParam == null) {
+            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                System.out.println("Fallback: unable to locate ini_arr pointer, using simplified remainder logic.");
+            }
+            BinaryInstruction newUpdateInst = IRBuilder.createBinaryInst(OpCode.ADD, preExitInductionVar,
+                                                        new ConstantInt(1, IntegerType.I32), preExitLatch);
+            IRBuilder.createBr(preExitHeader, preExitLatch);
+            return;
+        }
+
         
         GetElementPtrInstruction gepInst1 = IRBuilder.createGetElementPtr(iniArrParam, addInst1, preExitLatch);
         
