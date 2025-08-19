@@ -24,7 +24,6 @@ public class AArch64Move extends AArch64Instruction {
         }
         this.isImmediate = isImmediate;
         this.moveType = MoveType.MOV;
-        
     }
 
     public AArch64Move(AArch64Reg destReg, AArch64Operand operand, boolean isImmediate, MoveType moveType) {
