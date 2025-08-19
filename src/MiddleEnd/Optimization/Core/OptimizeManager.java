@@ -47,6 +47,9 @@ public class OptimizeManager {
         // 尾递归消除优化
         addModuleOptimizer(new TailRecursionElimination());
         
+        // 栈上大数组全局化（在Mem2Reg之前）
+        addModuleOptimizer(new LargeAllocaGlobalizer());
+        
         // 第一次Mem2Reg优化
         addModuleOptimizer(new Mem2Reg());
         
@@ -113,6 +116,9 @@ public class OptimizeManager {
 
         // 窥孔优化
         addModuleOptimizer(new PeepHole());
+
+        // 函数内联展开优化
+        addModuleOptimizer(new InlineExpansion());
         
         // 全局代码移动优化
         addModuleOptimizer(new GCM());
@@ -131,7 +137,7 @@ public class OptimizeManager {
         addModuleOptimizer(new ConstantFolding());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        addModuleOptimizer(new RemovePhiPass());
+        // addModuleOptimizer(new RemovePhiPass());
     }
     
     public void addModuleOptimizer(ModuleOptimizer optimizer) {
@@ -215,24 +221,6 @@ public class OptimizeManager {
         
         // 再运行函数级优化器
         runFunctionOptimizersOnModule(module);
-    }
-    
-    public void optimize(Module module, int optimizationLevel) {
-        clearAnalysisResults();
-        
-        if (optimizationLevel <= 0) {
-            return;
-        }
-        
-        runModuleOptimizers(module);
-        
-        if (optimizationLevel >= 2) {
-            runModuleOptimizers(module);
-        }
-        
-        if (optimizationLevel >= 3) {
-            runModuleOptimizers(module);
-        }
     }
 }
     
