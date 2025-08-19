@@ -54,9 +54,8 @@ public class CloneHelper {
             return copyPhiInstruction(phiInst);
         } else if (inst instanceof GetElementPtrInstruction gepInst) {
             return copyGetElementPtrInstruction(gepInst);
-        // ConvertInstruction暂时不支持
-        // } else if (inst instanceof ConvertInstruction convInst) {
-        //     return copyConvertInstruction(convInst);
+        } else if (inst instanceof ConversionInstruction convInst) {
+            return copyConversionInstruction(convInst);
         }
         
         // 未知指令类型，抛出异常
@@ -151,11 +150,11 @@ public class CloneHelper {
         }
     }
     
-    // ConvertInstruction暂时不支持
-         /*private ConvertInstruction copyConvertInstruction(ConvertInstruction original) {
-        Value operand = findValue(original.getOperand());
-        return IRBuilder.createConversion(operand, original.getTargetType(), original.getOpCode(), null);
-    }*/
+    private ConversionInstruction copyConversionInstruction(ConversionInstruction original) {
+        Value src = findValue(original.getSource());
+        // 使用IRBuilder创建转换指令，保持相同的目标类型和转换操作码
+        return IRBuilder.createConversion(src, original.getType(), original.getConversionType(), null);
+    }
     
     /**
      * 复制基本块到另一个基本块
