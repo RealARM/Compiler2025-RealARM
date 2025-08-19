@@ -90,9 +90,6 @@ public class OptimizeManager {
 
         // 删除无用循环
         addModuleOptimizer(new TrivialLoopDeletion());
-
-        // 循环交换优化
-        // addModuleOptimizer(new LoopInterchange());
         
         // 循环优化
         addModuleOptimizer(new LoopInvariantCodeMotion());
@@ -100,6 +97,9 @@ public class OptimizeManager {
         // 循环指针访问优化
         addModuleOptimizer(new LoopPointerExtract());
         addModuleOptimizer(new LoopPointerExtractPlus());
+        
+        // 循环交换优化
+        // addModuleOptimizer(new LoopInterchange());
 
         // 窥孔优化
         addModuleOptimizer(new PeepHole());
@@ -109,9 +109,6 @@ public class OptimizeManager {
         
         // 全局值编号优化 (GVN)
         addModuleOptimizer(new GVN());
-        
-        // Load/Store数据流优化
-        addModuleOptimizer(new LoadStoreFlowOptimizer());
         
         // 无用代码消除
         addModuleOptimizer(new DCE());
