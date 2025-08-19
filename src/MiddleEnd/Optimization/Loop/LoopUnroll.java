@@ -147,7 +147,8 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         
         int iterationCount = calculateIterationCount(aluOp, cmpOp, init, step, end);
         
-        if (iterationCount < 0 || iterationCount > MAX_UNROLL_ITERATIONS) {
+        // 如果迭代次数为0，则没有展开的意义；因此需要确保迭代次数至少为1
+        if (iterationCount <= 0 || iterationCount > MAX_UNROLL_ITERATIONS) {
             return false;
         }
 
@@ -1274,22 +1275,23 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
                 // preExitHeader有两个前驱：preHeader和preExitLatch
                 PhiInstruction newPhi = new PhiInstruction(phi.getType(), phi.getName() + "_exit");
                 
-                // 使用addIncoming方法正确添加phi操作数
-                Value initValue = phi.getOperand(1 - latchIndex);
-                
-                // 添加来自preHeader的初始值
+                // 正确添加phi操作数，对应三个前驱：preHeader、header、preExitLatch
+                Value initValue = phi.getOperand(1 - latchIndex); // 初始0
+                // 使用头块phi自身作为来自header边的值（支配性保证）
+                Value headerValue = phi;
+                Value latchValue = phi.getOperand(latchIndex);    // 最后迭代值（来自latch）
+
+                // preHeader 边：初始值
                 newPhi.addIncoming(initValue, preHeader);
-                
-                // 添加来自preExitLatch的值，暂时用初始值
+                // header 边：循环最后一次迭代后的值
+                newPhi.addIncoming(headerValue, header);
+                // preExitLatch 边：暂时也用初始值，稍后在completePreExitPhiOperands中更新
                 newPhi.addIncoming(initValue, preExitLatch);
-                
-                // 添加来自header的当前phi值，保持与控制流前驱一致
-                newPhi.addIncoming(phi, header);
-                
-                // 验证phi节点确实有两个操作数
+
+                // 验证phi节点确实有三个操作数
                 if (newPhi.getOperands().size() != 3) {
                     if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
-                        System.out.println("Warning: phi node " + newPhi.getName() + 
+                        System.out.println("Warning: phi node " + newPhi.getName() +
                                          " has " + newPhi.getOperands().size() + " operands, expected 3");
                     }
                 }
@@ -1361,10 +1363,91 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         }
         
         if (preExitInductionVar == null) {
-            // 如果没有归纳变量phi，只创建简单的自增
-            BinaryInstruction newUpdateInst = IRBuilder.createBinaryInst(OpCode.ADD, preExitInductionVar, 
-                                                                        new ConstantInt(1, IntegerType.I32), 
-                                                                        preExitLatch);
+            // 如果没有归纳变量phi，使用通用方式复制latch主体指令
+            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                System.out.println("Generic fallback: cloning latch body instructions for remainder loop");
+            }
+            
+            // 如果preExitInductionVar为null，我们需要先创建一个合适的phi节点
+            PhiInstruction tempExitPhi = null;
+            if (inductionVar instanceof PhiInstruction originalPhi) {
+                tempExitPhi = new PhiInstruction(originalPhi.getType(), originalPhi.getName() + "_exit_fallback");
+                // 添加来自preHeader和preExitLatch的操作数
+                tempExitPhi.addIncoming(new ConstantInt(0, IntegerType.I32), preExitHeader.getPredecessors().get(0));
+                tempExitPhi.addIncoming(new ConstantInt(0, IntegerType.I32), preExitLatch);
+                preExitHeader.addInstruction(tempExitPhi);
+                preExitInductionVar = tempExitPhi;
+            }
+            
+            // 收集latch中的非控制流指令
+            List<Instruction> latchBody = new ArrayList<>();
+            for (Instruction inst : latch.getInstructions()) {
+                if (inst == latch.getTerminator()) break;
+                if (inst instanceof PhiInstruction) continue;
+                if (inst instanceof BranchInstruction) continue;
+                
+                // 跳过展开生成的OR指令和基于OR的计算
+                boolean isUnrollGenerated = false;
+                if (inst instanceof BinaryInstruction binInst && binInst.getOpCode() == OpCode.OR) {
+                    isUnrollGenerated = true;
+                } else {
+                    // 检查指令的操作数是否依赖于OR指令
+                    for (Value operand : inst.getOperands()) {
+                        if (operand instanceof Instruction opInst) {
+                            if (opInst instanceof BinaryInstruction binOp && binOp.getOpCode() == OpCode.OR) {
+                                isUnrollGenerated = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+                
+                if (!isUnrollGenerated) {
+                    latchBody.add(inst);
+                }
+            }
+            
+            // 复制每条指令
+            CloneHelper genericHelper = new CloneHelper();
+            if (preExitInductionVar != null) {
+                genericHelper.addValueMapping(inductionVar, preExitInductionVar);
+            }
+            for (Map.Entry<PhiInstruction, PhiInstruction> entry : headToPreExitPhiMap.entrySet()) {
+                genericHelper.addValueMapping(entry.getKey(), entry.getValue());
+            }
+            
+            // 确保全局变量和函数参数的映射
+            Function function = preExitLatch.getParentFunction();
+            for (Argument arg : function.getArguments()) {
+                genericHelper.addValueMapping(arg, arg);
+            }
+            
+            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                System.out.println("Copying " + latchBody.size() + " instructions to remainder loop");
+            }
+            
+            for (Instruction original : latchBody) {
+                Instruction cloned = genericHelper.copyInstruction(original);
+                preExitLatch.addInstruction(cloned);
+                
+                if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                    System.out.println("  Copied: " + original.getClass().getSimpleName() + " -> " + cloned.getClass().getSimpleName());
+                }
+            }
+            
+            // 最后添加归纳变量更新和分支
+            if (preExitInductionVar != null) {
+                BinaryInstruction newUpdate = IRBuilder.createBinaryInst(OpCode.ADD, preExitInductionVar,
+                        new ConstantInt(1, IntegerType.I32), preExitLatch);
+                
+                // 更新对应的phi节点的操作数
+                PhiInstruction phiToUpdate = (tempExitPhi != null) ? tempExitPhi : preExitInductionVar;
+                phiToUpdate.setOperandForBlock(preExitLatch, newUpdate);
+                
+                if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                    System.out.println("  Updated phi " + phiToUpdate.getName() + " with induction update: " + newUpdate);
+                }
+            }
             IRBuilder.createBr(preExitHeader, preExitLatch);
             return;
         }
@@ -1464,6 +1547,7 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         
         // 12. 最后创建分支指令
         IRBuilder.createBr(preExitHeader, preExitLatch);
+
     }
 
     private void completePreExitPhiOperands(BasicBlock preExitHeader, 
