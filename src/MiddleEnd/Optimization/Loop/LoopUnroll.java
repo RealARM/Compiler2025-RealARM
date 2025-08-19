@@ -4,6 +4,7 @@ import MiddleEnd.IR.Module;
 import MiddleEnd.IR.Value.*;
 import MiddleEnd.IR.Value.Instructions.*;
 import MiddleEnd.IR.Type.IntegerType;
+import MiddleEnd.IR.Type.*;
 import MiddleEnd.IR.OpCode;
 import MiddleEnd.Optimization.Core.Optimizer;
 import MiddleEnd.Optimization.Analysis.*;
@@ -545,8 +546,7 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         performUnrollCopies(blocksToUnroll, header, headerNext, latch, exit, iterationCount - 1, 
                           phiMap, beginToEndMap, headerPhis, function);
 
-        // 修复exit中的LCSSA phi指令
-        fixExitPhiInstructions(exit, header, beginToEndMap);
+        // beginToEndMap已经在performUnrollCopies中处理了exit phi的修复
     }
 
     private List<PhiInstruction> extractHeaderPhis(BasicBlock header) {
@@ -632,11 +632,14 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
              currentLatch.addSuccessor(newHeaderNext);
              newHeaderNext.addPredecessor(currentLatch);
              IRBuilder.createBr(newHeaderNext, currentLatch);
+
+            // 4.5) 建立完整的控制流关系
+            establishControlFlowForUnrolledBlocks(blocksToUnroll, blockMapping);
+
+            // 5) 修正新块中的Phi操作数
+            updatePhiInstructionsAfterCopy(blocksToUnroll, blockMapping, cloneHelper);
  
-             // 5) 修正新块中的Phi操作数
-             updatePhiInstructionsAfterCopy(blocksToUnroll, blockMapping, cloneHelper);
- 
-             // 6) 更新头块Phi在本轮后的“最新latch值”映射
+             // 6) 更新头块Phi在本轮后的"最新latch值"映射
              for (Map.Entry<PhiInstruction, Value> e : phiMap.entrySet()) {
                  Value baseLatchVal = e.getValue();
                  Value latest = cloneHelper.findValue(baseLatchVal);
@@ -657,7 +660,7 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
          exit.addPredecessor(currentLatch);
          IRBuilder.createBr(exit, currentLatch);
  
-         // 8) 最终确定：每个头块Phi在展开结束后对应的“最终值”
+         // 8) 最终确定：每个头块Phi在展开结束后对应的"最终值"
          for (PhiInstruction headerPhi : headerPhis) {
              Value base = phiMap.get(headerPhi);
              if (base != null) {
@@ -671,6 +674,73 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
          // 9) 将出口Phi来自 currentLatch 的来边，设置为对应头块Phi的最终值
          fixExitPhiUsingHeaderPhis(exit, currentLatch, headerPhis, beginToEndMap);
      }
+
+    /**
+     * 为展开后的基本块建立完整的控制流关系
+     */
+    private void establishControlFlowForUnrolledBlocks(List<BasicBlock> originalBlocks, 
+                                                     Map<BasicBlock, BasicBlock> blockMapping) {
+        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+            System.out.println("Establishing control flow for unrolled blocks...");
+        }
+        
+        for (BasicBlock originalBB : originalBlocks) {
+            BasicBlock newBB = blockMapping.get(originalBB);
+            if (newBB == null) continue;
+            
+            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                System.out.println("  Setting up CFG for: " + originalBB.getName() + " -> " + newBB.getName());
+            }
+            
+            // 建立前驱关系
+            for (BasicBlock originalPred : originalBB.getPredecessors()) {
+                BasicBlock newPred = blockMapping.get(originalPred);
+                
+                // 如果前驱在映射中，建立新的前驱关系
+                if (newPred != null) {
+                    if (!newBB.getPredecessors().contains(newPred)) {
+                        newBB.addPredecessor(newPred);
+                        newPred.addSuccessor(newBB);
+                        
+                        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                            System.out.println("    Added predecessor: " + newPred.getName() + " -> " + newBB.getName());
+                        }
+                    }
+                }
+                // 如果前驱不在映射中，检查是否是外部连接（如currentLatch -> newHeaderNext）
+                else {
+                    // 这种情况下前驱关系应该已经在其他地方建立了
+                    if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                        System.out.println("    External predecessor: " + originalPred.getName() + 
+                                         " (should be handled separately)");
+                    }
+                }
+            }
+            
+            // 建立后继关系
+            for (BasicBlock originalSucc : originalBB.getSuccessors()) {
+                BasicBlock newSucc = blockMapping.get(originalSucc);
+                
+                // 如果后继在映射中，建立新的后继关系
+                if (newSucc != null) {
+                    if (!newBB.getSuccessors().contains(newSucc)) {
+                        newBB.addSuccessor(newSucc);
+                        newSucc.addPredecessor(newBB);
+                        
+                        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                            System.out.println("    Added successor: " + newBB.getName() + " -> " + newSucc.getName());
+                        }
+                    }
+                }
+                // 外部后继关系（如到exit块）会在其他地方处理
+            }
+            
+            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                System.out.println("    Final predecessors: " + newBB.getPredecessors().size());
+                System.out.println("    Final successors: " + newBB.getSuccessors().size());
+            }
+        }
+    }
 
     // 收集头块中的循环体指令（排除Phi与分支）
     private List<Instruction> collectHeaderBodyInstructions(BasicBlock header) {
@@ -709,21 +779,142 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
                                            Map<Value, Value> beginToEndMap) {
         int latchIdx = exit.getPredecessors().indexOf(currentLatch);
         if (latchIdx < 0) return;
+
         for (Instruction inst : exit.getInstructions()) {
-            if (inst instanceof PhiInstruction phiExit) {
-                String exitName = phiExit.getName();
+            if (inst instanceof PhiInstruction exitPhi) {
+                String exitName = exitPhi.getName();
+                if (exitName == null) continue;
+
+                // 尝试找到与header phi名称最相似的匹配
                 for (PhiInstruction headerPhi : headerPhis) {
                     String headerName = headerPhi.getName();
-                    if (exitName != null && headerName != null && (exitName.startsWith(headerName) || exitName.contains(headerName))) {
+                    if (headerName == null) continue;
+
+                    boolean matched = false;
+                    if (exitName.startsWith(headerName) || exitName.contains(headerName)) {
+                        matched = true;
+                    } else {
+                        // 对比数字部分
+                        String exitNum = extractPhiNumber(exitName);
+                        String headerNum = extractPhiNumber(headerName);
+                        if (exitNum != null && exitNum.equals(headerNum)) {
+                            matched = true;
+                        }
+                    }
+
+                    if (matched) {
                         Value finalVal = beginToEndMap.get(headerPhi);
-                        if (finalVal != null && latchIdx < phiExit.getOperands().size()) {
-                            phiExit.setOperand(latchIdx, finalVal);
+                        if (finalVal != null && latchIdx < exitPhi.getOperands().size()) {
+                            exitPhi.setOperand(latchIdx, finalVal);
                         }
                         break;
                     }
                 }
             }
         }
+    }
+    
+    /**
+     * 查找最佳的值映射
+     */
+    private Value findBestValueMapping(Value currentOperand, List<PhiInstruction> headerPhis, 
+                                     Map<Value, Value> beginToEndMap) {
+        // 直接查找在beginToEndMap中的映射
+        for (Map.Entry<Value, Value> entry : beginToEndMap.entrySet()) {
+            Value original = entry.getKey();
+            Value mapped = entry.getValue();
+            
+            // 如果当前操作数就是某个header phi，直接使用映射
+            if (currentOperand == original) {
+                return mapped;
+            }
+            
+            // 如果当前操作数和原始值有相同的类型和相似的用途，考虑使用映射
+            if (currentOperand != null && original != null) {
+                if (isSimilarValue(currentOperand, original)) {
+                    return mapped;
+                }
+            }
+        }
+        
+        // 如果没有找到直接映射，检查是否是某个header phi的最新值
+        for (PhiInstruction headerPhi : headerPhis) {
+            Value finalValue = beginToEndMap.get(headerPhi);
+            if (finalValue != null && areSemanticallyRelated(currentOperand, headerPhi)) {
+                return finalValue;
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 检查两个值是否相似（类型和语义上）
+     */
+    private boolean isSimilarValue(Value val1, Value val2) {
+        if (val1 == val2) return true;
+        if (val1 == null || val2 == null) return false;
+        
+        // 检查类型是否匹配
+        if (!val1.getType().equals(val2.getType())) return false;
+        
+        // 如果都是常量，检查值是否相等
+        if (val1 instanceof ConstantInt && val2 instanceof ConstantInt) {
+            return ((ConstantInt) val1).getValue() == ((ConstantInt) val2).getValue();
+        }
+        
+        // 如果都是指令，检查是否有相似的语义
+        if (val1 instanceof Instruction && val2 instanceof Instruction) {
+            Instruction inst1 = (Instruction) val1;
+            Instruction inst2 = (Instruction) val2;
+            
+            // 简单的语义检查：相同的操作码
+            if (inst1.getClass().equals(inst2.getClass())) {
+                if (inst1 instanceof PhiInstruction) return true;
+                if (inst1 instanceof BinaryInstruction) {
+                    return ((BinaryInstruction) inst1).getOpCode() == ((BinaryInstruction) inst2).getOpCode();
+                }
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 检查两个值是否在语义上相关
+     */
+    private boolean areSemanticallyRelated(Value currentOperand, Value headerPhi) {
+        if (currentOperand == headerPhi) return true;
+        if (currentOperand == null || headerPhi == null) return false;
+        
+        // 如果当前操作数是phi节点且名称相似
+        if (currentOperand instanceof PhiInstruction && headerPhi instanceof PhiInstruction) {
+            String currentName = ((PhiInstruction) currentOperand).getName();
+            String headerName = ((PhiInstruction) headerPhi).getName();
+            
+            if (currentName != null && headerName != null) {
+                // 提取数字部分进行比较（如phi_11, phi_12）
+                String currentNumber = extractPhiNumber(currentName);
+                String headerNumber = extractPhiNumber(headerName);
+                
+                return currentNumber != null && currentNumber.equals(headerNumber);
+            }
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 从phi节点名称中提取数字
+     */
+    private String extractPhiNumber(String phiName) {
+        if (phiName.startsWith("phi_")) {
+            String[] parts = phiName.split("_");
+            if (parts.length >= 2) {
+                return parts[1];
+            }
+        }
+        return null;
     }
 
     /**
@@ -1392,47 +1583,147 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
     }
 
     /**
-     * 更新phi指令
+     * 更新phi指令 - 重新设计的实现
      */
     private void updatePhiInstructionsAfterCopy(List<BasicBlock> originalBlocks, 
                                                Map<BasicBlock, BasicBlock> blockMapping, 
                                                CloneHelper cloneHelper) {
+        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+            System.out.println("Updating phi instructions after copy (redesigned)...");
+        }
+        
+        // 收集所有需要修正的phi节点
         for (BasicBlock originalBB : originalBlocks) {
             BasicBlock newBB = blockMapping.get(originalBB);
+            if (newBB == null) continue;
             
-            for (Instruction inst : newBB.getInstructions()) {
-                if (inst instanceof PhiInstruction phi) {
-                    for (int i = 0; i < phi.getOperands().size(); i++) {
-                        Value operand = phi.getOperands().get(i);
-                        Value mappedValue = cloneHelper.findValue(operand);
-                        if (mappedValue != null && mappedValue != operand) {
-                            phi.setOperand(i, mappedValue);
+            for (Instruction inst : originalBB.getInstructions()) {
+                if (inst instanceof PhiInstruction originalPhi) {
+                    PhiInstruction copyPhi = (PhiInstruction) cloneHelper.getValueMapDirect().get(originalPhi);
+                    if (copyPhi == null) continue;
+                    
+                    if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                        System.out.println("  Processing phi: " + originalPhi.getName() + " -> " + copyPhi.getName());
+                        System.out.println("    Original BB: " + originalBB.getName() + ", Copy BB: " + newBB.getName());
+                        System.out.println("    Copy BB predecessors: " + newBB.getPredecessors().size());
+                    }
+                    
+                    // 为复制的phi节点添加正确的操作数
+                    for (BasicBlock copyPred : newBB.getPredecessors()) {
+                        // 找到对应的原始前驱块
+                        BasicBlock originalPred = findOriginalPredecessor(copyPred, originalBB, blockMapping, cloneHelper);
+                        
+                        if (originalPred != null) {
+                            // 获取原始phi节点中来自这个前驱的值
+                            Value originalValue = getPhiValueFromPredecessor(originalPhi, originalPred);
+                            
+                            if (originalValue != null) {
+                                // 映射到新值
+                                Value newValue = mapValue(originalValue, cloneHelper);
+                                
+                                // 添加到复制的phi节点
+                                copyPhi.addIncoming(newValue, copyPred);
+                                
+                                if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                                    System.out.println("    Added incoming: " + newValue + " from " + copyPred.getName());
+                                }
+                            }
+                        } else {
+                            // 如果找不到对应的原始前驱，使用默认值
+                            Value defaultValue = createDefaultValue(originalPhi.getType());
+                            copyPhi.addIncoming(defaultValue, copyPred);
+                            
+                            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                                System.out.println("    Added default incoming: " + defaultValue + " from " + copyPred.getName());
+                            }
                         }
                     }
                 }
             }
         }
     }
-
+    
     /**
-     * 修复出口块中的phi指令
+     * 找到复制前驱块对应的原始前驱块
      */
-    private void fixExitPhiInstructions(BasicBlock exit, BasicBlock originalHeader, 
-                                      Map<Value, Value> beginToEndMap) {
-        for (Instruction inst : exit.getInstructions()) {
-            if (inst instanceof PhiInstruction phi) {
-                for (int i = 0; i < phi.getOperands().size(); i++) {
-                    Value operand = phi.getOperands().get(i);
-                    if (operand instanceof Instruction opInst && 
-                        opInst.getParent() == originalHeader &&
-                        beginToEndMap.containsKey(operand)) {
-                        phi.setOperand(i, beginToEndMap.get(operand));
-                    }
+    private BasicBlock findOriginalPredecessor(BasicBlock copyPred, BasicBlock originalBB, 
+                                             Map<BasicBlock, BasicBlock> blockMapping, 
+                                             CloneHelper cloneHelper) {
+        // 首先检查是否是在blockMapping中的块
+        for (Map.Entry<BasicBlock, BasicBlock> entry : blockMapping.entrySet()) {
+            if (entry.getValue() == copyPred) {
+                return entry.getKey();
+            }
+        }
+        
+        // 检查是否是cloneHelper中映射的外部块
+        for (Map.Entry<Value, Value> entry : cloneHelper.getValueMapDirect().entrySet()) {
+            if (entry.getValue() == copyPred && entry.getKey() instanceof BasicBlock) {
+                BasicBlock candidate = (BasicBlock) entry.getKey();
+                if (originalBB.getPredecessors().contains(candidate)) {
+                    return candidate;
                 }
             }
         }
+        
+        // 如果copyPred就是原始的外部前驱块
+        if (originalBB.getPredecessors().contains(copyPred)) {
+            return copyPred;
+        }
+        
+        return null;
     }
-
+    
+    /**
+     * 从phi节点中获取来自指定前驱块的值
+     */
+    private Value getPhiValueFromPredecessor(PhiInstruction phi, BasicBlock pred) {
+        List<BasicBlock> incomingBlocks = phi.getIncomingBlocks();
+        if (incomingBlocks.isEmpty()) {
+            // 如果没有incoming blocks信息，使用前驱索引
+            int predIndex = phi.getParent().getPredecessors().indexOf(pred);
+            if (predIndex >= 0 && predIndex < phi.getOperands().size()) {
+                return phi.getOperands().get(predIndex);
+            }
+        } else {
+            // 使用incoming blocks信息
+            for (int i = 0; i < incomingBlocks.size(); i++) {
+                if (incomingBlocks.get(i) == pred && i < phi.getOperands().size()) {
+                    return phi.getOperands().get(i);
+                }
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 映射值到新的上下文中
+     */
+    private Value mapValue(Value originalValue, CloneHelper cloneHelper) {
+        if (originalValue instanceof ConstantInt) {
+            // 常量直接复制
+            ConstantInt constInt = (ConstantInt) originalValue;
+            return new ConstantInt(constInt.getValue(), (IntegerType) constInt.getType());
+        } else {
+            // 使用cloneHelper查找映射
+            Value mapped = cloneHelper.getValueMapDirect().get(originalValue);
+            return mapped != null ? mapped : originalValue;
+        }
+    }
+    
+    /**
+     * 为类型创建默认值
+     */
+    private Value createDefaultValue(Type type) {
+        if (type.toString().contains("i32")) {
+            return new ConstantInt(0, IntegerType.I32);
+        } else if (type.toString().contains("i1")) {
+            return new ConstantInt(0, IntegerType.I1);
+        } else {
+            return new ConstantInt(0, IntegerType.I32);
+        }
+    }
+    
     /**
      * 修复exit块中的LCSSA phi节点
      */

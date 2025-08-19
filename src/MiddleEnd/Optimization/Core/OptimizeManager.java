@@ -44,87 +44,87 @@ public class OptimizeManager {
 
     private void initializeOptimizers() {
 
-        // 尾递归消除优化
-        addModuleOptimizer(new TailRecursionElimination());
+        // // 尾递归消除优化
+        // addModuleOptimizer(new TailRecursionElimination());
         
         // 第一次Mem2Reg优化
         addModuleOptimizer(new Mem2Reg());
         
-        // 函数内联展开优化
-        addModuleOptimizer(new InlineExpansion());
+        // // 函数内联展开优化
+        // addModuleOptimizer(new InlineExpansion());
 
-        // 第二次Mem2Reg优化
-        addModuleOptimizer(new Mem2Reg());
+        // // 第二次Mem2Reg优化
+        // addModuleOptimizer(new Mem2Reg());
         
-        // 常量优化
-        addModuleOptimizer(new ConstantDeduplication());
-        addModuleOptimizer(new ConstantArraySimplifier());
+        // // 常量优化
+        // addModuleOptimizer(new ConstantDeduplication());
+        // addModuleOptimizer(new ConstantArraySimplifier());
         
-        // 基本块处理
-        addModuleOptimizer(new EmptyBlockHandler());
+        // // 基本块处理
+        // addModuleOptimizer(new EmptyBlockHandler());
         
-        // 常量处理
-        addModuleOptimizer(new ConstantPropagation());
-        addModuleOptimizer(new ConstantFolding());
+        // // 常量处理
+        // addModuleOptimizer(new ConstantPropagation());
+        // addModuleOptimizer(new ConstantFolding());
         
-        // 全局变量优化
-        addModuleOptimizer(new GlobalValueLocalize());
+        // // 全局变量优化
+        // addModuleOptimizer(new GlobalValueLocalize());
         
-        // 指令组合优化
-        addModuleOptimizer(new InstCombine());
+        // // 指令组合优化
+        // addModuleOptimizer(new InstCombine());
         
-        // 窥孔优化
-        addModuleOptimizer(new PeepHole());
+        // // 窥孔优化
+        // addModuleOptimizer(new PeepHole());
         
-        // 删除单跳转基本块优化 - 存在问题
-        addModuleOptimizer(new RemoveSingleJumpBB());
+        // // 删除单跳转基本块优化 - 存在问题
+        // addModuleOptimizer(new RemoveSingleJumpBB());
         
         // 移除无用的不等于比较指令优化
         addModuleOptimizer(new RemoveUselessNE());
         
         // 控制流优化
-        addModuleOptimizer(new BranchSimplifier());
+        // addModuleOptimizer(new BranchSimplifier());
         
         // 循环SSA形式转换（在循环优化之前）
         addModuleOptimizer(new LoopSSATransform());
 
         // 删除无用循环
-        addModuleOptimizer(new TrivialLoopDeletion());
+        // addModuleOptimizer(new TrivialLoopDeletion());
 
         // 循环交换优化
         // addModuleOptimizer(new LoopInterchange());
         
         // 循环优化
-        addModuleOptimizer(new LoopInvariantCodeMotion());
+        // addModuleOptimizer(new LoopInvariantCodeMotion());
         
-        // 循环指针访问优化
-        addModuleOptimizer(new LoopPointerExtract());
-        addModuleOptimizer(new LoopPointerExtractPlus());
+        // // 循环指针访问优化
+        // addModuleOptimizer(new LoopPointerExtract());
+        // addModuleOptimizer(new LoopPointerExtractPlus());
 
         // 循环展开优化
         addModuleOptimizer(new LoopUnroll());
 
-        // 窥孔优化
-        addModuleOptimizer(new PeepHole());
+        // // 窥孔优化
+        // addModuleOptimizer(new PeepHole());
         
-        // 全局代码移动优化
-        addModuleOptimizer(new GCM());
+        // // 全局代码移动优化
+        // addModuleOptimizer(new GCM());
         
-        // 全局值编号优化 (GVN)
-        addModuleOptimizer(new GVN());
+        // // 全局值编号优化 (GVN)
+        // addModuleOptimizer(new GVN());
         
-        // Load/Store数据流优化
-        addModuleOptimizer(new LoadStoreFlowOptimizer());
+        // // Load/Store数据流优化
+        // addModuleOptimizer(new LoadStoreFlowOptimizer());
         
-        // 无用代码消除
-        addModuleOptimizer(new DCE());
+        // // 无用代码消除
+        // addModuleOptimizer(new DCE());
 
-        // 常量处理
-        addModuleOptimizer(new ConstantPropagation());
-        addModuleOptimizer(new ConstantFolding());
+        // // 常量处理
+        // addModuleOptimizer(new ConstantPropagation());
+        // addModuleOptimizer(new ConstantFolding());
         
-        // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        // addModuleOptimizer(new RemovePhiPass());
+        // // PHI指令消除（在进入后端前将PHI转换为Move指令）
+        // // addModuleOptimizer(new RemovePhiPass());
     }
     
     public void addModuleOptimizer(ModuleOptimizer optimizer) {

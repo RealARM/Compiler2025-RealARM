@@ -13,6 +13,7 @@ import java.util.*;
  */
 public class CloneHelper {
     private final Map<Value, Value> valueMap = new HashMap<>();
+    private static int copyCounter = 0; // 添加静态计数器
     
     public void clear() {
         valueMap.clear();
@@ -125,14 +126,12 @@ public class CloneHelper {
     }
     
     private PhiInstruction copyPhiInstruction(PhiInstruction original) {
-        // 对于Phi指令，我们先创建一个空的，稍后填充
-        PhiInstruction phi = new PhiInstruction(original.getType(), original.getName() + "_copy");
+        // 创建新的phi节点，但不预先添加操作数
+        String uniqueName = original.getName() + "_copy_" + (copyCounter++);
+        PhiInstruction phi = new PhiInstruction(original.getType(), uniqueName);
         
-        // 复制所有操作数，但保持原有结构
-        for (Value operand : original.getOperands()) {
-            Value newOperand = findValue(operand);
-            phi.addOperand(newOperand);
-        }
+        // 注意：不在这里添加操作数，让后续的更新逻辑处理
+        // 这样可以避免操作数和前驱块不匹配的问题
         
         return phi;
     }
@@ -184,5 +183,12 @@ public class CloneHelper {
      */
     public Map<Value, Value> getValueMap() {
         return new HashMap<>(valueMap);
+    }
+    
+    /**
+     * 获取值映射的直接引用（用于内部查找）
+     */
+    public Map<Value, Value> getValueMapDirect() {
+        return valueMap;
     }
 } 
