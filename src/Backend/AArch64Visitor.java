@@ -421,17 +421,9 @@ public class AArch64Visitor {
                 ins.getType() instanceof MiddleEnd.IR.Type.IntegerType &&
                 ((MiddleEnd.IR.Type.IntegerType) ins.getType()).getBitWidth() == 32) {
 
-                ArrayList<AArch64Operand> maskOps = new ArrayList<>();
-                maskOps.add(destReg);
-                maskOps.add(new AArch64Imm(0xffffffffL));
-                AArch64Binary maskInst = new AArch64Binary(maskOps, destReg, AArch64Binary.AArch64BinaryType.and);
-                addInstr(maskInst, insList, predefine);
-
-                AArch64Binary lslInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                addInstr(lslInst, insList, predefine);
-
-                AArch64Binary asrInst = new AArch64Binary(destReg, destReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                addInstr(asrInst, insList, predefine);
+                // 截取低32位并进行符号扩展
+                AArch64Binary sxtwInst = new AArch64Binary(destReg, destReg, null, AArch64Binary.AArch64BinaryType.sxtw);
+                addInstr(sxtwInst, insList, predefine);
             }
         
         }
@@ -520,22 +512,14 @@ public class AArch64Visitor {
                 if (!isFloat) {
                     if (leftOp instanceof AArch64Reg && left.getType().isIntegerType()) {
                         AArch64VirReg extLeft = new AArch64VirReg(false);
-                        AArch64Move mvL = new AArch64Move(extLeft, (AArch64Reg) leftOp, false);
-                        addInstr(mvL, insList, predefine);
-                        AArch64Binary lslL = new AArch64Binary(extLeft, extLeft, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                        addInstr(lslL, insList, predefine);
-                        AArch64Binary asrL = new AArch64Binary(extLeft, extLeft, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                        addInstr(asrL, insList, predefine);
+                        AArch64Binary sxtwL = new AArch64Binary(extLeft, (AArch64Reg) leftOp, null, AArch64Binary.AArch64BinaryType.sxtw);
+                        addInstr(sxtwL, insList, predefine);
                         leftOp = extLeft;
                     }
                     if (rightOp instanceof AArch64Reg && right.getType().isIntegerType()) {
                         AArch64VirReg extRight = new AArch64VirReg(false);
-                        AArch64Move mvR = new AArch64Move(extRight, (AArch64Reg) rightOp, false);
-                        addInstr(mvR, insList, predefine);
-                        AArch64Binary lslR = new AArch64Binary(extRight, extRight, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                        addInstr(lslR, insList, predefine);
-                        AArch64Binary asrR = new AArch64Binary(extRight, extRight, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                        addInstr(asrR, insList, predefine);
+                        AArch64Binary sxtwR = new AArch64Binary(extRight, (AArch64Reg) rightOp, null, AArch64Binary.AArch64BinaryType.sxtw);
+                        addInstr(sxtwR, insList, predefine);
                         rightOp = extRight;
                     }
                 }
@@ -944,12 +928,9 @@ public class AArch64Visitor {
                     
                     // 为getint函数调用添加32位到64位的符号扩展
                     if (functionName.equals("getint") && ins.getCallee().getReturnType().isIntegerType()) {
-                        // getint返回的已经是32位值，高32位自动为0，只需要进行符号扩展
-                        AArch64Binary lslInst = new AArch64Binary(resultReg, resultReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                        addInstr(lslInst, insList, predefine);
-                        
-                        AArch64Binary asrInst = new AArch64Binary(resultReg, resultReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                        addInstr(asrInst, insList, predefine);
+                        // 使用 sxtw 指令进行符号扩展
+                        AArch64Binary sxtwInst = new AArch64Binary(resultReg, resultReg, AArch64Binary.AArch64BinaryType.sxtw);
+                        addInstr(sxtwInst, insList, predefine);
                     }
                 }
             } else {
@@ -1665,19 +1646,19 @@ public class AArch64Visitor {
             leftOp = leftReg;
                 
             // 如果左操作数是寄存器中的整数变量，需要进行符号扩展
-            if (!isFloat && leftOp instanceof AArch64Reg && left.getType().isIntegerType()) {
-                AArch64Reg extendedLeftReg = new AArch64VirReg(false);
-                AArch64Move moveInst = new AArch64Move(extendedLeftReg, (AArch64Reg)leftOp, false);
-                addInstr(moveInst, insList, predefine);
-                
-                AArch64Binary lslInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                addInstr(lslInst, insList, predefine);
-                
-                AArch64Binary asrInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                addInstr(asrInst, insList, predefine);
-                
-                leftOp = extendedLeftReg;
-            }
+            // if (!isFloat && leftOp instanceof AArch64Reg && left.getType().isIntegerType()) {
+            //     AArch64Reg extendedLeftReg = new AArch64VirReg(false);
+            //     AArch64Move moveInst = new AArch64Move(extendedLeftReg, (AArch64Reg)leftOp, false);
+            //     addInstr(moveInst, insList, predefine);
+            //     
+            //     AArch64Binary lslInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+            //     addInstr(lslInst, insList, predefine);
+            //     
+            //     AArch64Binary asrInst = new AArch64Binary(extendedLeftReg, extendedLeftReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+            //     addInstr(asrInst, insList, predefine);
+            //     
+            //     leftOp = extendedLeftReg;
+            // }
         }
         
         AArch64Operand rightOp;
@@ -1702,19 +1683,19 @@ public class AArch64Visitor {
             rightOp = rightReg;
                 
             // 如果右操作数是寄存器中的整数变量，需要进行符号扩展
-            if (!isFloat && rightOp instanceof AArch64Reg && right.getType().isIntegerType()) {
-                AArch64Reg extendedRightReg = new AArch64VirReg(false);
-                AArch64Move moveInst = new AArch64Move(extendedRightReg, (AArch64Reg)rightOp, false);
-                addInstr(moveInst, insList, predefine);
-                
-                AArch64Binary lslInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
-                addInstr(lslInst, insList, predefine);
-                
-                AArch64Binary asrInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
-                addInstr(asrInst, insList, predefine);
-                
-                rightOp = extendedRightReg;
-            }
+            // if (!isFloat && rightOp instanceof AArch64Reg && right.getType().isIntegerType()) {
+            //     AArch64Reg extendedRightReg = new AArch64VirReg(false);
+            //     AArch64Move moveInst = new AArch64Move(extendedRightReg, (AArch64Reg)rightOp, false);
+            //     addInstr(moveInst, insList, predefine);
+            //     
+            //     AArch64Binary lslInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.lsl);
+            //     addInstr(lslInst, insList, predefine);
+            //     
+            //     AArch64Binary asrInst = new AArch64Binary(extendedRightReg, extendedRightReg, new AArch64Imm(32), AArch64Binary.AArch64BinaryType.asr);
+            //     addInstr(asrInst, insList, predefine);
+            //     
+            //     rightOp = extendedRightReg;
+            // }
         }
         
         AArch64Compare.CmpType cmpType;

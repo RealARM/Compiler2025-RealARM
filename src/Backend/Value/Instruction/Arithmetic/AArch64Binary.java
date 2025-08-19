@@ -41,6 +41,17 @@ public class AArch64Binary extends AArch64Instruction {
         this.imm = imm;
     }
 
+    // 为sxtw等单操作数指令添加的构造函数
+    public AArch64Binary(AArch64Reg defReg, AArch64Reg srcReg, AArch64BinaryType type) {
+        super(defReg, new ArrayList<AArch64Operand>() {{
+                add(srcReg);
+            }});
+        this.instType = type;
+        this.shiftBit = 0;
+        this.shiftType = AArch64ShiftType.LSL;
+        this.imm = null;
+    }
+
     public AArch64BinaryType getInstType() {
         return instType;
     }
@@ -92,6 +103,9 @@ public class AArch64Binary extends AArch64Instruction {
         asr,    // 算术右移
         ror,    // 循环右移
         
+        // 符号扩展
+        sxtw,   // 符号扩展32位到64位
+        
         // 浮点运算
         fadd,   // 浮点加法
         fsub,   // 浮点减法
@@ -137,6 +151,8 @@ public class AArch64Binary extends AArch64Instruction {
                 return "asr";
             case ror:
                 return "ror";
+            case sxtw:
+                return "sxtw";
             case fadd:
                 return "fadd";
             case fsub:
@@ -154,6 +170,12 @@ public class AArch64Binary extends AArch64Instruction {
     public String toString() {
         if (imm != null) {
             return binaryTypeToString() + "\t" + getDefReg() + ", " + getOperands().get(0) + ", " + getOperands().get(1);
+        } else if (instType == AArch64BinaryType.sxtw) {
+            // SXTW指令格式：sxtw Xd, Ws （符号扩展32位到64位）
+            // 目标寄存器用X寄存器，源寄存器用W寄存器
+            AArch64Reg srcReg = (AArch64Reg) getOperands().get(0);
+            String srcRegW = srcReg.toString().replace("x", "w"); // 将x寄存器转换为w寄存器
+            return binaryTypeToString() + "\t" + getDefReg() + ", " + srcRegW;
         } else if (instType == AArch64BinaryType.madd || instType == AArch64BinaryType.msub) {
             // MADD/MSUB指令有特殊格式：madd d, a, b, c （d = a*b + c）
             if (getOperands().size() >= 3) {

@@ -80,15 +80,16 @@ public class AArch64Move extends AArch64Instruction {
         sb.append("\t");
         String destStr;
         if (isImmediate && getDefReg() instanceof AArch64CPUReg cpuDest) {
-            boolean use64Bit = false;
-            if (!getOperands().isEmpty() && getOperands().get(0) instanceof AArch64Imm imm) {
-                long immVal = imm.getValue();
-                use64Bit = (immVal < 0) || (immVal > 0xFFFFFFFFL);
-            }
-            destStr = use64Bit ? cpuDest.getName() : cpuDest.get32BitName();
-            if (moveType == MoveType.MOVK || moveType == MoveType.MOVZ) {
-                destStr = cpuDest.getName();
-            }
+            // boolean use64Bit = false;
+            // if (!getOperands().isEmpty() && getOperands().get(0) instanceof AArch64Imm imm) {
+            //     long immVal = imm.getValue();
+            //     use64Bit = (immVal < 0) || (immVal > 0xFFFFFFFFL);
+            // }
+            // destStr = use64Bit ? cpuDest.getName() : cpuDest.get32BitName();
+            // if (moveType == MoveType.MOVK || moveType == MoveType.MOVZ) {
+            //     destStr = cpuDest.getName();
+            // }
+            destStr = cpuDest.getName();
         } else {
             destStr = getDefReg().toString();
         }
