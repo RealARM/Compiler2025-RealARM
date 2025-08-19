@@ -45,6 +45,11 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
             if (module.libFunctions().contains(function)) {
                 continue;
             }
+            // 新增：跳过基本块过多的函数以防止卡顿
+            if (function.getBasicBlocks().size() > 4000) {
+                System.out.println("[LoopUnroll] Skipping function " + function.getName() + " due to too many basic blocks: " + function.getBasicBlocks().size());
+                continue;
+            }
             
             // 运行循环分析
             LoopAnalysis.runLoopInfo(function);
@@ -67,6 +72,10 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
             allLoops = getAllLoopsInDFSOrder(function); // 重新获取，因为可能有变化
             for (Loop loop : allLoops) {
                 changed |= tryDynamicUnroll(loop);
+            }
+            // -------- 新增：清理所有Phi的来边 --------
+            if (changed) {
+                cleanInvalidPhiIncoming(function);
             }
         }
         
@@ -171,6 +180,17 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         performConstantUnroll(loop, iterationCount);
         hasChanged = true;
         
+        // 修复exit块中的phi节点，移除来自原header的来边
+        BasicBlock exit = loop.getExitBlocks().iterator().next();
+        for (Instruction inst : exit.getInstructions()) {
+            if (inst instanceof PhiInstruction phi) {
+                phi.removeIncoming(header);
+            }
+        }
+        
+        // 新增：立即清理无效来边
+        cleanInvalidPhiIncoming(loop.getHeader().getParentFunction());
+        
         // 更新统计信息
         constantUnrollCount++;
         totalIterationsSaved += iterationCount;
@@ -244,6 +264,9 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         // 执行动态循环展开
         performEnhancedDynamicUnroll(loop);
         hasChanged = true;
+        
+        // 新增：立即清理无效来边
+        cleanInvalidPhiIncoming(loop.getHeader().getParentFunction());
         
         // 更新统计信息
         dynamicUnrollCount++;
@@ -1606,6 +1629,17 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
                             }
                         }
                     }
+
+                    // -------- 新增：清理多余的来边，确保与前驱数量一致 --------
+                    {
+                        Set<BasicBlock> predSet = new HashSet<>(newBB.getPredecessors());
+                        List<BasicBlock> incomingBlocks = new ArrayList<>(copyPhi.getIncomingBlocks());
+                        for (BasicBlock inc : incomingBlocks) {
+                            if (!predSet.contains(inc)) {
+                                copyPhi.removeIncoming(inc);
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -1964,5 +1998,23 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         }
         
         return original;
+    }
+
+    /**
+     * 移除所有Phi节点中与前驱不匹配的来边
+     */
+    private void cleanInvalidPhiIncoming(Function function) {
+        for (BasicBlock bb : function.getBasicBlocks()) {
+            List<BasicBlock> preds = bb.getPredecessors();
+            for (Instruction inst : bb.getInstructions()) {
+                if (inst instanceof PhiInstruction phi) {
+                    for (BasicBlock inc : new ArrayList<>(phi.getIncomingBlocks())) {
+                        if (!preds.contains(inc)) {
+                            phi.removeIncoming(inc);
+                        }
+                    }
+                }
+            }
+        }
     }
  }  
