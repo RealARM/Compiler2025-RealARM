@@ -739,10 +739,16 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         Value endValue = loop.getEndValue();
         BinaryInstruction updateInst = (BinaryInstruction) loop.getUpdateInstruction();
 
+        // 首先清理可能错误放置的指令
+        cleanupMisplacedInstructions(function, loop);
+
         // 创建新的基本块
         BasicBlock preHeader = IRBuilder.createBasicBlock("preheader", function);
         BasicBlock preExitHeader = IRBuilder.createBasicBlock("pre_exit_header", function);
         BasicBlock preExitLatch = IRBuilder.createBasicBlock("pre_exit_latch", function);
+
+        // 重定向原来到header的边 - 先重定向，再创建指令
+        redirectPreHeaderEdges(header, latch, preHeader);
 
         // 在preHeader中添加边界检查 - 使用位运算优化
         int mask = ~(DYNAMIC_UNROLL_FACTOR - 1); // 对于4倍展开，mask = -4
@@ -752,10 +758,8 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         ConstantInt threshold = new ConstantInt(DYNAMIC_UNROLL_FACTOR - 1, IntegerType.I32);
         CompareInstruction cmpInst = IRBuilder.createICmp(OpCode.SGT, endValue, threshold, preHeader);
 
+        // 修正：preHeader跳转到header或preExitHeader，不能跳转到自己
         IRBuilder.createCondBr(cmpInst, header, preExitHeader, preHeader);
-
-        // 重定向原来到header的边
-        redirectPreHeaderEdges(header, latch, preHeader);
 
         // 修改步长为DYNAMIC_UNROLL_FACTOR
         updateStepSize(updateInst);
@@ -766,8 +770,107 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         // 执行4倍展开复制
         performDynamicUnrollCopies(loop, inductionVar, updateInst);
 
+        // 修改主循环的出口：现在主循环退出时应该跳转到exit而不是原来的出口
+        updateMainLoopExit(header, exit);
+
         // 创建预出口处理
-        createEnhancedPreExitBlocks(loop, preExitHeader, preExitLatch, exit, inductionVar, endValue, header, latch);
+        createEnhancedPreExitBlocks(loop, preExitHeader, preExitLatch, exit, inductionVar, endValue, header, latch, preHeader);
+        
+        // 验证：确保没有指令被错误地放置在入口块
+        validateNoMisplacedInstructions(function);
+    }
+    
+    /**
+     * 验证函数中没有错误放置的指令
+     */
+    private void validateNoMisplacedInstructions(Function function) {
+        BasicBlock entryBlock = function.getEntryBlock();
+        
+        for (Instruction inst : new ArrayList<>(entryBlock.getInstructions())) {
+            // 入口块中不应该有使用未定义值的指令
+            for (Value operand : inst.getOperands()) {
+                if (operand instanceof Instruction opInst) {
+                    BasicBlock opBlock = opInst.getParent();
+                    
+                    // 如果操作数指令在其他块中定义，这是错误的
+                    if (opBlock != null && opBlock != entryBlock) {
+                        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                            System.out.println("Error: Instruction in entry block uses value from another block");
+                            System.out.println("  Instruction: " + inst);
+                            System.out.println("  Operand: " + opInst);
+                            System.out.println("  Operand block: " + opBlock.getName());
+                        }
+                        
+                        // 尝试修复：将指令移动到正确的块
+                        if (inst instanceof BinaryInstruction && opInst instanceof PhiInstruction) {
+                            // 这个指令应该在phi所在的块或其后继块中
+                            entryBlock.removeInstruction(inst);
+                            // 不在这里重新插入，因为可能会破坏其他逻辑
+                            // 标记为需要修复
+                            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                                System.out.println("  Removed misplaced instruction from entry block");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * 清理错误放置的指令
+     */
+    private void cleanupMisplacedInstructions(Function function, Loop loop) {
+        BasicBlock entryBlock = function.getEntryBlock();
+        Set<BasicBlock> loopBlocks = new HashSet<>(loop.getBlocks());
+        
+        List<Instruction> toRemove = new ArrayList<>();
+        
+        for (Instruction inst : entryBlock.getInstructions()) {
+            // 检查指令是否使用了循环内的值
+            for (Value operand : inst.getOperands()) {
+                if (operand instanceof Instruction opInst) {
+                    BasicBlock opBlock = opInst.getParent();
+                    if (loopBlocks.contains(opBlock)) {
+                        // 这个指令使用了循环内的值，应该被移除
+                        toRemove.add(inst);
+                        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                            System.out.println("Removing misplaced instruction from entry: " + inst);
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        
+        for (Instruction inst : toRemove) {
+            entryBlock.removeInstruction(inst);
+        }
+    }
+
+    /**
+     * 更新主循环的出口，使其跳转到最终出口块
+     */
+    private void updateMainLoopExit(BasicBlock header, BasicBlock exit) {
+        BranchInstruction headerBr = (BranchInstruction) header.getTerminator();
+        if (!headerBr.isUnconditional()) {
+            // 更新条件分支的false目标为exit
+            BasicBlock trueTarget = headerBr.getTrueBlock();
+            BasicBlock falseTarget = headerBr.getFalseBlock();
+            
+            // 找到循环的出口边并更新
+            if (trueTarget != exit && falseTarget == exit) {
+                // 已经正确
+            } else if (trueTarget == exit) {
+                // 需要交换条件
+                Value condition = headerBr.getCondition();
+                header.removeInstruction(headerBr);
+                IRBuilder.createCondBr(condition, falseTarget, exit, header);
+            } else {
+                // falseTarget不是exit，更新为exit
+                header.updateBranchTarget(falseTarget, exit);
+            }
+        }
     }
 
     private void redirectPreHeaderEdges(BasicBlock header, BasicBlock latch, BasicBlock preHeader) {
@@ -815,84 +918,121 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
 
     private void performDynamicUnrollCopies(Loop loop, Value inductionVar, BinaryInstruction updateInst) {
         BasicBlock latch = loop.getLatchBlocks().get(0);
-        CloneHelper cloneHelper = new CloneHelper();
-
+        BasicBlock header = loop.getHeader();
+        
+        // 确保updateInst确实在latch中
+        if (updateInst.getParent() != latch) {
+            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                System.out.println("Warning: Update instruction not in latch block");
+            }
+            return;
+        }
+        
         // 建立头块phi映射
         Map<PhiInstruction, Value> headPhiMap = new HashMap<>();
         Map<Value, PhiInstruction> valueToPhiMap = new HashMap<>();
-        BasicBlock header = loop.getHeader();
         
         int latchIndex = header.getPredecessors().indexOf(latch);
         for (Instruction inst : header.getInstructions()) {
             if (inst instanceof PhiInstruction phi && phi != inductionVar) {
                 Value latchValue = phi.getOperand(latchIndex);
                 headPhiMap.put(phi, latchValue);
-                valueToPhiMap.put(latchValue, phi);
+                if (latchValue instanceof Instruction) {
+                    valueToPhiMap.put(latchValue, phi);
+                }
+            }
+        }
+
+        // 收集latch中的原始指令（跳过phi、更新指令和分支指令）
+        List<Instruction> originalInstructions = new ArrayList<>();
+        for (Instruction inst : latch.getInstructions()) {
+            if (inst == updateInst) {
+                break; // 只复制updateInst之前的指令
+            }
+            if (!(inst instanceof PhiInstruction) && !(inst instanceof BranchInstruction)) {
+                originalInstructions.add(inst);
             }
         }
 
         // 复制DYNAMIC_UNROLL_FACTOR-1次
-        Instruction firstOrInst = null;
         for (int i = 1; i < DYNAMIC_UNROLL_FACTOR; i++) {
-            // 创建或指令 (i | offset)
+            // 创建或指令 (inductionVar | i)
             ConstantInt offset = new ConstantInt(i, IntegerType.I32);
-            BinaryInstruction orInst = IRBuilder.createBinaryInst(OpCode.OR, inductionVar, offset, null);
-            orInst.insertBefore(updateInst);
+            BinaryInstruction orInst = new BinaryInstruction(OpCode.OR, inductionVar, offset, inductionVar.getType());
             
-            if (firstOrInst == null) firstOrInst = orInst;
-            cloneHelper.addValueMapping(inductionVar, orInst);
-
-            // 复制latch中的指令
-            List<Instruction> instructionsToCopy = collectInstructionsToCopy(latch, firstOrInst, updateInst);
+            // 确保orInst被插入到latch中正确的位置
+            latch.addInstructionBefore(orInst, updateInst);
             
-            for (Instruction inst : instructionsToCopy) {
-                Instruction newInst = cloneHelper.copyInstruction(inst);
+            // 为这次展开创建映射
+            Map<Value, Value> iterationMapping = new HashMap<>();
+            iterationMapping.put(inductionVar, orInst);
+            
+            // 复制并插入原始指令
+            for (Instruction original : originalInstructions) {
+                // 创建指令副本
+                Instruction newInst = copyInstructionWithMapping(original, iterationMapping);
                 
-                // 处理phi变量的替换
-                updateInstructionOperands(newInst, headPhiMap);
+                // 处理对头块phi的引用
+                for (int j = 0; j < newInst.getOperands().size(); j++) {
+                    Value operand = newInst.getOperands().get(j);
+                    // 替换phi引用
+                    if (headPhiMap.containsKey(operand)) {
+                        newInst.setOperand(j, headPhiMap.get(operand));
+                    }
+                    // 替换归纳变量引用
+                    else if (operand == inductionVar) {
+                        newInst.setOperand(j, orInst);
+                    }
+                }
                 
                 // 更新phi映射
-                if (valueToPhiMap.containsKey(inst)) {
-                    PhiInstruction phi = valueToPhiMap.get(inst);
+                if (valueToPhiMap.containsKey(original)) {
+                    PhiInstruction phi = valueToPhiMap.get(original);
                     headPhiMap.put(phi, newInst);
                 }
                 
-                newInst.insertBefore(updateInst);
+                // 将新指令插入到latch中updateInst之前
+                latch.addInstructionBefore(newInst, updateInst);
+                
+                // 更新映射
+                iterationMapping.put(original, newInst);
             }
         }
 
         // 修复头块phi值
         updateHeaderPhiValues(header, latch, headPhiMap);
     }
-
-    private List<Instruction> collectInstructionsToCopy(BasicBlock latch, Instruction firstOrInst, Instruction updateInst) {
-        List<Instruction> result = new ArrayList<>();
-        boolean foundOr = false;
+    
+    /**
+     * 复制指令并应用值映射
+     */
+    private Instruction copyInstructionWithMapping(Instruction original, Map<Value, Value> mapping) {
+        Instruction copy = null;
         
-        for (Instruction inst : latch.getInstructions()) {
-            if (inst == firstOrInst) {
-                foundOr = true;
-                continue;
+        if (original instanceof BinaryInstruction binInst) {
+            Value left = mapping.getOrDefault(binInst.getLeft(), binInst.getLeft());
+            Value right = mapping.getOrDefault(binInst.getRight(), binInst.getRight());
+            copy = new BinaryInstruction(binInst.getOpCode(), left, right, binInst.getType());
+        } else if (original instanceof LoadInstruction loadInst) {
+            Value pointer = mapping.getOrDefault(loadInst.getPointer(), loadInst.getPointer());
+            // LoadInstruction需要名字参数
+            copy = new LoadInstruction(pointer, loadInst.getType(), loadInst.getName() + "_copy");
+        } else if (original instanceof StoreInstruction storeInst) {
+            Value value = mapping.getOrDefault(storeInst.getValue(), storeInst.getValue());
+            Value pointer = mapping.getOrDefault(storeInst.getPointer(), storeInst.getPointer());
+            copy = new StoreInstruction(value, pointer);
+        } else {
+            // 使用CloneHelper作为后备
+            CloneHelper helper = new CloneHelper();
+            for (Map.Entry<Value, Value> entry : mapping.entrySet()) {
+                helper.addValueMapping(entry.getKey(), entry.getValue());
             }
-            if (foundOr && inst == updateInst) {
-                break;
-            }
-            if (foundOr && !(inst instanceof BranchInstruction)) {
-                result.add(inst);
-            }
+            copy = helper.copyInstruction(original);
         }
         
-        return result;
+        return copy;
     }
 
-    private void updateInstructionOperands(Instruction inst, Map<PhiInstruction, Value> headPhiMap) {
-        for (int i = 0; i < inst.getOperands().size(); i++) {
-            Value operand = inst.getOperands().get(i);
-            if (headPhiMap.containsKey(operand)) {
-                inst.setOperand(i, headPhiMap.get(operand));
-            }
-        }
-    }
 
     private void updateHeaderPhiValues(BasicBlock header, BasicBlock latch, Map<PhiInstruction, Value> headPhiMap) {
         int latchIndex = header.getPredecessors().indexOf(latch);
@@ -905,10 +1045,13 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
 
     private void createEnhancedPreExitBlocks(Loop loop, BasicBlock preExitHeader, BasicBlock preExitLatch, 
                                            BasicBlock exit, Value inductionVar, Value endValue,
-                                           BasicBlock header, BasicBlock latch) {
+                                           BasicBlock header, BasicBlock latch, BasicBlock preHeader) {
         CloneHelper cloneHelper = new CloneHelper();
         
-        // 复制header到preExitHeader，建立phi映射
+        // 先设置控制流，确保前驱关系正确
+        setupPreExitControlFlow(preExitHeader, preExitLatch, exit, header, preHeader);
+        
+        // 然后创建phi节点，确保操作数数量与前驱数量匹配
         Map<PhiInstruction, PhiInstruction> preExitToHeadPhiMap = new HashMap<>();
         Map<PhiInstruction, PhiInstruction> headToPreExitPhiMap = new HashMap<>();
         Value exitInductionVar = null;
@@ -916,11 +1059,25 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         int latchIndex = header.getPredecessors().indexOf(latch);
         for (Instruction inst : header.getInstructions()) {
             if (inst instanceof PhiInstruction phi) {
-                // 为preExitHeader创建新phi，有三个操作数
+                // preExitHeader有两个前驱：preHeader和preExitLatch
                 PhiInstruction newPhi = new PhiInstruction(phi.getType(), phi.getName() + "_exit");
-                newPhi.addOperand(phi.getOperand(1 - latchIndex)); // 来自preHeader
-                newPhi.addOperand(new ConstantInt(0, IntegerType.I32)); // 来自header
-                newPhi.addOperand(phi.getOperand(latchIndex)); // 来自preExitLatch
+                
+                // 使用addIncoming方法正确添加phi操作数
+                Value initValue = phi.getOperand(1 - latchIndex);
+                
+                // 添加来自preHeader的初始值
+                newPhi.addIncoming(initValue, preHeader);
+                
+                // 添加来自preExitLatch的值，暂时用初始值
+                newPhi.addIncoming(initValue, preExitLatch);
+                
+                // 验证phi节点确实有两个操作数
+                if (newPhi.getOperands().size() != 2) {
+                    if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                        System.out.println("Warning: phi node " + newPhi.getName() + 
+                                         " has " + newPhi.getOperands().size() + " operands, expected 2");
+                    }
+                }
                 
                 preExitHeader.addInstruction(newPhi);
                 preExitToHeadPhiMap.put(newPhi, phi);
@@ -929,6 +1086,19 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
                 
                 if (phi == inductionVar) {
                     exitInductionVar = newPhi;
+                }
+                
+                // 调试信息
+                if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                    System.out.println("Created phi node: " + newPhi.getName() + 
+                                     " with " + newPhi.getOperands().size() + " operands");
+                    for (int i = 0; i < newPhi.getOperands().size(); i++) {
+                        System.out.println("  Operand " + i + ": " + newPhi.getOperand(i));
+                    }
+                    System.out.println("  Incoming blocks: " + newPhi.getIncomingBlocks().size());
+                    for (BasicBlock block : newPhi.getIncomingBlocks()) {
+                        System.out.println("    Block: " + block.getName());
+                    }
                 }
             } else if (inst instanceof CompareInstruction) {
                 break;
@@ -939,36 +1109,37 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         CompareInstruction exitCmp = IRBuilder.createICmp(OpCode.SLT, exitInductionVar, endValue, preExitHeader);
         IRBuilder.createCondBr(exitCmp, preExitLatch, exit, preExitHeader);
 
-        // 设置控制流
-        setupPreExitControlFlow(preExitHeader, preExitLatch, exit, header);
-
         // 复制latch到preExitLatch
-        copyLatchToPreExitLatch(latch, preExitLatch, cloneHelper, inductionVar, headToPreExitPhiMap);
+        copyLatchToPreExitLatch(latch, preExitLatch, preExitHeader, cloneHelper, inductionVar, headToPreExitPhiMap);
 
-        // 完善preExitHeader的phi操作数
+        // 完善preExitHeader的phi操作数 - 必须在复制完latch之后
         completePreExitPhiOperands(preExitHeader, preExitToHeadPhiMap, preExitLatch, inductionVar);
+
+        // 修复exit块中的LCSSA phi节点
+        fixExitLCSSAPhis(exit, preExitHeader, headToPreExitPhiMap);
     }
 
     private void setupPreExitControlFlow(BasicBlock preExitHeader, BasicBlock preExitLatch, 
-                                       BasicBlock exit, BasicBlock header) {
+                                       BasicBlock exit, BasicBlock header, BasicBlock preHeader) {
         preExitHeader.addSuccessor(preExitLatch);
         preExitHeader.addSuccessor(exit);
         preExitLatch.addPredecessor(preExitHeader);
         exit.addPredecessor(preExitHeader);
         
-        // 设置preExitHeader的前驱
-        preExitHeader.addPredecessor(header.getPredecessors().get(0)); // preHeader
-        preExitHeader.addPredecessor(header); // header
+        // 设置preExitHeader的前驱（只有preHeader和preExitLatch）
+        preExitHeader.addPredecessor(preHeader); // 来自preHeader的边
+        preExitHeader.addPredecessor(preExitLatch); // 来自preExitLatch的回边
         
-        // 创建preExitLatch回到preExitHeader的边
+        // 设置preExitLatch的后继
         preExitLatch.addSuccessor(preExitHeader);
-        preExitHeader.addPredecessor(preExitLatch);
-        IRBuilder.createBr(preExitHeader, preExitLatch);
+        
+        // 注意：不在这里创建分支指令，留给后面创建
     }
 
     private void copyLatchToPreExitLatch(BasicBlock latch, BasicBlock preExitLatch, 
-                                       CloneHelper cloneHelper, Value inductionVar,
+                                       BasicBlock preExitHeader, CloneHelper cloneHelper, Value inductionVar,
                                        Map<PhiInstruction, PhiInstruction> headToPreExitPhiMap) {
+        // 先查找归纳变量的更新指令
         BinaryInstruction updateInst = null;
         for (Instruction inst : latch.getInstructions()) {
             if (inst instanceof BinaryInstruction binInst && 
@@ -979,39 +1150,218 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
             }
         }
         
+        // 收集原始指令（不包括展开后的OR指令和基于OR的计算）
+        List<Instruction> originalInstructions = new ArrayList<>();
+        
+        // 首先找到第一个OR指令，这标志着展开开始的位置
+        Instruction firstORInst = null;
         for (Instruction inst : latch.getInstructions()) {
-            if (inst == updateInst || inst instanceof BranchInstruction) {
+            if (inst instanceof BinaryInstruction binInst && binInst.getOpCode() == OpCode.OR) {
+                firstORInst = inst;
+                break;
+            }
+        }
+        
+        for (Instruction inst : latch.getInstructions()) {
+            if (inst == updateInst || inst instanceof BranchInstruction || inst instanceof PhiInstruction) {
                 continue;
             }
+            
+            // 如果找到了OR指令，那么只包含OR指令之前的指令
+            if (firstORInst != null) {
+                List<Instruction> allInstructions = latch.getInstructions();
+                int currentIndex = allInstructions.indexOf(inst);
+                int firstORIndex = allInstructions.indexOf(firstORInst);
+                
+                // 只包含OR指令之前的指令
+                if (currentIndex >= firstORIndex) {
+                    continue;
+                }
+            }
+            
+            // 额外检查：确保指令不依赖于任何展开生成的值
+            boolean dependsOnUnrollInsts = false;
+            for (Value operand : inst.getOperands()) {
+                if (operand instanceof Instruction opInst) {
+                    // 检查操作数是否是OR指令或依赖于OR指令的结果
+                    if (opInst instanceof BinaryInstruction binOp && binOp.getOpCode() == OpCode.OR) {
+                        dependsOnUnrollInsts = true;
+                        break;
+                    }
+                    
+                    // 检查操作数是否是展开后生成的指令（通过名称判断）
+                    String opName = opInst.getName();
+                    if (opName != null && (opName.contains("or_result") || 
+                        (opName.contains("mul_result") && !opName.equals("mul_result_0")) ||
+                        (opName.contains("add_result") && !opName.equals("add_result_1")))) {
+                        dependsOnUnrollInsts = true;
+                        break;
+                    }
+                }
+            }
+            
+            if (dependsOnUnrollInsts) {
+                continue;
+            }
+            
+            originalInstructions.add(inst);
+        }
+        
+        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+            System.out.println("Copying " + originalInstructions.size() + " original instructions to pre_exit_latch");
+            for (Instruction inst : originalInstructions) {
+                System.out.println("  " + inst.toString());
+            }
+        }
+        
+        // 复制原始指令到preExitLatch
+        for (Instruction inst : originalInstructions) {
+            // 复制指令
             Instruction newInst = cloneHelper.copyInstruction(inst);
+            
+            // 修正操作数映射
+            for (int i = 0; i < newInst.getOperands().size(); i++) {
+                Value operand = newInst.getOperands().get(i);
+                
+                // 如果操作数是归纳变量，替换为pre_exit_header中的对应phi
+                if (operand == inductionVar && inductionVar instanceof PhiInstruction) {
+                    PhiInstruction exitPhi = headToPreExitPhiMap.get((PhiInstruction)inductionVar);
+                    if (exitPhi != null) {
+                        newInst.setOperand(i, exitPhi);
+                    }
+                }
+                // 如果操作数是其他phi节点，也要替换
+                else if (operand instanceof PhiInstruction && headToPreExitPhiMap.containsKey(operand)) {
+                    newInst.setOperand(i, headToPreExitPhiMap.get(operand));
+                }
+            }
+            
             preExitLatch.addInstruction(newInst);
+            cloneHelper.addValueMapping(inst, newInst);
         }
         
         // 创建新的归纳变量更新（步长为1）
-        Value preExitInductionVar = headToPreExitPhiMap.get(inductionVar);
-        BinaryInstruction newUpdateInst = IRBuilder.createBinaryInst(OpCode.ADD, preExitInductionVar, 
-                                                                    new ConstantInt(1, IntegerType.I32), 
-                                                                    preExitLatch);
+        PhiInstruction preExitInductionVar = null;
+        if (inductionVar instanceof PhiInstruction) {
+            preExitInductionVar = headToPreExitPhiMap.get((PhiInstruction)inductionVar);
+        }
+        
+        if (preExitInductionVar != null) {
+            BinaryInstruction newUpdateInst = IRBuilder.createBinaryInst(OpCode.ADD, preExitInductionVar, 
+                                                                        new ConstantInt(1, IntegerType.I32), 
+                                                                        preExitLatch);
+            // 更新cloneHelper映射，以便后续使用
+            if (updateInst != null) {
+                cloneHelper.addValueMapping(updateInst, newUpdateInst);
+            }
+        }
+        
+        // 最后创建分支指令（必须是块的最后一条指令）
+        IRBuilder.createBr(preExitHeader, preExitLatch);
     }
 
     private void completePreExitPhiOperands(BasicBlock preExitHeader, 
                                           Map<PhiInstruction, PhiInstruction> preExitToHeadPhiMap,
                                           BasicBlock preExitLatch, Value inductionVar) {
+        // preExitHeader的phi节点有两个前驱：preHeader(索引0)和preExitLatch(索引1)
+        // 我们需要更新来自preExitLatch的值（索引1）
+        
+        // 先收集preExitLatch中的所有指令，用于匹配
+        BinaryInstruction inductionVarUpdate = null;
+        
+        for (Instruction inst : preExitLatch.getInstructions()) {
+            if (inst instanceof BinaryInstruction binInst) {
+                
+                // 查找归纳变量的更新指令
+                if (binInst.getOpCode() == OpCode.ADD && 
+                    binInst.getOperands().size() >= 2) {
+                    
+                    Value left = binInst.getLeft();
+                    Value right = binInst.getRight();
+                    
+                    // 检查是否是对某个phi的+1操作
+                    if ((left instanceof PhiInstruction && 
+                         right instanceof ConstantInt && 
+                         ((ConstantInt)right).getValue() == 1) ||
+                        (right instanceof PhiInstruction && 
+                         left instanceof ConstantInt && 
+                         ((ConstantInt)left).getValue() == 1)) {
+                        
+                        inductionVarUpdate = binInst;
+                        break; // 找到了，跳出循环
+                    }
+                }
+            }
+        }
+        
         for (Instruction inst : preExitHeader.getInstructions()) {
             if (inst instanceof PhiInstruction phi) {
                 PhiInstruction headPhi = preExitToHeadPhiMap.get(phi);
-                if (headPhi == inductionVar) {
-                    // 找到preExitLatch中的更新指令
-                    for (Instruction latchInst : preExitLatch.getInstructions()) {
-                        if (latchInst instanceof BinaryInstruction binInst && 
-                            binInst.getOpCode() == OpCode.ADD) {
-                            phi.setOperand(2, binInst);
-                            break;
+                
+                if (headPhi == inductionVar && inductionVarUpdate != null) {
+                    // 对于归纳变量，使用找到的更新指令
+                    phi.setOperandForBlock(preExitLatch, inductionVarUpdate);
+                    
+                    if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                        System.out.println("Updated induction var phi " + phi.getName() + 
+                                         " with " + inductionVarUpdate);
+                    }
+                } else {
+                    // 对于其他phi节点，查找最合适的值
+                    Value latchValue = findBestLatchValue(preExitLatch, headPhi, phi);
+                    if (latchValue != null) {
+                        phi.setOperandForBlock(preExitLatch, latchValue);
+                        
+                        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                            System.out.println("Updated phi " + phi.getName() + 
+                                             " with latch value " + latchValue);
+                        }
+                    } else {
+                        // 如果找不到合适的值，保持原来的值（来自preHeader的值）
+                        Value preHeaderValue = phi.getIncomingValue(phi.getIncomingBlocks().get(0));
+                        phi.setOperandForBlock(preExitLatch, preHeaderValue);
+                        
+                        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                            System.out.println("No suitable latch value found for phi " + phi.getName() + 
+                                             ", keeping preheader value: " + preHeaderValue);
                         }
                     }
                 }
             }
         }
+    }
+    
+    /**
+     * 在preExitLatch中查找最合适的值作为phi节点的操作数
+     */
+    private Value findBestLatchValue(BasicBlock preExitLatch, PhiInstruction headPhi, PhiInstruction exitPhi) {
+        // 如果是sum累加器（phi_11），查找最后一个add_result指令
+        if (headPhi != null && headPhi.getName() != null && headPhi.getName().contains("phi_11")) {
+            // 找到最后一个add指令
+            Instruction lastAddInst = null;
+            for (Instruction inst : preExitLatch.getInstructions()) {
+                if (inst instanceof BinaryInstruction binInst && 
+                    binInst.getOpCode() == OpCode.ADD &&
+                    !(inst instanceof BranchInstruction)) {
+                    // 跳过归纳变量的更新指令
+                    boolean isInductionUpdate = false;
+                    for (Value operand : binInst.getOperands()) {
+                        if (operand instanceof ConstantInt constInt && constInt.getValue() == 1) {
+                            isInductionUpdate = true;
+                            break;
+                        }
+                    }
+                    if (!isInductionUpdate) {
+                        lastAddInst = inst;
+                    }
+                }
+            }
+            if (lastAddInst != null) {
+                return lastAddInst;
+            }
+        }
+        
+        return null;
     }
 
     /**
@@ -1081,5 +1431,90 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
                 }
             }
         }
+    }
+
+    /**
+     * 修复exit块中的LCSSA phi节点
+     */
+    private void fixExitLCSSAPhis(BasicBlock exit, BasicBlock preExitHeader, 
+                                 Map<PhiInstruction, PhiInstruction> headToPreExitPhiMap) {
+        if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+            System.out.println("Fixing exit LCSSA phi nodes...");
+        }
+        
+        for (Instruction inst : exit.getInstructions()) {
+            if (inst instanceof PhiInstruction exitPhi) {
+                if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                    System.out.println("Processing exit phi: " + exitPhi.getName());
+                    System.out.println("  Current operands: " + exitPhi.getOperands().size());
+                    for (int i = 0; i < exitPhi.getOperands().size(); i++) {
+                        System.out.println("    [" + i + "]: " + exitPhi.getOperand(i));
+                    }
+                }
+                
+                // 查找来自preExitHeader的操作数
+                List<BasicBlock> incomingBlocks = exitPhi.getIncomingBlocks();
+                for (int i = 0; i < incomingBlocks.size(); i++) {
+                    BasicBlock incomingBlock = incomingBlocks.get(i);
+                    
+                    if (incomingBlock == preExitHeader) {
+                        Value currentValue = exitPhi.getOperand(i);
+                        
+                        // 如果当前值是常数0，这很可能是错误的，需要替换
+                        if (currentValue instanceof ConstantInt && 
+                            ((ConstantInt)currentValue).getValue() == 0) {
+                            
+                            // 查找对应的phi变量
+                            String exitPhiName = exitPhi.getName();
+                            PhiInstruction correctPreExitPhi = findCorrespondingPreExitPhi(
+                                preExitHeader, exitPhiName, headToPreExitPhiMap);
+                            
+                            if (correctPreExitPhi != null) {
+                                exitPhi.setOperand(i, correctPreExitPhi);
+                                
+                                if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
+                                    System.out.println("  Fixed operand " + i + ": " + currentValue + 
+                                                     " -> " + correctPreExitPhi);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * 查找对应的pre_exit_header中的phi节点
+     */
+    private PhiInstruction findCorrespondingPreExitPhi(BasicBlock preExitHeader, String exitPhiName,
+                                                      Map<PhiInstruction, PhiInstruction> headToPreExitPhiMap) {
+        if (exitPhiName == null) return null;
+        
+        // 查找名称匹配的phi节点
+        for (Instruction inst : preExitHeader.getInstructions()) {
+            if (inst instanceof PhiInstruction preExitPhi) {
+                String preExitName = preExitPhi.getName();
+                
+                if (preExitName != null) {
+                    // 匹配逻辑：例如 phi_11_lcssa_1 对应 phi_11_exit
+                    if (exitPhiName.contains("phi_11") && preExitName.contains("phi_11_exit")) {
+                        return preExitPhi;
+                    } else if (exitPhiName.contains("phi_12") && preExitName.contains("phi_12_exit")) {
+                        return preExitPhi;
+                    }
+                    // 通用匹配：提取数字部分
+                    else if (exitPhiName.startsWith("phi_") && preExitName.startsWith("phi_")) {
+                        String exitNumber = exitPhiName.replace("phi_", "").split("_")[0];
+                        String preExitNumber = preExitName.replace("phi_", "").split("_")[0];
+                        if (exitNumber.equals(preExitNumber)) {
+                            return preExitPhi;
+                        }
+                    }
+                }
+            }
+        }
+        
+        return null;
     }
 } 

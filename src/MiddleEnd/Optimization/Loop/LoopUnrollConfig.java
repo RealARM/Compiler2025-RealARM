@@ -31,7 +31,7 @@ public class LoopUnrollConfig {
     
     // 调试和分析
     public static final boolean ENABLE_UNROLL_STATISTICS = false;
-    public static final boolean VERBOSE_UNROLL_LOGGING = false;
+    public static final boolean VERBOSE_UNROLL_LOGGING = true;
     
     private LoopUnrollConfig() {
         // 工具类，不允许实例化
