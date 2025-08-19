@@ -1206,8 +1206,10 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
             copy = new BinaryInstruction(binInst.getOpCode(), left, right, binInst.getType());
         } else if (original instanceof LoadInstruction loadInst) {
             Value pointer = mapping.getOrDefault(loadInst.getPointer(), loadInst.getPointer());
-            // LoadInstruction需要名字参数
-            copy = new LoadInstruction(pointer, loadInst.getType(), loadInst.getName() + "_copy");
+            // 生成唯一名称，避免重复
+            String baseName = loadInst.getName() == null ? "load" : loadInst.getName();
+            String uniqueName = baseName + "_copy_" + UUID.randomUUID().toString().replace("-", "").substring(0, 8);
+            copy = new LoadInstruction(pointer, loadInst.getType(), uniqueName);
         } else if (original instanceof StoreInstruction storeInst) {
             Value value = mapping.getOrDefault(storeInst.getValue(), storeInst.getValue());
             Value pointer = mapping.getOrDefault(storeInst.getPointer(), storeInst.getPointer());
