@@ -47,6 +47,12 @@ public class AArch64Cvt extends AArch64Instruction {
         AArch64Reg srcReg = getSrcReg();
         AArch64Reg dstReg = getDefReg();
         
+        if (srcReg == null || dstReg == null) {
+            String srcStr = (srcReg == null) ? "<null-src>" : srcReg.toString();
+            String dstStr = (dstReg == null) ? "<null-dst>" : dstReg.toString();
+            return getConversionTypeString() + "\t" + dstStr + ", " + srcStr + "\t# WARN: null operand";
+        }
+        
         String srcRegStr;
         String dstRegStr;
         

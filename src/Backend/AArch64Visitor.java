@@ -1010,8 +1010,47 @@ public class AArch64Visitor {
         } else if (RegList.containsKey(source)) {
             srcReg = RegList.get(source);
         } else {
-            srcReg = null;
-            // System.out.println("error no virReg: " + source);
+            if (source instanceof Instruction) {
+                parseInstruction((Instruction) source, true);
+                srcReg = RegList.get(source);
+            } else if (source instanceof Argument) {
+                AArch64Reg argReg = curAArch64Function.getRegArg(source);
+                if (argReg != null) {
+                    srcReg = argReg;
+                } else if (curAArch64Function.getStackArg(source) != null) {
+                    AArch64VirReg tempReg = new AArch64VirReg(false);
+                    long stackParamOffset = curAArch64Function.getStackArg(source);
+                    AArch64Operand paramOffsetOp = checkImmediate(stackParamOffset, ImmediateRange.MEMORY_OFFSET_UNSIGNED, insList, predefine);
+                    if (paramOffsetOp instanceof AArch64Reg) {
+                        AArch64VirReg addrReg = new AArch64VirReg(false);
+                        ArrayList<AArch64Operand> operands = new ArrayList<>();
+                        operands.add(AArch64CPUReg.getAArch64FPReg());
+                        operands.add(paramOffsetOp);
+                        AArch64Binary addInst = new AArch64Binary(operands, addrReg, AArch64Binary.AArch64BinaryType.add);
+                        addInstr(addInst, insList, predefine);
+                        AArch64Load loadParamInst = new AArch64Load(addrReg, new AArch64Imm(0), tempReg);
+                        addInstr(loadParamInst, insList, predefine);
+                    } else {
+                        AArch64Load loadParamInst = new AArch64Load(AArch64CPUReg.getAArch64FPReg(), paramOffsetOp, tempReg);
+                        addInstr(loadParamInst, insList, predefine);
+                    }
+                    srcReg = tempReg;
+                } else {
+                    boolean valueIsFloat = ((Argument) source).getType() instanceof FloatType;
+                    srcReg = getOrCreateRegister(source, valueIsFloat);
+                }
+                RegList.put(source, srcReg);
+            } else if (source instanceof GlobalVariable) {
+                AArch64Label label = new AArch64Label(removeLeadingAt(((GlobalVariable) source).getName()));
+                AArch64VirReg tempReg = new AArch64VirReg(false);
+                loadGlobalAddress(tempReg, label, insList, predefine);
+                srcReg = tempReg;
+                RegList.put(source, srcReg);
+            } else {
+                boolean valueIsFloat = source.getType() instanceof FloatType;
+                srcReg = getOrCreateRegister(source, valueIsFloat);
+                RegList.put(source, srcReg);
+            }
         }
         
         boolean isFloat = targetType.isFloatType();

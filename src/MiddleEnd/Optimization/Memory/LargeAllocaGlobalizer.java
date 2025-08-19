@@ -17,7 +17,7 @@ import java.util.List;
  */
 public class LargeAllocaGlobalizer implements Optimizer.ModuleOptimizer {
 
-	private static final int PROMOTE_THRESHOLD_BYTES = 8 * 1024; // 8KB
+	private static final int PROMOTE_THRESHOLD_BYTES = 512 * 1024;
 
 	@Override
 	public String getName() {

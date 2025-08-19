@@ -46,6 +46,9 @@ public class ConstantFolding implements Optimizer.ModuleOptimizer {
             else if (inst instanceof CompareInstruction) {
                 changed |= foldCompareInstruction((CompareInstruction) inst);
             }
+            else if (inst instanceof ConversionInstruction) {
+                changed |= foldConversionInstruction((ConversionInstruction) inst);
+            }
         }
         
         return changed;
@@ -245,6 +248,26 @@ public class ConstantFolding implements Optimizer.ModuleOptimizer {
                 for (int i = 0; i < userInst.getOperandCount(); i++) {
                     if (userInst.getOperand(i) == inst) {
                         userInst.setOperand(i, result);
+                    }
+                }
+            }
+        }
+        
+        inst.removeFromParent();
+        return true;
+    }
+
+    private boolean foldConversionInstruction(ConversionInstruction inst) {
+        Constant evaluated = ConstantExpressionEvaluator.evaluate(inst);
+        if (evaluated == null) {
+            return false;
+        }
+        
+        for (Value user : new ArrayList<>(inst.getUsers())) {
+            if (user instanceof Instruction userInst) {
+                for (int i = 0; i < userInst.getOperandCount(); i++) {
+                    if (userInst.getOperand(i) == inst) {
+                        userInst.setOperand(i, evaluated);
                     }
                 }
             }

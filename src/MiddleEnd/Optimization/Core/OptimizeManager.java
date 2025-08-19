@@ -94,6 +94,9 @@ public class OptimizeManager {
         addModuleOptimizer(new UnreachableBlockElimination());
         addModuleOptimizer(new StraightLineBlockMerge());
 
+        // 常量处理
+        addModuleOptimizer(new ConstantPropagation());
+        addModuleOptimizer(new ConstantFolding());
  
         // 删除单跳转基本块优化 - 存在问题
         addModuleOptimizer(new RemoveSingleJumpBB());
@@ -137,7 +140,7 @@ public class OptimizeManager {
         addModuleOptimizer(new ConstantFolding());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        // addModuleOptimizer(new RemovePhiPass());
+        addModuleOptimizer(new RemovePhiPass());
     }
     
     public void addModuleOptimizer(ModuleOptimizer optimizer) {
