@@ -1383,192 +1383,55 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
             preExitInductionVar = headToPreExitPhiMap.get((PhiInstruction)inductionVar);
         }
         
-        if (preExitInductionVar == null) {
-            // 如果没有归纳变量phi，使用通用方式复制latch主体指令
-            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
-                System.out.println("Generic fallback: cloning latch body instructions for remainder loop");
+        // 收集latch中的非控制流指令（仅保留展开前的原始指令）
+        List<Instruction> latchBody = new ArrayList<>();
+        boolean encounteredOR = false;
+        for (Instruction inst : latch.getInstructions()) {
+            if (inst == latch.getTerminator()) break;
+            if (inst instanceof PhiInstruction) continue;
+            if (inst instanceof BranchInstruction) continue;
+
+            if (inst instanceof BinaryInstruction bin && bin.getOpCode() == OpCode.OR) {
+                // 这是动态展开生成的第一条OR指令，后面的都属于展开副本
+                encounteredOR = true;
+                break;
             }
-            
-            // 如果preExitInductionVar为null，我们需要先创建一个合适的phi节点
-            PhiInstruction tempExitPhi = null;
-            if (inductionVar instanceof PhiInstruction originalPhi) {
-                tempExitPhi = new PhiInstruction(originalPhi.getType(), originalPhi.getName() + "_exit_fallback");
-                // 添加来自preHeader和preExitLatch的操作数
-                tempExitPhi.addIncoming(new ConstantInt(0, IntegerType.I32), preExitHeader.getPredecessors().get(0));
-                tempExitPhi.addIncoming(new ConstantInt(0, IntegerType.I32), preExitLatch);
-                preExitHeader.addInstruction(tempExitPhi);
-                preExitInductionVar = tempExitPhi;
-            }
-            
-            // 收集latch中的非控制流指令
-            List<Instruction> latchBody = new ArrayList<>();
-            for (Instruction inst : latch.getInstructions()) {
-                if (inst == latch.getTerminator()) break;
-                if (inst instanceof PhiInstruction) continue;
-                if (inst instanceof BranchInstruction) continue;
-                
-                // 跳过展开生成的OR指令和基于OR的计算
-                boolean isUnrollGenerated = false;
-                if (inst instanceof BinaryInstruction binInst && binInst.getOpCode() == OpCode.OR) {
-                    isUnrollGenerated = true;
-                } else {
-                    // 检查指令的操作数是否依赖于OR指令
-                    for (Value operand : inst.getOperands()) {
-                        if (operand instanceof Instruction opInst) {
-                            if (opInst instanceof BinaryInstruction binOp && binOp.getOpCode() == OpCode.OR) {
-                                isUnrollGenerated = true;
-                                break;
-                            }
-                        }
-                    }
-                }
-                
-                if (!isUnrollGenerated) {
-                    latchBody.add(inst);
-                }
-            }
-            
-            // 复制每条指令
-            CloneHelper genericHelper = new CloneHelper();
-            if (preExitInductionVar != null) {
-                genericHelper.addValueMapping(inductionVar, preExitInductionVar);
-            }
-            for (Map.Entry<PhiInstruction, PhiInstruction> entry : headToPreExitPhiMap.entrySet()) {
-                genericHelper.addValueMapping(entry.getKey(), entry.getValue());
-            }
-            
-            // 确保全局变量和函数参数的映射
-            Function function = preExitLatch.getParentFunction();
-            for (Argument arg : function.getArguments()) {
-                genericHelper.addValueMapping(arg, arg);
-            }
-            
-            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
-                System.out.println("Copying " + latchBody.size() + " instructions to remainder loop");
-            }
-            
-            for (Instruction original : latchBody) {
-                Instruction cloned = genericHelper.copyInstruction(original);
-                preExitLatch.addInstruction(cloned);
-                
-                if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
-                    System.out.println("  Copied: " + original.getClass().getSimpleName() + " -> " + cloned.getClass().getSimpleName());
-                }
-            }
-            
-            // 最后添加归纳变量更新和分支
-            if (preExitInductionVar != null) {
-                BinaryInstruction newUpdate = IRBuilder.createBinaryInst(OpCode.ADD, preExitInductionVar,
-                        new ConstantInt(1, IntegerType.I32), preExitLatch);
-                
-                // 更新对应的phi节点的操作数
-                PhiInstruction phiToUpdate = (tempExitPhi != null) ? tempExitPhi : preExitInductionVar;
-                phiToUpdate.setOperandForBlock(preExitLatch, newUpdate);
-                
-                if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
-                    System.out.println("  Updated phi " + phiToUpdate.getName() + " with induction update: " + newUpdate);
-                }
-            }
-            IRBuilder.createBr(preExitHeader, preExitLatch);
-            return;
+
+            if (encounteredOR) break; // 保险起见
+
+            latchBody.add(inst);
         }
         
-        // 重新创建完整的循环体逻辑
-        // 1. mul i32 %phi_81_exit, 1
-        BinaryInstruction mulInst1 = IRBuilder.createBinaryInst(OpCode.MUL, preExitInductionVar, 
-                                                               new ConstantInt(1, IntegerType.I32), preExitLatch);
+        // 复制每条指令，使用依赖敏感的复制
+        CloneHelper genericHelper = new CloneHelper();
+        if (preExitInductionVar != null) {
+            genericHelper.addValueMapping(inductionVar, preExitInductionVar);
+        }
+        for (Map.Entry<PhiInstruction, PhiInstruction> entry : headToPreExitPhiMap.entrySet()) {
+            genericHelper.addValueMapping(entry.getKey(), entry.getValue());
+        }
         
-        // 2. add i32 0, %mul_result
-        BinaryInstruction addInst1 = IRBuilder.createBinaryInst(OpCode.ADD, new ConstantInt(0, IntegerType.I32), 
-                                                               mulInst1, preExitLatch);
-        
-        // 3. gep %ini_arr, %add_result
         Function function = preExitLatch.getParentFunction();
-        Value iniArrParam = null;
         for (Argument arg : function.getArguments()) {
-            if (arg.getName() != null && arg.getName().equals("ini_arr")) {
-                iniArrParam = arg;
-                break;
-            }
+            genericHelper.addValueMapping(arg, arg);
         }
         
-        if (iniArrParam == null) {
-            // 尝试通过参数索引获取
-            List<Argument> args = function.getArguments();
-            if (!args.isEmpty()) {
-                iniArrParam = args.get(0); // 退而求其次使用第一个参数
-            }
+        Set<Instruction> processed = new HashSet<>();
+        for (Instruction original : latchBody) {
+            copyInstructionWithDependencies(original, latchBody, processed, preExitLatch, headToPreExitPhiMap, inductionVar, genericHelper);
         }
         
-        // 如果仍为空，再在entry block中搜寻第一个i32*类型的alloca作为备选
-        if (iniArrParam == null) {
-            for (Instruction inst : function.getEntryBlock().getInstructions()) {
-                if (inst instanceof AllocaInstruction allocaInst) {
-                    if (allocaInst.getAllocatedType().toString().contains("i32")) {
-                        iniArrParam = allocaInst;
-                        break;
-                    }
-                }
-            }
-        }
-
-        // 如果仍未找到必要的参数，提前返回避免空指针异常
-        if (iniArrParam == null) {
-            if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
-                System.out.println("Fallback: unable to locate ini_arr pointer, using simplified remainder logic.");
-            }
-            BinaryInstruction newUpdateInst = IRBuilder.createBinaryInst(OpCode.ADD, preExitInductionVar,
-                                                        new ConstantInt(1, IntegerType.I32), preExitLatch);
-            IRBuilder.createBr(preExitHeader, preExitLatch);
-            return;
-        }
-
-        
-        GetElementPtrInstruction gepInst1 = IRBuilder.createGetElementPtr(iniArrParam, addInst1, preExitLatch);
-        
-        // 4. load from %gep
-        LoadInstruction loadInst1 = IRBuilder.createLoad(gepInst1, preExitLatch);
-        
-        // 5. mul i32 %load, 1
-        BinaryInstruction mulInst2 = IRBuilder.createBinaryInst(OpCode.MUL, loadInst1, 
-                                                               new ConstantInt(1, IntegerType.I32), preExitLatch);
-        
-        // 6. add i32 0, %mul_result
-        BinaryInstruction addInst2 = IRBuilder.createBinaryInst(OpCode.ADD, new ConstantInt(0, IntegerType.I32), 
-                                                               mulInst2, preExitLatch);
-        
-        // 7. gep %array_alloca_1, %add_result
-        Value arrayAllocaParam = null;
-        // 查找array_alloca_1
-        for (Instruction inst : function.getEntryBlock().getInstructions()) {
-            if (inst instanceof AllocaInstruction && inst.getName() != null && inst.getName().contains("array_alloca")) {
-                arrayAllocaParam = inst;
-                break;
-            }
-        }
-        
-        if (arrayAllocaParam != null) {
-            GetElementPtrInstruction gepInst2 = IRBuilder.createGetElementPtr(arrayAllocaParam, addInst2, preExitLatch);
-            
-            // 8. load from array
-            LoadInstruction loadInst2 = IRBuilder.createLoad(gepInst2, preExitLatch);
-            
-            // 9. add i32 %load, 1
-            BinaryInstruction addInst3 = IRBuilder.createBinaryInst(OpCode.ADD, loadInst2, 
-                                                                   new ConstantInt(1, IntegerType.I32), preExitLatch);
-            
-            // 10. store result back to array
-            StoreInstruction storeInst = IRBuilder.createStore(addInst3, gepInst2, preExitLatch);
-        }
-        
-        // 11. 创建归纳变量更新
+        // 添加归纳变量更新
         BinaryInstruction newUpdateInst = IRBuilder.createBinaryInst(OpCode.ADD, preExitInductionVar, 
                                                                     new ConstantInt(1, IntegerType.I32), 
                                                                     preExitLatch);
         
-        // 12. 最后创建分支指令
+        if (preExitInductionVar != null) {
+            preExitInductionVar.setOperandForBlock(preExitLatch, newUpdateInst);
+        }
+        
+        // 创建分支指令
         IRBuilder.createBr(preExitHeader, preExitLatch);
-
     }
 
     private void completePreExitPhiOperands(BasicBlock preExitHeader, 
