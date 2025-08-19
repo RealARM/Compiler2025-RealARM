@@ -43,6 +43,9 @@ public class ConstantFolding implements Optimizer.ModuleOptimizer {
             if (inst instanceof BinaryInstruction) {
                 changed |= foldBinaryInstruction((BinaryInstruction) inst);
             }
+            else if (inst instanceof CompareInstruction) {
+                changed |= foldCompareInstruction((CompareInstruction) inst);
+            }
         }
         
         return changed;
@@ -123,7 +126,7 @@ public class ConstantFolding implements Optimizer.ModuleOptimizer {
             // if (left instanceof ConstantFloat && right instanceof ConstantFloat) {
             //     double leftVal = ((ConstantFloat) left).getValue();
             //     double rightVal = ((ConstantFloat) right).getValue();
-                
+            //     
             //     switch (inst.getOpCode()) {
             //         case FADD:
             //             result = new ConstantFloat(leftVal + rightVal);
@@ -164,5 +167,90 @@ public class ConstantFolding implements Optimizer.ModuleOptimizer {
         }
         
         return false;
+    }
+    
+    private boolean foldCompareInstruction(CompareInstruction inst) {
+        Value left = inst.getLeft();
+        Value right = inst.getRight();
+        
+        if (!(left instanceof Constant && right instanceof Constant)) {
+            return false;
+        }
+        
+        Constant result = null;
+        OpCode predicate = inst.getPredicate();
+        
+        if (inst.isIntegerCompare() && left instanceof ConstantInt && right instanceof ConstantInt) {
+            int l = ((ConstantInt) left).getValue();
+            int r = ((ConstantInt) right).getValue();
+            boolean res = false;
+            switch (predicate) {
+                case EQ:
+                    res = (l == r);
+                    break;
+                case NE:
+                    res = (l != r);
+                    break;
+                case SLT:
+                    res = (l < r);
+                    break;
+                case SLE:
+                    res = (l <= r);
+                    break;
+                case SGT:
+                    res = (l > r);
+                    break;
+                case SGE:
+                    res = (l >= r);
+                    break;
+                default:
+                    return false;
+            }
+            result = ConstantInt.getBool(res);
+        } else if (inst.isFloatCompare() && left instanceof ConstantFloat && right instanceof ConstantFloat) {
+            double l = ((ConstantFloat) left).getValue();
+            double r = ((ConstantFloat) right).getValue();
+            boolean res = false;
+            switch (predicate) {
+                case UEQ:
+                    res = (l == r);
+                    break;
+                case UNE:
+                    res = (l != r);
+                    break;
+                case ULT:
+                    res = (l < r);
+                    break;
+                case ULE:
+                    res = (l <= r);
+                    break;
+                case UGT:
+                    res = (l > r);
+                    break;
+                case UGE:
+                    res = (l >= r);
+                    break;
+                default:
+                    return false;
+            }
+            result = ConstantInt.getBool(res);
+        }
+        
+        if (result == null) {
+            return false;
+        }
+        
+        for (Value user : new ArrayList<>(inst.getUsers())) {
+            if (user instanceof Instruction userInst) {
+                for (int i = 0; i < userInst.getOperandCount(); i++) {
+                    if (userInst.getOperand(i) == inst) {
+                        userInst.setOperand(i, result);
+                    }
+                }
+            }
+        }
+        
+        inst.removeFromParent();
+        return true;
     }
 } 

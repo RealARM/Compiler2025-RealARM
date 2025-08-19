@@ -84,6 +84,16 @@ public class OptimizeManager {
         
         // 控制流优化
         addModuleOptimizer(new BranchSimplifier());
+        addModuleOptimizer(new UnreachableBlockElimination());
+        addModuleOptimizer(new TrivialPhiElimination());
+        addModuleOptimizer(new StraightLineBlockMerge());
+        addModuleOptimizer(new BranchSimplifier());
+        addModuleOptimizer(new UnreachableBlockElimination());
+        addModuleOptimizer(new StraightLineBlockMerge());
+
+ 
+        // 删除单跳转基本块优化 - 存在问题
+        addModuleOptimizer(new RemoveSingleJumpBB());
         
         // 循环SSA形式转换（在循环优化之前）
         addModuleOptimizer(new LoopSSATransform());
