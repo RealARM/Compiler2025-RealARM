@@ -87,12 +87,12 @@ public class OptimizeManager {
         
         // 控制流优化
         addModuleOptimizer(new BranchSimplifier());
-        addModuleOptimizer(new UnreachableBlockElimination());
-        addModuleOptimizer(new TrivialPhiElimination());
-        addModuleOptimizer(new StraightLineBlockMerge());
-        addModuleOptimizer(new BranchSimplifier());
-        addModuleOptimizer(new UnreachableBlockElimination());
-        addModuleOptimizer(new StraightLineBlockMerge());
+        // addModuleOptimizer(new UnreachableBlockElimination());
+        // addModuleOptimizer(new TrivialPhiElimination());
+        // addModuleOptimizer(new StraightLineBlockMerge());
+        // addModuleOptimizer(new BranchSimplifier());
+        // addModuleOptimizer(new UnreachableBlockElimination());
+        // addModuleOptimizer(new StraightLineBlockMerge());
 
         // 常量处理
         addModuleOptimizer(new ConstantPropagation());
@@ -143,7 +143,7 @@ public class OptimizeManager {
         addModuleOptimizer(new ConstantFolding());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        // addModuleOptimizer(new RemovePhiPass());
+        addModuleOptimizer(new RemovePhiPass());
     }
     
     public void addModuleOptimizer(ModuleOptimizer optimizer) {
