@@ -53,6 +53,9 @@ public class OptimizeManager {
         // 第一次Mem2Reg优化
         addModuleOptimizer(new Mem2Reg());
 
+        // 全局值编号优化 (GVN)
+        addModuleOptimizer(new GVN());
+
         // 基本块处理
         addModuleOptimizer(new EmptyBlockHandler());
         
@@ -65,6 +68,9 @@ public class OptimizeManager {
         
         // 函数内联展开优化
         addModuleOptimizer(new InlineExpansion());
+
+        // 全局变量优化
+        addModuleOptimizer(new GlobalValueLocalize());
 
         // 第二次Mem2Reg优化
         addModuleOptimizer(new Mem2Reg());
@@ -79,9 +85,6 @@ public class OptimizeManager {
         // 常量处理
         addModuleOptimizer(new ConstantPropagation());
         addModuleOptimizer(new ConstantFolding());
-        
-        // 全局变量优化
-        addModuleOptimizer(new GlobalValueLocalize());
         
         // 指令组合优化
         addModuleOptimizer(new InstCombine());
@@ -110,6 +113,61 @@ public class OptimizeManager {
  
         // 删除单跳转基本块优化 - 存在问题
         addModuleOptimizer(new RemoveSingleJumpBB());
+
+         // 常量优化
+         addModuleOptimizer(new ConstantDeduplication());
+         addModuleOptimizer(new ConstantArraySimplifier());
+         
+         // 基本块处理
+         addModuleOptimizer(new EmptyBlockHandler());
+         
+         // 常量处理
+         addModuleOptimizer(new ConstantPropagation());
+         addModuleOptimizer(new ConstantFolding());
+         
+         // 指令组合优化
+         addModuleOptimizer(new InstCombine());
+         
+         // 窥孔优化
+         addModuleOptimizer(new PeepHole());
+         
+         // 删除单跳转基本块优化 - 存在问题
+         addModuleOptimizer(new RemoveSingleJumpBB());
+         
+         // 移除无用的不等于比较指令优化
+         addModuleOptimizer(new RemoveUselessNE());
+         
+         // 控制流优化
+         addModuleOptimizer(new BranchSimplifier());
+         addModuleOptimizer(new UnreachableBlockElimination());
+         addModuleOptimizer(new TrivialPhiElimination());
+         addModuleOptimizer(new StraightLineBlockMerge());
+         addModuleOptimizer(new BranchSimplifier());
+         addModuleOptimizer(new UnreachableBlockElimination());
+         addModuleOptimizer(new StraightLineBlockMerge());
+ 
+         // 常量处理
+         addModuleOptimizer(new ConstantPropagation());
+         addModuleOptimizer(new ConstantFolding());
+  
+         // 删除单跳转基本块优化 - 存在问题
+         addModuleOptimizer(new RemoveSingleJumpBB());
+
+        // 全局代码移动优化
+        addModuleOptimizer(new GCM());
+        
+        // 全局值编号优化 (GVN)
+        addModuleOptimizer(new GVN());
+        
+        // Load/Store数据流优化
+        addModuleOptimizer(new LoadStoreFlowOptimizer());
+        
+        // 无用代码消除
+        addModuleOptimizer(new DCE());
+
+        // 常量处理
+        addModuleOptimizer(new ConstantPropagation());
+        addModuleOptimizer(new ConstantFolding());
         
         // 循环SSA形式转换（在循环优化之前）
         addModuleOptimizer(new LoopSSATransform());
@@ -138,6 +196,45 @@ public class OptimizeManager {
 
         // 函数内联展开优化
         addModuleOptimizer(new InlineExpansion());
+
+         // 常量优化
+         addModuleOptimizer(new ConstantDeduplication());
+         addModuleOptimizer(new ConstantArraySimplifier());
+         
+         // 基本块处理
+         addModuleOptimizer(new EmptyBlockHandler());
+         
+         // 常量处理
+         addModuleOptimizer(new ConstantPropagation());
+         addModuleOptimizer(new ConstantFolding());
+         
+         // 指令组合优化
+         addModuleOptimizer(new InstCombine());
+         
+         // 窥孔优化
+         addModuleOptimizer(new PeepHole());
+         
+         // 删除单跳转基本块优化 - 存在问题
+         addModuleOptimizer(new RemoveSingleJumpBB());
+         
+         // 移除无用的不等于比较指令优化
+         addModuleOptimizer(new RemoveUselessNE());
+         
+         // 控制流优化
+         addModuleOptimizer(new BranchSimplifier());
+         addModuleOptimizer(new UnreachableBlockElimination());
+         addModuleOptimizer(new TrivialPhiElimination());
+         addModuleOptimizer(new StraightLineBlockMerge());
+         addModuleOptimizer(new BranchSimplifier());
+         addModuleOptimizer(new UnreachableBlockElimination());
+         addModuleOptimizer(new StraightLineBlockMerge());
+ 
+         // 常量处理
+         addModuleOptimizer(new ConstantPropagation());
+         addModuleOptimizer(new ConstantFolding());
+  
+         // 删除单跳转基本块优化 - 存在问题
+         addModuleOptimizer(new RemoveSingleJumpBB());
         
         // 全局代码移动优化
         addModuleOptimizer(new GCM());
@@ -154,6 +251,7 @@ public class OptimizeManager {
         // 常量处理
         addModuleOptimizer(new ConstantPropagation());
         addModuleOptimizer(new ConstantFolding());
+        addModuleOptimizer(new BranchSimplifier());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
         addModuleOptimizer(new RemovePhiPass());
