@@ -1157,13 +1157,27 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
     }
 
     private void redirectPreHeaderEdges(BasicBlock header, BasicBlock latch, BasicBlock preHeader) {
+        // 记录需要迁移到preHeader的Phi来边值（假定只有一个进入前驱在规范化循环中）
+        List<PhiInstruction> headerPhis = extractHeaderPhis(header);
+        Map<PhiInstruction, Value> incomingToPreHeader = new HashMap<>();
+
         for (BasicBlock pred : new ArrayList<>(header.getPredecessors())) {
             if (pred != latch) {
+                // 先为每个Phi记录来自该pred的来边值，然后移除该来边
+                for (PhiInstruction phi : headerPhis) {
+                    Value oldVal = phi.getIncomingValue(pred);
+                    if (oldVal != null && !incomingToPreHeader.containsKey(phi)) {
+                        incomingToPreHeader.put(phi, oldVal);
+                    }
+                    phi.removeIncoming(pred);
+                }
+
+                // 重定向CFG边
                 pred.removeSuccessor(header);
                 pred.addSuccessor(preHeader);
                 preHeader.addPredecessor(pred);
                 header.removePredecessor(pred);
-                
+
                 // 更新分支指令
                 Instruction terminator = pred.getTerminator();
                 if (terminator instanceof BranchInstruction) {
@@ -1172,8 +1186,16 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
             }
         }
 
+        // 连接 preHeader -> header
         preHeader.addSuccessor(header);
         header.addPredecessor(preHeader);
+
+        // 将记录下来的值作为来自preHeader的来边补回到Phi
+        for (Map.Entry<PhiInstruction, Value> e : incomingToPreHeader.entrySet()) {
+            PhiInstruction phi = e.getKey();
+            Value val = e.getValue();
+            phi.addOrUpdateIncoming(val, preHeader);
+        }
     }
 
     private void updateStepSize(BinaryInstruction updateInst) {
@@ -1452,22 +1474,34 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
             preExitInductionVar = headToPreExitPhiMap.get((PhiInstruction)inductionVar);
         }
         
-        // 收集latch中的非控制流指令（仅保留展开前的原始指令）
+        // 收集latch中的所有原始计算指令，需要复制到pre_exit_latch中进行剩余迭代
         List<Instruction> latchBody = new ArrayList<>();
-        boolean encounteredOR = false;
+        
         for (Instruction inst : latch.getInstructions()) {
             if (inst == latch.getTerminator()) break;
             if (inst instanceof PhiInstruction) continue;
             if (inst instanceof BranchInstruction) continue;
 
+            // 跳过动态展开生成的OR指令及其后续
             if (inst instanceof BinaryInstruction bin && bin.getOpCode() == OpCode.OR) {
-                // 这是动态展开生成的第一条OR指令，后面的都属于展开副本
-                encounteredOR = true;
                 break;
             }
 
-            if (encounteredOR) break; // 保险起见
+            // 跳过已被修改为4倍步长的归纳变量更新指令
+            if (inst instanceof BinaryInstruction bin && bin.getOpCode() == OpCode.ADD) {
+                boolean isModifiedInductionUpdate = false;
+                for (Value operand : bin.getOperands()) {
+                    if (operand instanceof ConstantInt constInt && constInt.getValue() == DYNAMIC_UNROLL_FACTOR) {
+                        isModifiedInductionUpdate = true;
+                        break;
+                    }
+                }
+                if (isModifiedInductionUpdate) {
+                    continue; // 跳过修改后的归纳变量更新
+                }
+            }
 
+            // 包含所有其他原始计算指令（包括乘法、加法等）
             latchBody.add(inst);
         }
         
@@ -1488,6 +1522,16 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         Set<Instruction> processed = new HashSet<>();
         for (Instruction original : latchBody) {
             copyInstructionWithDependencies(original, latchBody, processed, preExitLatch, headToPreExitPhiMap, inductionVar, genericHelper);
+        }
+        
+        // 确保复制了所有相关的乘法计算，从原始latch中查找
+        for (Instruction inst : latch.getInstructions()) {
+            if (inst instanceof BinaryInstruction binInst && binInst.getOpCode() == OpCode.MUL) {
+                // 如果这个乘法指令还没有被复制过，现在复制它
+                if (!processed.contains(inst) && !containsEquivalentInstruction(preExitLatch, inst)) {
+                    copyInstructionWithDependencies(inst, new ArrayList<>(latch.getInstructions()), processed, preExitLatch, headToPreExitPhiMap, inductionVar, genericHelper);
+                }
+            }
         }
         
         // 添加归纳变量更新
@@ -1547,18 +1591,117 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
                                          " (latch operand) with " + inductionVarUpdate);
                     }
                 } else {
-                    // 对于其他phi节点，使用合适的默认值
-                    Value preHeaderValue = phi.getOperand(0); // preHeader 对应的值
-                    phi.setOperandForBlock(preExitLatch, preHeaderValue);
+                    // 对于其他 phi（例如累积量 b），应当使用在 preExitLatch 中最新产生的值，
+                    // 否则会丢失最后一次迭代的计算。
+                    Value latest = findLatestValueInPreExitLatch(preExitLatch, headPhi, phi);
+
+                    if (latest == null) {
+                        // 如果未能找到相关计算，退回到 phi 本身，保持安全
+                        latest = phi;
+                    }
+
+                    phi.setOperandForBlock(preExitLatch, latest);
+
                     if (LoopUnrollConfig.VERBOSE_UNROLL_LOGGING) {
                         System.out.println("Updated phi " + phi.getName() +
-                                         " (latch operand) with preheader value: " + preHeaderValue);
+                                         " (latch operand) with latest value: " + latest);
                     }
                 }
             }
         }
     }
     
+    /**
+     * 在pre_exit_latch中查找某个phi的最新计算值
+     */
+    private Value findLatestValueInPreExitLatch(BasicBlock preExitLatch, PhiInstruction headPhi, PhiInstruction exitPhi) {
+        if (headPhi == null) return null;
+        
+        // 查找在pre_exit_latch中最后一个与该phi相关的计算结果
+        Value latestValue = null;
+        
+        // 从后往前查找指令，找到最新的相关计算
+        List<Instruction> instructions = preExitLatch.getInstructions();
+        for (int i = instructions.size() - 1; i >= 0; i--) {
+            Instruction inst = instructions.get(i);
+            
+            // 跳过分支指令和归纳变量更新指令
+            if (inst instanceof BranchInstruction) continue;
+            if (inst instanceof BinaryInstruction binInst && 
+                binInst.getOpCode() == OpCode.ADD &&
+                isInductionVarUpdate(binInst)) {
+                continue;
+            }
+            
+            // 对于乘法指令，检查是否与headPhi相关
+            if (inst instanceof BinaryInstruction binInst && binInst.getOpCode() == OpCode.MUL) {
+                // 检查操作数是否涉及到我们关心的phi
+                for (Value operand : binInst.getOperands()) {
+                    if (isRelatedToHeadPhi(operand, headPhi)) {
+                        latestValue = inst;
+                        break;
+                    }
+                }
+                if (latestValue != null) break;
+            }
+        }
+        
+        return latestValue;
+    }
+    
+    /**
+     * 检查是否是归纳变量的更新指令
+     */
+    private boolean isInductionVarUpdate(BinaryInstruction binInst) {
+        for (Value operand : binInst.getOperands()) {
+            if (operand instanceof ConstantInt constInt && constInt.getValue() == 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    /**
+     * 检查基本块中是否已包含等价的指令
+     */
+    private boolean containsEquivalentInstruction(BasicBlock block, Instruction target) {
+        if (!(target instanceof BinaryInstruction targetBin)) return false;
+        
+        for (Instruction inst : block.getInstructions()) {
+            if (inst instanceof BinaryInstruction binInst && 
+                binInst.getOpCode() == targetBin.getOpCode()) {
+                // 简单检查：如果操作码相同且操作数类型相似，认为是等价的
+                if (binInst.getOperands().size() == targetBin.getOperands().size()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * 检查值是否与头块phi相关
+     */
+    private boolean isRelatedToHeadPhi(Value value, PhiInstruction headPhi) {
+        if (value == headPhi) return true;
+        
+        // 如果是指令，递归检查其操作数
+        if (value instanceof Instruction inst) {
+            for (Value operand : inst.getOperands()) {
+                if (isRelatedToHeadPhi(operand, headPhi)) {
+                    return true;
+                }
+            }
+        }
+        
+        // 如果是phi节点，检查名称相似性
+        if (value instanceof PhiInstruction phi && headPhi.getName() != null && phi.getName() != null) {
+            return phi.getName().contains(headPhi.getName()) || headPhi.getName().contains(phi.getName());
+        }
+        
+        return false;
+    }
+
     /**
      * 在preExitLatch中查找最合适的值作为phi节点的操作数
      */
@@ -2293,4 +2436,4 @@ public class LoopUnroll implements Optimizer.ModuleOptimizer {
         }
         return false;
     }
- }  
+}  
