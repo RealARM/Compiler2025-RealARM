@@ -155,6 +155,109 @@ public class LoopInterchange implements Optimizer.ModuleOptimizer {
             return false;
         }
         
+        // 新增：检查是否为简单的初始化循环，如果是则不进行重排
+        if (isSimpleInitializationLoop(outer) || isSimpleInitializationLoop(inner)) {
+            return false;
+        }
+        
+        // 新增：检查边界值的兼容性
+        if (!areBoundsCompatibleForInterchange(outer, inner)) {
+            return false;
+        }
+        
+        return true;
+    }
+    
+    /**
+     * 检查是否为简单的初始化循环（通常不应该重排）
+     */
+    private boolean isSimpleInitializationLoop(Loop loop) {
+        // 检查循环体是否主要包含存储指令（数组初始化的特征）
+        int storeCount = 0;
+        int gepCount = 0;
+        int totalInstructions = 0;
+        
+        for (BasicBlock block : loop.getBlocks()) {
+            for (Instruction inst : block.getInstructions()) {
+                totalInstructions++;
+                if (inst instanceof StoreInstruction) {
+                    storeCount++;
+                } else if (inst instanceof GetElementPtrInstruction) {
+                    gepCount++;
+                }
+            }
+        }
+        
+        // 如果存储指令占比很高，认为是初始化循环
+        if (totalInstructions > 0 && (double)storeCount / totalInstructions > 0.2) {
+            return true;
+        }
+        
+        // 如果包含大量GEP指令（数组访问），认为是数组操作循环
+        if (totalInstructions > 0 && (double)gepCount / totalInstructions > 0.1) {
+            return true;
+        }
+        
+        // 检查是否为常数边界的简单计数循环
+        Value init = loop.getInitValue();
+        Value end = loop.getEndValue();
+        Value step = loop.getStepValue();
+        
+        if (init instanceof ConstantInt && 
+            end instanceof ConstantInt && 
+            step instanceof ConstantInt) {
+            ConstantInt stepConst = (ConstantInt) step;
+            // 简单的单步递增循环通常是初始化循环
+            if (stepConst.getValue() == 1) {
+                return true;
+            }
+        }
+        
+        // 对于深度超过2的嵌套循环，更加保守
+        if (loop.getDepth() > 2) {
+            return true;
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 检查两个循环的边界是否兼容交换
+     */
+    private boolean areBoundsCompatibleForInterchange(Loop outer, Loop inner) {
+        Value outerInit = outer.getInitValue();
+        Value outerEnd = outer.getEndValue();
+        Value innerInit = inner.getInitValue();
+        Value innerEnd = inner.getEndValue();
+        
+        // 要求边界值都是常数，且初始值相同（通常都是0）
+        if (!(outerInit instanceof ConstantInt) || 
+            !(outerEnd instanceof ConstantInt) ||
+            !(innerInit instanceof ConstantInt) || 
+            !(innerEnd instanceof ConstantInt)) {
+            return false;
+        }
+        
+        ConstantInt outerInitConst = (ConstantInt) outerInit;
+        ConstantInt innerInitConst = (ConstantInt) innerInit;
+        
+        // 初始值必须相同（通常都是0）
+        if (outerInitConst.getValue() != innerInitConst.getValue()) {
+            return false;
+        }
+        
+        ConstantInt outerEndConst = (ConstantInt) outerEnd;
+        ConstantInt innerEndConst = (ConstantInt) innerEnd;
+        
+        // 如果边界值差距过大，不适合交换
+        long outerRange = outerEndConst.getValue() - outerInitConst.getValue();
+        long innerRange = innerEndConst.getValue() - innerInitConst.getValue();
+        
+        // 如果范围差距超过2倍，认为不适合交换
+        if (outerRange > innerRange * 2 || innerRange > outerRange * 2) {
+            return false;
+        }
+        
         return true;
     }
     
@@ -183,13 +286,26 @@ public class LoopInterchange implements Optimizer.ModuleOptimizer {
      * 检查值是否依赖于目标变量
      */
     private boolean dependsOn(Value value, Value target) {
+        return dependsOn(value, target, new HashSet<>());
+    }
+    
+    /**
+     * 检查值是否依赖于目标变量（带访问集合避免循环）
+     */
+    private boolean dependsOn(Value value, Value target, Set<Value> visited) {
         if (value == target) {
             return true;
         }
         
+        // 避免循环访问
+        if (visited.contains(value)) {
+            return false;
+        }
+        visited.add(value);
+        
         if (value instanceof Instruction inst) {
             for (int i = 0; i < inst.getOperandCount(); i++) {
-                if (dependsOn(inst.getOperand(i), target)) {
+                if (dependsOn(inst.getOperand(i), target, visited)) {
                     return true;
                 }
             }
@@ -293,12 +409,26 @@ public class LoopInterchange implements Optimizer.ModuleOptimizer {
      * 检查值中是否包含特定变量
      */
     private boolean containsVariable(Value value, Value target) {
+        return containsVariable(value, target, new HashSet<>());
+    }
+    
+    /**
+     * 检查值中是否包含特定变量（带访问集合避免循环）
+     */
+    private boolean containsVariable(Value value, Value target, Set<Value> visited) {
         if (value == target) {
             return true;
         }
+        
+        // 避免循环访问
+        if (visited.contains(value)) {
+            return false;
+        }
+        visited.add(value);
+        
         if (value instanceof Instruction inst) {
             for (int i = 0; i < inst.getOperandCount(); i++) {
-                if (containsVariable(inst.getOperand(i), target)) {
+                if (containsVariable(inst.getOperand(i), target, visited)) {
                     return true;
                 }
             }
