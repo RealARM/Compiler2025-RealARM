@@ -154,9 +154,11 @@ public class OptimizeManager {
         // 常量处理
         addModuleOptimizer(new ConstantPropagation());
         addModuleOptimizer(new ConstantFolding());
+
+        addModuleOptimizer(new BranchSimplifier());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        addModuleOptimizer(new RemovePhiPass());
+        // addModuleOptimizer(new RemovePhiPass());
     }
     
     public void addModuleOptimizer(ModuleOptimizer optimizer) {
