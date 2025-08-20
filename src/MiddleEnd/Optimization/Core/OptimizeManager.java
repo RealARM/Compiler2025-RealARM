@@ -52,6 +52,16 @@ public class OptimizeManager {
         
         // 第一次Mem2Reg优化
         addModuleOptimizer(new Mem2Reg());
+
+        // 基本块处理
+        addModuleOptimizer(new EmptyBlockHandler());
+        
+        // 常量处理
+        addModuleOptimizer(new ConstantPropagation());
+        addModuleOptimizer(new ConstantFolding());
+        
+        // 纯函数标记
+        addModuleOptimizer(new MemoizationAdvisorSimple());
         
         // 函数内联展开优化
         addModuleOptimizer(new InlineExpansion());
@@ -87,12 +97,12 @@ public class OptimizeManager {
         
         // 控制流优化
         addModuleOptimizer(new BranchSimplifier());
-        // addModuleOptimizer(new UnreachableBlockElimination());
-        // addModuleOptimizer(new TrivialPhiElimination());
-        // addModuleOptimizer(new StraightLineBlockMerge());
-        // addModuleOptimizer(new BranchSimplifier());
-        // addModuleOptimizer(new UnreachableBlockElimination());
-        // addModuleOptimizer(new StraightLineBlockMerge());
+        addModuleOptimizer(new UnreachableBlockElimination());
+        addModuleOptimizer(new TrivialPhiElimination());
+        addModuleOptimizer(new StraightLineBlockMerge());
+        addModuleOptimizer(new BranchSimplifier());
+        addModuleOptimizer(new UnreachableBlockElimination());
+        addModuleOptimizer(new StraightLineBlockMerge());
 
         // 常量处理
         addModuleOptimizer(new ConstantPropagation());
@@ -106,6 +116,9 @@ public class OptimizeManager {
 
         // 删除无用循环
         addModuleOptimizer(new TrivialLoopDeletion());
+
+        // 循环并行化优化
+        // addModuleOptimizer(new LoopParallelizer());
 
         // 循环交换优化
         addModuleOptimizer(new LoopInterchange());

@@ -970,8 +970,19 @@ public class AArch64Visitor {
         } else if (RegList.containsKey(source)) {
             srcReg = RegList.get(source);
         } else {
-            srcReg = null;
-            // System.out.println("error no virReg: " + source);
+            // 补丁：中端的def-use chain有点问题，当源操作数不在RegList中时，先尝试从instruction分配寄存器
+            if (source instanceof Instruction) {
+                parseInstruction((Instruction) source, true);
+                if (RegList.containsKey(source)) {
+                    srcReg = RegList.get(source);
+                } else {
+                    boolean sourceIsFloat = source.getType() instanceof FloatType;
+                    srcReg = getOrCreateRegister(source, sourceIsFloat);
+                }
+            } else {
+                boolean sourceIsFloat = source.getType() instanceof FloatType;
+                srcReg = getOrCreateRegister(source, sourceIsFloat);
+            }
         }
         
         boolean isFloat = targetType.isFloatType();

@@ -104,8 +104,12 @@ public class DCE implements Optimizer.ModuleOptimizer {
             return true;
         }
         
-        if (inst instanceof CallInstruction) {
-            return true;
+        if (inst instanceof CallInstruction callInst) {
+            if (isPureFunction(callInst)) {
+                return !callInst.getUsers().isEmpty();
+            } else {
+                return true;
+            }
         }
         
         if (!inst.getUsers().isEmpty()) {
@@ -113,6 +117,16 @@ public class DCE implements Optimizer.ModuleOptimizer {
         }
         
         return false;
+    }
+    
+    private boolean isPureFunction(CallInstruction callInst) {
+        Function calledFunction = callInst.getCallee();
+        if (calledFunction == null) {
+            return false;
+        }
+        
+        String functionName = calledFunction.getName();
+        return functionName.contains("memoizable");
     }
     
     private List<Instruction> collectDeadInstructions(Function function) {
