@@ -107,8 +107,8 @@ public class OptimizeManager {
         // 删除无用循环
         addModuleOptimizer(new TrivialLoopDeletion());
 
-        // 循环交换优化
-        // addModuleOptimizer(new LoopInterchange());
+        // 循环重排优化（改进版）
+        addModuleOptimizer(new LoopInterchange());
 
         // 循环优化
         addModuleOptimizer(new LoopInvariantCodeMotion());
