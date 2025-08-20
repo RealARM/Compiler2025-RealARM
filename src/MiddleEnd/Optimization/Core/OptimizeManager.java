@@ -108,7 +108,7 @@ public class OptimizeManager {
         addModuleOptimizer(new TrivialLoopDeletion());
 
         // 循环交换优化
-        // addModuleOptimizer(new LoopInterchange());
+        addModuleOptimizer(new LoopInterchange());
         
         // 循环展开
         // addModuleOptimizer(new LoopUnroll());
