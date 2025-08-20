@@ -503,7 +503,8 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
             Function function = header.getParentFunction();
             
             // 第一步：创建并行入口块
-            BasicBlock parallelEntry = new BasicBlock("parallel_entry", function);
+            String loopSuffix = header.getName();
+            BasicBlock parallelEntry = new BasicBlock("parallel_entry_" + loopSuffix, function);
             
             // 在并行入口调用parallelStart()
             CallInstruction parallelStartCall = new CallInstruction(parallelStartFunc, new ArrayList<>(), "parallel_start_call");
@@ -513,6 +514,7 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
             ConstantInt parallelNumConst = new ConstantInt(parallelNum, IntegerType.I32);
             BinaryInstruction newStep = new BinaryInstruction(
                 OpCode.MUL, stepValue, parallelNumConst, IntegerType.I32);
+            newStep.setName("new_step");
             parallelEntry.addInstruction(newStep);
             
             // 为每个线程计算起始索引
@@ -523,6 +525,8 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
                     OpCode.MUL, threadIdConst, stepValue, IntegerType.I32);
                 BinaryInstruction newStartIndex = new BinaryInstruction(
                     OpCode.ADD, initValue, startOffset, IntegerType.I32);
+                startOffset.setName("start_offset_" + i);
+                newStartIndex.setName("new_start_index_" + i);
                 
                 parallelEntry.addInstruction(startOffset);
                 parallelEntry.addInstruction(newStartIndex);
@@ -532,35 +536,48 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
             // 第二步：创建多线程分支结构
             BasicBlock currentBranch = parallelEntry;
             List<List<BasicBlock>> copiedLoops = new ArrayList<>();
+            List<BasicBlock> threadBranches = new ArrayList<>();
             
             // 为每个线程（除了第0个）创建循环副本
             for (int i = 0; i < parallelNum - 1; i++) {
-                // 创建条件检查：if (threadId == i)
-                ConstantInt threadIdConst = new ConstantInt(i, IntegerType.I32);
-                BinaryInstruction threadIdCheck = new BinaryInstruction(
-                    OpCode.EQ, parallelStartCall, threadIdConst, IntegerType.I1);
+                // 创建条件检查：if (threadId == i + 1), because thread 0 is the original loop
+                ConstantInt threadIdConst = new ConstantInt(i + 1, IntegerType.I32);
+                CompareInstruction threadIdCheck = new CompareInstruction(
+                    OpCode.ICMP,
+                    OpCode.EQ,
+                    parallelStartCall,
+                    threadIdConst
+                );
+                threadIdCheck.setName("thread_id_check_" + (i + 1));
                 currentBranch.addInstruction(threadIdCheck);
                 
                 // 创建新的分支块
-                BasicBlock nextBranch = new BasicBlock("thread_branch_" + (i + 1), function);
+                BasicBlock nextBranch = new BasicBlock("thread_branch_" + (i + 1) + "_" + loopSuffix, function);
+                threadBranches.add(nextBranch);
                 
                 // 复制循环
                 List<BasicBlock> copiedLoop = copyLoopForThread(loop, function, i + 1);
                 copiedLoops.add(copiedLoop);
                 
-                // 修改复制的循环的起始索引
+                // 修改复制的循环的起始索引和步长
                 if (!copiedLoop.isEmpty() && copiedLoop.get(0) != null) {
-                    modifyLoopStartIndex(copiedLoop.get(0), loop, newStartIndexes.get(i + 1), newStep);
+                    modifyLoopStartIndex(copiedLoop.get(0), loop, newStartIndexes.get(i + 1), currentBranch);
+                    fixInductionVariableUpdate(copiedLoop, loop, newStep);
+                    ensureInductionVariableUpdate(copiedLoop, loop, newStep);
                 }
                 
                 // 创建条件分支指令
                 BranchInstruction condBranch = new BranchInstruction(threadIdCheck, copiedLoop.get(0), nextBranch);
-                // 移除之前可能添加的跳转（如果存在）
                 Instruction lastInst = currentBranch.getLastInstruction();
                 if (lastInst instanceof BranchInstruction) {
                     currentBranch.removeInstruction(lastInst);
                 }
                 currentBranch.addInstruction(condBranch);
+                // Maintain CFG relationships for the new conditional branch
+                copiedLoop.get(0).addPredecessor(currentBranch);
+                currentBranch.addSuccessor(copiedLoop.get(0));
+                nextBranch.addPredecessor(currentBranch);
+                currentBranch.addSuccessor(nextBranch);
                 
                 currentBranch = nextBranch;
             }
@@ -568,24 +585,13 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
             // 最后一个分支跳转到原始循环（线程0）
             BranchInstruction brToOriginal = new BranchInstruction(header);
             currentBranch.addInstruction(brToOriginal);
+            currentBranch.addSuccessor(header);
             
             // 第三步：创建并行结束块
-            BasicBlock parallelExit = new BasicBlock("parallel_exit", function);
+            BasicBlock parallelExit = new BasicBlock("parallel_exit_" + loopSuffix, function);
             
             // 创建phi指令收集所有线程的结果
             PhiInstruction endPhi = new PhiInstruction(IntegerType.I32, "end_phi");
-            ConstantInt endZeroConst = new ConstantInt(0, IntegerType.I32);
-            endPhi.addIncoming(endZeroConst, header);
-            
-            // 为每个复制的循环添加phi输入
-            for (int i = 0; i < copiedLoops.size(); i++) {
-                List<BasicBlock> copiedLoop = copiedLoops.get(i);
-                if (!copiedLoop.isEmpty()) {
-                    BasicBlock copiedHeader = copiedLoop.get(0);
-                    ConstantInt threadResult = new ConstantInt(i + 1, IntegerType.I32);
-                    endPhi.addIncoming(threadResult, copiedHeader);
-                }
-            }
             
             parallelExit.addInstruction(endPhi);
             
@@ -597,50 +603,97 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
             BranchInstruction brToExit = new BranchInstruction(exitBlock);
             parallelExit.addInstruction(brToExit);
             
-            // 第四步：更新控制流
-            insertBasicBlockAfter(function, preheader, parallelEntry);
-            
-            // 插入所有分支块
-            BasicBlock lastInserted = parallelEntry;
-            for (int i = 1; i < parallelNum; i++) {
-                BasicBlock branchBlock = findBranchBlock(function, "thread_branch_" + i);
-                if (branchBlock != null) {
-                    insertBasicBlockAfter(function, lastInserted, branchBlock);
-                    lastInserted = branchBlock;
+            // 第四步: 批量更新函数的基本块列表
+            List<BasicBlock> newBlocks = new ArrayList<>();
+            newBlocks.add(parallelEntry);
+            newBlocks.addAll(threadBranches);
+            for (List<BasicBlock> copied : copiedLoops) {
+                newBlocks.addAll(copied);
+            }
+            newBlocks.add(parallelExit);
+
+            int preheaderIndex = function.getBasicBlocks().indexOf(preheader);
+            List<BasicBlock> funcBlocks = function.getBasicBlocks();
+            if (preheaderIndex != -1) {
+                int insertIndex = preheaderIndex + 1;
+                for (BasicBlock nb : newBlocks) {
+                    if (!funcBlocks.contains(nb)) {
+                        funcBlocks.add(insertIndex, nb);
+                        insertIndex++;
+                    }
+                }
+            } else {
+                int insertIndex = Math.min(1, funcBlocks.size());
+                for (BasicBlock nb : newBlocks) {
+                    if (!funcBlocks.contains(nb)) {
+                        funcBlocks.add(insertIndex, nb);
+                        insertIndex++;
+                    }
                 }
             }
-            
-            // 插入所有复制的循环块
-            for (List<BasicBlock> copiedLoop : copiedLoops) {
-                for (BasicBlock block : copiedLoop) {
-                    insertBasicBlockAfter(function, lastInserted, block);
-                    lastInserted = block;
-                }
-            }
-            
-            insertBasicBlockBefore(function, exitBlock, parallelExit);
-            
-            // 更新原始循环的控制流
+
+            // 第五步：更新控制流
             replaceSuccessor(preheader, header, parallelEntry);
-            replaceSuccessor(header, exitBlock, parallelExit);
             
+            // 更新所有循环出口到 parallelExit
+            List<BasicBlock> loopExits = new ArrayList<>(loop.getExitBlocks());
+            for(BasicBlock latch : loop.getLatchBlocks()) {
+                replaceSuccessor(latch, loopExits.get(0), parallelExit);
+            }
+
+            for (List<BasicBlock> copiedLoop : copiedLoops) {
+                if (copiedLoop.isEmpty()) continue;
+                BasicBlock copiedHeader = copiedLoop.get(0);
+                
+                // 查找复制的循环的latch块
+                for(BasicBlock copiedBlock : copiedLoop) {
+                     Instruction terminator = copiedBlock.getTerminator();
+                     if (terminator instanceof BranchInstruction) {
+                         BranchInstruction br = (BranchInstruction) terminator;
+                         if (br.isUnconditional() && br.getTrueBlock() == copiedHeader) { // This is a latch
+                             // This is not a reliable way to find exits
+                         } else if (!br.isUnconditional()) {
+                            if(br.getTrueBlock() != copiedHeader && !copiedLoop.contains(br.getTrueBlock())) {
+                                replaceSuccessor(copiedBlock, br.getTrueBlock(), parallelExit);
+                            }
+                             if(br.getFalseBlock() != copiedHeader && !copiedLoop.contains(br.getFalseBlock())) {
+                                replaceSuccessor(copiedBlock, br.getFalseBlock(), parallelExit);
+                            }
+                         }
+                     }
+                }
+                 fixCopiedLoopExits(copiedLoop, loop, function, parallelExit);
+            }
+
+
             // 更新前驱后继关系
             header.removePredecessor(preheader);
-            header.addPredecessor(currentBranch); // 最后一个分支块指向原始循环
+            header.addPredecessor(currentBranch);
             
             exitBlock.removePredecessor(header);
             exitBlock.addPredecessor(parallelExit);
             parallelExit.addPredecessor(header);
             
-            // 为每个复制的循环添加到parallelExit的连接
+            // 修复每个复制循环的退出，让它们跳转到parallel_exit
             for (List<BasicBlock> copiedLoop : copiedLoops) {
                 if (!copiedLoop.isEmpty()) {
                     BasicBlock copiedHeader = copiedLoop.get(0);
                     parallelExit.addPredecessor(copiedHeader);
+                    
+                    // 修复复制循环的退出分支
+                    fixCopiedLoopExits(copiedLoop, loop, function, parallelExit);
+                }
+            }
+            // Now predecessors are correct; populate endPhi incomings
+            endPhi.addIncoming(new ConstantInt(0, IntegerType.I32), header);
+            for (int i = 0; i < copiedLoops.size(); i++) {
+                List<BasicBlock> copiedLoop = copiedLoops.get(i);
+                if (!copiedLoop.isEmpty()) {
+                    endPhi.addIncoming(new ConstantInt(i + 1, IntegerType.I32), copiedLoop.get(0));
                 }
             }
             
-            // 第五步：更新原始循环的归纳变量
+            // 第六步：更新原始循环的归纳变量
             if (inductionVar instanceof PhiInstruction) {
                 PhiInstruction phi = (PhiInstruction) inductionVar;
                 phi.removeIncoming(preheader);
@@ -685,46 +738,84 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
      * 为特定线程复制整个循环 - 完整版本
      */
     private List<BasicBlock> copyLoopForThread(Loop loop, Function function, int threadId) {
-        if (debug) {
-            System.out.println("[LoopParallelizer] 为线程 " + threadId + " 复制完整循环");
-        }
-        
+        List<BasicBlock> originalBlocks = new ArrayList<>(loop.getBlocks());
         List<BasicBlock> copiedBlocks = new ArrayList<>();
         Map<BasicBlock, BasicBlock> blockMapping = new HashMap<>();
         Map<Value, Value> valueMapping = new HashMap<>();
-        
-        // 第一步：为所有循环块创建副本
-        for (BasicBlock originalBlock : loop.getBlocks()) {
-            String newName = originalBlock.getName() + "_thread" + threadId;
-            BasicBlock copiedBlock = new BasicBlock(newName, function);
+
+        // Pass 1: Create block clones and populate block mapping.
+        for (BasicBlock originalBlock : originalBlocks) {
+            BasicBlock copiedBlock = new BasicBlock(originalBlock.getName() + "_thread" + threadId, function);
             copiedBlocks.add(copiedBlock);
             blockMapping.put(originalBlock, copiedBlock);
-            valueMapping.put(originalBlock, copiedBlock);
-            
-            if (debug) {
-                System.out.println("[LoopParallelizer] 创建循环块副本: " + newName);
+        }
+
+        // Pass 2: Copy all instructions and populate value mapping.
+        for (BasicBlock originalBlock : originalBlocks) {
+            BasicBlock copiedBlock = blockMapping.get(originalBlock);
+            for (Instruction originalInst : originalBlock.getInstructions()) {
+                Instruction copiedInst = copyInstructionComplete(originalInst, valueMapping, threadId);
+                copiedInst.setName(originalInst.getName() + "_thread" + threadId);
+                copiedBlock.addInstruction(copiedInst);
+                valueMapping.put(originalInst, copiedInst);
+            }
+        }
+
+        // Pass 3: Remap all operands (Values and BasicBlocks).
+        for (BasicBlock copiedBlock : copiedBlocks) {
+            for (Instruction copiedInst : copiedBlock.getInstructions()) {
+                for (int i = 0; i < copiedInst.getOperandCount(); i++) {
+                    Value operand = copiedInst.getOperand(i);
+                    
+                    Value mappedValue = valueMapping.get(operand);
+                    if (mappedValue != null) {
+                        copiedInst.setOperand(i, mappedValue);
+                        continue;
+                    }
+                    
+                    Value mappedBlock = blockMapping.get(operand);
+                    if (mappedBlock != null) {
+                        copiedInst.setOperand(i, mappedBlock);
+                    }
+                }
             }
         }
         
-        // 第二步：复制所有指令并建立值映射
-        for (BasicBlock originalBlock : loop.getBlocks()) {
-            BasicBlock copiedBlock = blockMapping.get(originalBlock);
-            copyInstructionsToBlock(originalBlock, copiedBlock, valueMapping, threadId);
-        }
-        
-        // 第三步：更新所有指令中的引用
+        // Pass 3.5: Update references that require block context (e.g., Phi incoming values)
         for (BasicBlock copiedBlock : copiedBlocks) {
             updateInstructionReferences(copiedBlock, valueMapping, blockMapping);
         }
         
-        // 第四步：建立控制流关系
-        establishControlFlowForCopiedLoop(new ArrayList<>(loop.getBlocks()), blockMapping);
-        
-        if (debug) {
-            System.out.println("[LoopParallelizer] 完成线程 " + threadId + " 的循环复制，共 " + copiedBlocks.size() + " 个块");
+        // Pass 4: Re-establish CFG for copied blocks.
+        for (BasicBlock originalBlock : originalBlocks) {
+            BasicBlock copiedBlock = blockMapping.get(originalBlock);
+            copiedBlock.getPredecessors().clear();
+            copiedBlock.getSuccessors().clear();
+
+            for (BasicBlock pred : originalBlock.getPredecessors()) {
+                BasicBlock mappedPred = blockMapping.get(pred);
+                if (mappedPred != null) {
+                    copiedBlock.addPredecessor(mappedPred);
+                }
+            }
+            for (BasicBlock succ : originalBlock.getSuccessors()) {
+                BasicBlock mappedSucc = blockMapping.get(succ);
+                if (mappedSucc != null) {
+                    copiedBlock.addSuccessor(mappedSucc);
+                }
+            }
         }
-        
+
         return copiedBlocks;
+    }
+    
+    private Value findOriginalValue(Value copied, Map<Value, Value> valueMapping) {
+        for (Map.Entry<Value, Value> entry : valueMapping.entrySet()) {
+            if (entry.getValue() == copied) {
+                return entry.getKey();
+            }
+        }
+        return null;
     }
     
     /**
@@ -819,12 +910,14 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
             
         } else if (original instanceof CompareInstruction) {
             CompareInstruction originalCmp = (CompareInstruction) original;
-            // CompareInstruction需要特殊处理，让我们检查它的具体实现
-            // 暂时跳过这个类型
-            if (debug) {
-                System.out.println("[LoopParallelizer] 跳过CompareInstruction复制: " + originalCmp.getName());
-            }
-            return null;
+            CompareInstruction copiedCmp = new CompareInstruction(
+                originalCmp.getCompareType(),
+                originalCmp.getPredicate(),
+                originalCmp.getLeft(),  // 稍后更新
+                originalCmp.getRight()  // 稍后更新
+            );
+            copiedCmp.setName(newName);
+            return copiedCmp;
             
         } else if (original instanceof BranchInstruction) {
             BranchInstruction originalBr = (BranchInstruction) original;
@@ -903,8 +996,9 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
             return;
         }
         
-        // 清除现有的incoming值
-        for (BasicBlock block : new ArrayList<>(originalPhi.getIncomingValues().keySet())) {
+        // 清除现有的incoming值（如果有的话）
+        Map<BasicBlock, Value> existingIncoming = new HashMap<>(phi.getIncomingValues());
+        for (BasicBlock block : new ArrayList<>(existingIncoming.keySet())) {
             phi.removeIncoming(block);
         }
         
@@ -914,8 +1008,19 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
             BasicBlock originalBlock = entry.getKey();
             Value originalValue = entry.getValue();
             
-            // 映射基本块
-            BasicBlock mappedBlock = blockMapping.getOrDefault(originalBlock, originalBlock);
+            // 映射基本块 - 只映射循环内的块
+            BasicBlock mappedBlock = blockMapping.get(originalBlock);
+            if (mappedBlock == null) {
+                // 如果没有映射（比如来自循环外的preheader），需要特殊处理
+                // 这种情况下我们需要找到正确的入口块
+                mappedBlock = findCorrectEntryBlock(originalBlock, blockMapping);
+                if (mappedBlock == null) {
+                    if (debug) {
+                        System.out.println("[LoopParallelizer] 警告：无法为Phi指令找到块映射: " + originalBlock.getName());
+                    }
+                    continue;
+                }
+            }
             
             // 映射值
             Value mappedValue = valueMapping.getOrDefault(originalValue, originalValue);
@@ -929,6 +1034,23 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
                                  " from " + mappedBlock.getName());
             }
         }
+    }
+    
+    /**
+     * 为复制的Phi指令找到正确的入口块
+     */
+    private BasicBlock findCorrectEntryBlock(BasicBlock originalEntryBlock, Map<BasicBlock, BasicBlock> blockMapping) {
+        // 对于来自循环外的块（如preheader），我们需要找到对应的线程分支块
+        // 这通常是thread_branch_N块
+        for (BasicBlock mappedBlock : blockMapping.values()) {
+            // 检查是否是线程分支块
+            if (mappedBlock.getName().startsWith("thread_branch_")) {
+                return mappedBlock;
+            }
+        }
+        
+        // 如果找不到，返回原始块（可能导致错误，但至少程序能继续）
+        return originalEntryBlock;
     }
     
     /**
@@ -999,6 +1121,132 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
             Value mappedArg = valueMapping.getOrDefault(arg, arg);
             args.set(i, mappedArg);
         }
+    }
+    
+    /**
+     * 修复复制循环的退出，确保它们跳转到parallel_exit
+     */
+    private void fixCopiedLoopExits(List<BasicBlock> copiedBlocks, Loop originalLoop, Function function, BasicBlock parallelExit) {
+        // 获取原始循环的退出块
+        BasicBlock originalExitBlock = findLoopExitBlock(originalLoop);
+        if (originalExitBlock == null) {
+            return;
+        }
+        
+        // 遍历所有复制的块，修复它们的退出分支
+        for (BasicBlock copiedBlock : copiedBlocks) {
+            Instruction terminator = copiedBlock.getTerminator();
+            if (terminator instanceof BranchInstruction) {
+                BranchInstruction branch = (BranchInstruction) terminator;
+                
+                if (branch.isUnconditional()) {
+                    // 无条件跳转
+                    if (branch.getTrueBlock() == originalExitBlock) {
+                        // 替换为跳转到parallel_exit
+                        copiedBlock.removeInstruction(branch);
+                        BranchInstruction newBranch = new BranchInstruction(parallelExit);
+                        copiedBlock.addInstruction(newBranch);
+                        
+                        if (debug) {
+                            System.out.println("[LoopParallelizer] 修复复制块 " + copiedBlock.getName() + 
+                                             " 的无条件跳转：" + originalExitBlock.getName() + " -> " + parallelExit.getName());
+                        }
+                    }
+                } else {
+                    // 条件跳转
+                    boolean changed = false;
+                    BasicBlock trueTarget = branch.getTrueBlock();
+                    BasicBlock falseTarget = branch.getFalseBlock();
+                    
+                    if (trueTarget == originalExitBlock) {
+                        trueTarget = parallelExit;
+                        changed = true;
+                    }
+                    if (falseTarget == originalExitBlock) {
+                        falseTarget = parallelExit;
+                        changed = true;
+                    }
+                    
+                    if (changed) {
+                        copiedBlock.removeInstruction(branch);
+                        BranchInstruction newBranch = new BranchInstruction(
+                            branch.getCondition(), trueTarget, falseTarget);
+                        copiedBlock.addInstruction(newBranch);
+                        
+                        if (debug) {
+                            System.out.println("[LoopParallelizer] 修复复制块 " + copiedBlock.getName() + 
+                                             " 的条件跳转");
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * 修复复制循环中PHI指令的初始值
+     */
+    private void fixCopiedLoopPhiInitialValues(List<BasicBlock> copiedBlocks, int threadId) {
+        for (int i = 0; i < copiedBlocks.size(); i++) {
+            BasicBlock copiedBlock = copiedBlocks.get(i);
+            
+            // 检查是否是循环头块（通常是第一个）
+            if (i == 0) {
+                for (Instruction inst : copiedBlock.getInstructions()) {
+                    if (inst instanceof PhiInstruction) {
+                        PhiInstruction phi = (PhiInstruction) inst;
+                        
+                                                 // 查找对应的线程初始值
+                         // 使用传入的threadId
+                         if (threadId > 0) {
+                             // 创建线程的起始索引值（threadId作为起始值）
+                             Value threadStartIndex = new ConstantInt(threadId, IntegerType.I32);
+                            
+                            // 找到来自循环外的入口块
+                            BasicBlock entryBlock = findThreadBranchBlock(copiedBlock.getParentFunction(), threadId);
+                            if (entryBlock != null) {
+                                // 添加初始值
+                                phi.addIncoming(threadStartIndex, entryBlock);
+                                
+                                if (debug) {
+                                    System.out.println("[LoopParallelizer] 为PHI " + phi.getName() + 
+                                                     " 添加初始值: " + threadStartIndex.getName() + 
+                                                     " from " + entryBlock.getName());
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /**
+     * 从块名中提取线程ID
+     */
+    private int extractThreadIdFromBlockName(String blockName) {
+        if (blockName.contains("_thread")) {
+            try {
+                String threadPart = blockName.substring(blockName.lastIndexOf("_thread") + 7);
+                return Integer.parseInt(threadPart);
+            } catch (NumberFormatException e) {
+                return -1;
+            }
+        }
+        return 0;
+    }
+    
+    /**
+     * 找到对应线程的分支块
+     */
+    private BasicBlock findThreadBranchBlock(Function function, int threadId) {
+        String targetName = "thread_branch_" + threadId;
+        for (BasicBlock block : function.getBasicBlocks()) {
+            if (block.getName().equals(targetName)) {
+                return block;
+            }
+        }
+        return null;
     }
     
     /**
@@ -1142,28 +1390,159 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
     }
     
     /**
-     * 修改复制循环的起始索引
+     * 修复复制循环中的归纳变量更新指令
      */
-    private void modifyLoopStartIndex(BasicBlock copiedHeader, Loop originalLoop, 
-                                    Value newStartIndex, Value newStep) {
-        for (Instruction inst : copiedHeader.getInstructions()) {
-            if (inst instanceof PhiInstruction) {
-                PhiInstruction phi = (PhiInstruction) inst;
-                // 假设这是归纳变量的phi
-                Map<BasicBlock, Value> incomingValues = phi.getIncomingValues();
-                if (incomingValues.size() >= 1) {
-                    // 更新来自preheader的值为新的起始索引
-                    for (Map.Entry<BasicBlock, Value> entry : new ArrayList<>(incomingValues.entrySet())) {
-                        BasicBlock block = entry.getKey();
-                        // 如果这是来自循环外部的值，更新为新的起始索引
-                        if (!originalLoop.getBlocks().contains(block)) {
-                            phi.removeIncoming(block);
-                            phi.addIncoming(newStartIndex, block);
-                            break;
+    private void fixInductionVariableUpdate(List<BasicBlock> copiedLoop, Loop originalLoop, Value newStep) {
+        Instruction originalUpdateInst = originalLoop.getUpdateInstruction();
+        if (originalUpdateInst == null) return;
+
+        for (BasicBlock copiedBlock : copiedLoop) {
+            for (Instruction inst : copiedBlock.getInstructions()) {
+                // This is a heuristic: find an instruction that looks like the original update instruction
+                if (inst instanceof BinaryInstruction && originalUpdateInst instanceof BinaryInstruction) {
+                    BinaryInstruction binInst = (BinaryInstruction) inst;
+                    BinaryInstruction origBinInst = (BinaryInstruction) originalUpdateInst;
+                    if (binInst.getOpCode() == origBinInst.getOpCode() && binInst.getName().startsWith(origBinInst.getName())) {
+                        binInst.setOperand(1, newStep);
+                         if (debug) {
+                            System.out.println("[LoopParallelizer] 修复复制循环中的步长更新：" +
+                                             copiedBlock.getName() + " 中的 " + binInst.getName());
                         }
+                        return;
                     }
                 }
             }
+        }
+    }
+    
+    /**
+     * 确保复制循环中存在归纳变量更新指令
+     */
+    private void ensureInductionVariableUpdate(List<BasicBlock> copiedLoop, Loop originalLoop, Value newStep) {
+        if (copiedLoop.size() < 2) {
+            return; // 需要至少有头块和体块
+        }
+        
+        BasicBlock copiedHeader = copiedLoop.get(0);
+        BasicBlock copiedBody = null;
+        
+        // 找到循环体块（通常是除头块外的其他块）
+        for (BasicBlock block : copiedLoop) {
+            if (block != copiedHeader) {
+                copiedBody = block;
+                break;
+            }
+        }
+        
+        if (copiedBody == null) {
+            return;
+        }
+        
+        // 检查复制的循环体中是否有归纳变量更新指令
+        boolean hasUpdateInstruction = false;
+        PhiInstruction inductionPhi = null;
+        
+        // 找到头块中的phi指令（归纳变量）
+        for (Instruction inst : copiedHeader.getInstructions()) {
+            if (inst instanceof PhiInstruction) {
+                inductionPhi = (PhiInstruction) inst;
+                break;
+            }
+        }
+        
+        if (inductionPhi == null) {
+            return;
+        }
+        
+        // 检查循环体中是否有更新该phi的指令
+        for (Instruction inst : copiedBody.getInstructions()) {
+            if (inst instanceof BinaryInstruction) {
+                BinaryInstruction binInst = (BinaryInstruction) inst;
+                if (binInst.getLeft() == inductionPhi || binInst.getRight() == inductionPhi) {
+                    hasUpdateInstruction = true;
+                    break;
+                }
+            }
+        }
+        
+        // 如果没有更新指令，创建一个
+        if (!hasUpdateInstruction) {
+            BinaryInstruction updateInst = new BinaryInstruction(
+                OpCode.ADD, inductionPhi, newStep, IntegerType.I32);
+            updateInst.setName("add_result_" + tmpCounter++ + "_thread" + extractThreadIdFromBlockName(copiedHeader.getName()));
+            
+            // 插入到循环体的合适位置（在分支指令之前）
+            Instruction lastInst = copiedBody.getLastInstruction();
+            if (lastInst instanceof BranchInstruction) {
+                copiedBody.addInstructionBefore(updateInst, lastInst);
+            } else {
+                copiedBody.addInstruction(updateInst);
+            }
+            
+            // 更新phi指令，让它使用这个更新后的值
+            inductionPhi.removeIncoming(copiedBody);
+            inductionPhi.addIncoming(updateInst, copiedBody);
+            
+            if (debug) {
+                System.out.println("[LoopParallelizer] 为复制循环添加归纳变量更新指令: " + updateInst.getName());
+            }
+        }
+    }
+    
+    // 临时计数器
+    private static int tmpCounter = 100;
+    
+    /**
+     * 检查是否是对应的步长值
+     */
+    private boolean isCorrespondingStepValue(Value candidateStep, Value originalStep) {
+        // 简单的名称匹配（可能需要更复杂的逻辑）
+        if (candidateStep == originalStep) {
+            return true;
+        }
+        
+        // 如果都是常量，比较值
+        if (candidateStep instanceof ConstantInt && originalStep instanceof ConstantInt) {
+            return ((ConstantInt) candidateStep).getValue() == ((ConstantInt) originalStep).getValue();
+        }
+        
+        // 检查名称模式（例如 step_value 对应 step_value_thread1）
+        String candidateName = candidateStep.getName();
+        String originalName = originalStep.getName();
+        
+        return candidateName.contains(originalName) || originalName.contains(candidateName);
+    }
+    
+    /**
+     * 修改复制循环的起始索引
+     */
+    private void modifyLoopStartIndex(BasicBlock copiedHeader, Loop originalLoop, 
+                                    Value newStartIndex, BasicBlock newPreheader) {
+        PhiInstruction ivPhi = null;
+        for (Instruction inst : copiedHeader.getInstructions()) {
+            if (inst instanceof PhiInstruction) {
+                if (inst.getName().startsWith(originalLoop.getInductionVariable().getName())) {
+                    ivPhi = (PhiInstruction) inst;
+                    break;
+                }
+            }
+        }
+
+        if (ivPhi == null) {
+            if (debug) System.out.println("[LoopParallelizer] ERROR: Could not find IV PHI in " + copiedHeader.getName());
+            return;
+        }
+
+        // Ensure CFG predecessor relationship so Phi can accept incoming from newPreheader
+        if (!copiedHeader.getPredecessors().contains(newPreheader)) {
+            copiedHeader.addPredecessor(newPreheader);
+            newPreheader.addSuccessor(copiedHeader);
+        }
+
+        // Update or add the incoming for the new preheader using PhiInstruction API
+        ivPhi.addOrUpdateIncoming(newStartIndex, newPreheader);
+        if (debug) {
+            System.out.println("[LoopParallelizer] Patched PHI " + ivPhi.getName() + " with start value " + newStartIndex.getName() + " from " + newPreheader.getName());
         }
     }
     
@@ -1195,35 +1574,22 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
     private void replaceSuccessor(BasicBlock block, BasicBlock oldSucc, BasicBlock newSucc) {
         // 这个方法需要根据具体的IR结构实现
         // 更新跳转指令的目标
-        if (!block.getInstructions().isEmpty()) {
-            Instruction terminator = block.getLastInstruction();
-            if (terminator instanceof BranchInstruction) {
-                BranchInstruction br = (BranchInstruction) terminator;
-                if (br.isUnconditional() && br.getTrueBlock() == oldSucc) {
-                    // 创建新的无条件跳转指令
-                    block.removeInstruction(br);
-                    BranchInstruction newBr = new BranchInstruction(newSucc);
-                    block.addInstruction(newBr);
-                } else if (!br.isUnconditional()) {
-                    // 处理条件跳转
-                    BasicBlock trueBlock = br.getTrueBlock();
-                    BasicBlock falseBlock = br.getFalseBlock();
-                    boolean changed = false;
-                    
-                    if (trueBlock == oldSucc) {
-                        trueBlock = newSucc;
-                        changed = true;
-                    }
-                    if (falseBlock == oldSucc) {
-                        falseBlock = newSucc;
-                        changed = true;
-                    }
-                    
-                    if (changed) {
-                        block.removeInstruction(br);
-                        BranchInstruction newBr = new BranchInstruction(br.getCondition(), trueBlock, falseBlock);
-                        block.addInstruction(newBr);
-                    }
+        if (block == null || block.getInstructions().isEmpty()) {
+            return;
+        }
+        Instruction terminator = block.getLastInstruction();
+        if (terminator instanceof BranchInstruction) {
+            BranchInstruction br = (BranchInstruction) terminator;
+            if (br.isUnconditional() && br.getTrueBlock() == oldSucc) {
+                // 创建新的无条件跳转指令
+                br.setOperand(0, newSucc);
+            } else if (!br.isUnconditional()) {
+                // 处理条件跳转
+                if (br.getTrueBlock() == oldSucc) {
+                    br.setOperand(1, newSucc);
+                }
+                if (br.getFalseBlock() == oldSucc) {
+                    br.setOperand(2, newSucc);
                 }
             }
         }
@@ -1242,8 +1608,14 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
      */
     private void insertBasicBlockAfter(Function function, BasicBlock after, BasicBlock newBlock) {
         List<BasicBlock> blocks = function.getBasicBlocks();
+        
+        // 检查新块是否已经在函数中，避免重复插入
+        if (blocks.contains(newBlock)) {
+            return;
+        }
+        
         int index = blocks.indexOf(after);
-        if (index >= 0) {
+        if (index >= 0 && index + 1 <= blocks.size()) {
             blocks.add(index + 1, newBlock);
         } else {
             blocks.add(newBlock);
@@ -1255,8 +1627,14 @@ public class LoopParallelizer implements Optimizer.ModuleOptimizer {
      */
     private void insertBasicBlockBefore(Function function, BasicBlock before, BasicBlock newBlock) {
         List<BasicBlock> blocks = function.getBasicBlocks();
+        
+        // 检查新块是否已经在函数中，避免重复插入
+        if (blocks.contains(newBlock)) {
+            return;
+        }
+        
         int index = blocks.indexOf(before);
-        if (index > 0) {
+        if (index >= 0) {
             blocks.add(index, newBlock);
         } else {
             blocks.add(0, newBlock);

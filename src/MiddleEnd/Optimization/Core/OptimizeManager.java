@@ -53,6 +53,16 @@ public class OptimizeManager {
         
         // 第一次Mem2Reg优化
         addModuleOptimizer(new Mem2Reg());
+
+        // 基本块处理
+        addModuleOptimizer(new EmptyBlockHandler());
+        
+        // 常量处理
+        addModuleOptimizer(new ConstantPropagation());
+        addModuleOptimizer(new ConstantFolding());
+        
+        // 纯函数标记
+        addModuleOptimizer(new MemoizationAdvisorSimple());
         
         // 函数内联展开优化
         addModuleOptimizer(new InlineExpansion());
@@ -109,7 +119,7 @@ public class OptimizeManager {
         addModuleOptimizer(new TrivialLoopDeletion());
 
         // 循环并行化优化
-        addModuleOptimizer(new LoopParallelizer());
+        // addModuleOptimizer(new LoopParallelizer());
 
         // 循环交换优化
         // addModuleOptimizer(new LoopInterchange());
@@ -147,7 +157,7 @@ public class OptimizeManager {
         addModuleOptimizer(new ConstantFolding());
         
         // PHI指令消除（在进入后端前将PHI转换为Move指令）
-        addModuleOptimizer(new RemovePhiPass());
+        // addModuleOptimizer(new RemovePhiPass());
     }
     
     public void addModuleOptimizer(ModuleOptimizer optimizer) {

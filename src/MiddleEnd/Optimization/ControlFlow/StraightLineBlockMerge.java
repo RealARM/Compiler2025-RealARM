@@ -40,6 +40,18 @@ public class StraightLineBlockMerge implements Optimizer.ModuleOptimizer {
 				if (succ.getPredecessors().size() != 1) continue;
 				if (succ == function.getEntryBlock()) continue;
 
+				boolean hazard = false;
+				for (Instruction sInst : succ.getInstructions()) {
+					for (User u : sInst.getUsers()) {
+						if (u instanceof Instruction uInst && uInst.getParent() == pred) {
+							hazard = true;
+							break;
+						}
+					}
+					if (hazard) break;
+				}
+				if (hazard) continue;
+
 				for (Instruction inst : new ArrayList<>(succ.getInstructions())) {
 					if (!(inst instanceof PhiInstruction phi)) break;
 					List<BasicBlock> incomings = phi.getIncomingBlocks();
@@ -54,11 +66,15 @@ public class StraightLineBlockMerge implements Optimizer.ModuleOptimizer {
 					}
 				}
 
+				int insertPos = pred.getInstructions().indexOf(br);
 				pred.removeInstruction(br);
 
+				List<Instruction> predInstList = pred.getInstructions();
+				int curPos = insertPos;
 				for (Instruction inst : new ArrayList<>(succ.getInstructions())) {
 					inst.removeFromParent();
-					pred.addInstruction(inst);
+					predInstList.add(curPos++, inst);
+					inst.setParent(pred);
 				}
 
 				for (BasicBlock succsucc : new ArrayList<>(succ.getSuccessors())) {
