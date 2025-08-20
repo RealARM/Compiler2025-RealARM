@@ -87,12 +87,12 @@ public class OptimizeManager {
         
         // 控制流优化
         addModuleOptimizer(new BranchSimplifier());
-        addModuleOptimizer(new UnreachableBlockElimination());
-        addModuleOptimizer(new TrivialPhiElimination());
-        addModuleOptimizer(new StraightLineBlockMerge());
-        addModuleOptimizer(new BranchSimplifier());
-        addModuleOptimizer(new UnreachableBlockElimination());
-        addModuleOptimizer(new StraightLineBlockMerge());
+        // addModuleOptimizer(new UnreachableBlockElimination());
+        // addModuleOptimizer(new TrivialPhiElimination());
+        // addModuleOptimizer(new StraightLineBlockMerge());
+        // addModuleOptimizer(new BranchSimplifier());
+        // addModuleOptimizer(new UnreachableBlockElimination());
+        // addModuleOptimizer(new StraightLineBlockMerge());
 
         // 常量处理
         addModuleOptimizer(new ConstantPropagation());

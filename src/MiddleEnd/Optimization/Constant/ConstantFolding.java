@@ -43,12 +43,12 @@ public class ConstantFolding implements Optimizer.ModuleOptimizer {
             if (inst instanceof BinaryInstruction) {
                 changed |= foldBinaryInstruction((BinaryInstruction) inst);
             }
-            else if (inst instanceof CompareInstruction) {
-                changed |= foldCompareInstruction((CompareInstruction) inst);
-            }
-            else if (inst instanceof ConversionInstruction) {
-                changed |= foldConversionInstruction((ConversionInstruction) inst);
-            }
+            // else if (inst instanceof CompareInstruction) {
+            //     changed |= foldCompareInstruction((CompareInstruction) inst);
+            // }
+            // else if (inst instanceof ConversionInstruction) {
+            //     changed |= foldConversionInstruction((ConversionInstruction) inst);
+            // }
         }
         
         return changed;

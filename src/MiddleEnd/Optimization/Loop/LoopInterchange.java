@@ -6,6 +6,7 @@ import MiddleEnd.IR.Value.Function;
 import MiddleEnd.IR.Value.Instructions.*;
 import MiddleEnd.IR.Value.Value;
 import MiddleEnd.IR.Value.ConstantInt;
+import MiddleEnd.IR.Value.Argument;
 import MiddleEnd.IR.OpCode;
 import MiddleEnd.Optimization.Analysis.Loop;
 import MiddleEnd.Optimization.Analysis.LoopAnalysis;
@@ -419,22 +420,41 @@ public class LoopInterchange implements Optimizer.ModuleOptimizer {
                 return false;
             }
             
-            // 由于BranchInstruction的条件是final的，我们需要创建新的分支指令
             Value outerCondition = outerBr.getCondition();
             Value innerCondition = innerBr.getCondition();
             
-            // 移除旧的分支指令
-            outerHeader.removeInstruction(outerBr);
-            innerHeader.removeInstruction(innerBr);
+            // 检查条件是否为比较指令
+            if (!(outerCondition instanceof CompareInstruction outerCmp) ||
+                !(innerCondition instanceof CompareInstruction innerCmp)) {
+                return false;
+            }
             
-            // 创建新的分支指令，条件交换
-            BranchInstruction newOuterBr = new BranchInstruction(
-                innerCondition, outerBr.getTrueBlock(), outerBr.getFalseBlock());
-            BranchInstruction newInnerBr = new BranchInstruction(
-                outerCondition, innerBr.getTrueBlock(), innerBr.getFalseBlock());
+            // 验证比较指令在正确的块中
+            if (outerCmp.getParent() != outerHeader || innerCmp.getParent() != innerHeader) {
+                return false;
+            }
             
-            outerHeader.addInstruction(newOuterBr);
-            innerHeader.addInstruction(newInnerBr);
+            // 检查比较指令的左操作数是否为对应的归纳变量
+            Value outerIndVar = outer.getInductionVariable();
+            Value innerIndVar = inner.getInductionVariable();
+            
+            if (outerCmp.getOperand(0) != outerIndVar || innerCmp.getOperand(0) != innerIndVar) {
+                return false;
+            }
+            
+            // 获取新的边界值（已在interchangeLoopBounds中交换）
+            Value newOuterEnd = outer.getEndValue();
+            Value newInnerEnd = inner.getEndValue();
+            
+            // 检查新边界值的支配关系
+            if (!isValueSafeToUse(newOuterEnd, outerHeader) || 
+                !isValueSafeToUse(newInnerEnd, innerHeader)) {
+                return false;
+            }
+            
+            // 更新比较指令的右操作数（边界值）
+            outerCmp.setOperand(1, newOuterEnd);
+            innerCmp.setOperand(1, newInnerEnd);
             
             return true;
             
@@ -444,6 +464,80 @@ public class LoopInterchange implements Optimizer.ModuleOptimizer {
             }
             return false;
         }
+    }
+    
+    /**
+     * 检查值是否可以安全地在指定块中使用
+     */
+    private boolean isValueSafeToUse(Value value, BasicBlock block) {
+        // 常量和参数总是安全的
+        if (value instanceof ConstantInt || value instanceof Argument) {
+            return true;
+        }
+        
+        // 指令必须支配使用点
+        if (value instanceof Instruction inst) {
+            BasicBlock defBlock = inst.getParent();
+            if (defBlock == null) {
+                return false;
+            }
+            
+            // 如果定义在同一个块中，需要检查指令顺序
+            if (defBlock == block) {
+                // 简化检查：如果是同一个块，假设定义在使用之前
+                return true;
+            }
+            
+            // 对于不同块，进行简单的支配检查
+            // 这里使用启发式方法：检查定义块是否在使用块的前驱路径上
+            return isBlockDominating(defBlock, block);
+        }
+        
+        return false;
+    }
+    
+    /**
+     * 简单的支配关系检查
+     */
+    private boolean isBlockDominating(BasicBlock dominator, BasicBlock dominated) {
+        if (dominator == dominated) {
+            return true;
+        }
+        
+        // 使用BFS检查是否存在从函数入口到dominated的路径不经过dominator
+        Function function = dominated.getParentFunction();
+        Set<BasicBlock> visited = new HashSet<>();
+        Queue<BasicBlock> queue = new LinkedList<>();
+        
+        // 从函数入口开始
+        BasicBlock entry = function.getBasicBlocks().get(0);
+        queue.offer(entry);
+        visited.add(entry);
+        
+        while (!queue.isEmpty()) {
+            BasicBlock current = queue.poll();
+            
+            // 如果到达目标块且没有经过支配者，则不支配
+            if (current == dominated) {
+                return false;
+            }
+            
+            // 如果到达支配者，跳过其后继（强制经过）
+            if (current == dominator) {
+                continue;
+            }
+            
+            // 继续搜索
+            for (BasicBlock succ : current.getSuccessors()) {
+                if (!visited.contains(succ)) {
+                    visited.add(succ);
+                    queue.offer(succ);
+                }
+            }
+        }
+        
+        // 如果没有找到不经过dominator的路径，则dominator支配dominated
+        return true;
     }
     
     /**
