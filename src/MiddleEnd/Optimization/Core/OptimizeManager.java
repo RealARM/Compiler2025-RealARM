@@ -13,6 +13,7 @@ import MiddleEnd.Optimization.Global.*;
 import MiddleEnd.Optimization.Instruction.*;
 import MiddleEnd.Optimization.Memory.*;
 import MiddleEnd.Optimization.Loop.*;
+import MiddleEnd.Optimization.Loop.LoopParallelizer;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -106,6 +107,9 @@ public class OptimizeManager {
 
         // 删除无用循环
         addModuleOptimizer(new TrivialLoopDeletion());
+
+        // 循环并行化优化
+        addModuleOptimizer(new LoopParallelizer());
 
         // 循环交换优化
         // addModuleOptimizer(new LoopInterchange());

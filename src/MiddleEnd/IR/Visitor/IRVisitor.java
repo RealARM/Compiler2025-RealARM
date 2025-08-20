@@ -86,6 +86,11 @@ public class IRVisitor {
         symbolTables.get(0).put("stoptime", stopTimeFunc);
         
         declareLibFunction("memset", VoidType.VOID, new PointerType(IntegerType.I32), IntegerType.I32, IntegerType.I32);
+        
+        // 添加并行化库函数
+        Function parallelStartFunc = declareLibFunction("parallelStart", IntegerType.I32);
+        Function parallelEndFunc = declareLibFunction("parallelEnd", VoidType.VOID, IntegerType.I32);
+        // System.out.println("[DEBUG] 并行化库函数已声明: " + parallelStartFunc.getName() + ", " + parallelEndFunc.getName());
     }
     
     private Function declareLibFunction(String name, Type returnType, Type... argTypes) {
