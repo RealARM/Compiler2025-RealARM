@@ -21,7 +21,7 @@ public class RegisterAllocator {
     private RegisterAllocationState currentState;
     
     // 寄存器类型配置
-    private static final int INTEGER_REGISTER_COUNT = 8;   // 整型寄存器数量 (x8-x15)
+    private static final int INTEGER_REGISTER_COUNT = 10;   // 整型寄存器数量 (x8-x28)
     private static final int FLOATING_REGISTER_COUNT = 24; // 浮点寄存器数量 (v8-v31)
     private static final int MAX_ALLOCATION_ROUNDS = 5;    // 最大分配轮次
     
@@ -211,7 +211,7 @@ public class RegisterAllocator {
                 physicalRegister = AArch64FPUReg.getAArch64FloatReg(color + 8);
             }
         } else {
-            // 整型寄存器: x19-x26
+            // 整型寄存器: x8-x28
             if (color >= 0 && color < INTEGER_REGISTER_COUNT) {
                 physicalRegister = AArch64CPUReg.getAArch64CPUReg(color + 19);
             }
