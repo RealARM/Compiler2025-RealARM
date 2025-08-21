@@ -80,9 +80,9 @@ public class AArch64Function {
             }
         }
 
-        // 保护空间，保存参数寄存器和返回地址
-        this.stackSize += 8 * (callerReg.size() + 32);
-        this.stackSpace.addOffset(8 * (callerReg.size() + 32));
+        // 保护空间，保存参数寄存器和返回地址（只为被调用者保存寄存器x19-x28+v8-v31分配空间）
+        this.stackSize += 8 * (callerReg.size() + 34);
+        this.stackSpace.addOffset(8 * (callerReg.size() + 34));
     }
 
 
@@ -137,6 +137,7 @@ public class AArch64Function {
             addOperands.add(baseReg);
             addOperands.add(tempAddrReg);
             AArch64Binary addInst = new AArch64Binary(addOperands, tempAddrReg, AArch64Binary.AArch64BinaryType.add);
+            addInst.setUse32BitMode(false); // 地址计算使用64位寄存器
             block.addAArch64Instruction(addInst);
             
             // 使用计算得到的地址进行内存访问
@@ -194,7 +195,8 @@ public class AArch64Function {
 
     public void saveCalleeRegs(AArch64Block block) {
         int size = callerReg.size();
-        for(int i = 0; i < 8; i++) {
+        // 只保存x8-x28（被调用者保存寄存器）
+        for(int i = 0; i < 10; i++) {
             AArch64Reg reg = AArch64CPUReg.getAArch64CPUReg(i + 19);
             long offset = (i + size) * 8L;
             createSafeMemoryInstruction(block, AArch64CPUReg.getAArch64SpReg(), offset, reg, false);
@@ -202,14 +204,15 @@ public class AArch64Function {
 
         for (int i = 0; i < 24; i++) {
             AArch64Reg reg = AArch64FPUReg.getAArch64FloatReg(i + 8);
-            long offset = (i + size + 8) * 8L;
+            long offset = (i + size + 10) * 8L;
             createSafeMemoryInstruction(block, AArch64CPUReg.getAArch64SpReg(), offset, reg, false);
         }
     }
 
     public void loadCalleeRegs(AArch64Block block) {
         int size = callerReg.size();
-        for(int i = 0; i < 8; i++) {
+        // 只恢复x8-x28（被调用者保存寄存器）
+        for(int i = 0; i < 10; i++) {
             AArch64Reg reg = AArch64CPUReg.getAArch64CPUReg(i + 19);
             long offset = (i + size) * 8L;
             createSafeMemoryInstruction(block, AArch64CPUReg.getAArch64SpReg(), offset, reg, true);
@@ -217,19 +220,17 @@ public class AArch64Function {
 
         for (int i = 0; i < 24; i++) {
             AArch64Reg reg = AArch64FPUReg.getAArch64FloatReg(i + 8);
-            long offset = (i + size + 8) * 8L;
+            long offset = (i + size + 10) * 8L;
             createSafeMemoryInstruction(block, AArch64CPUReg.getAArch64SpReg(), offset, reg, true);
         }
     }
 
+
     public void addStack(Value value, Long offset) {
-        // 只有在指令真正需要栈空间时才分配
-        // 如果offset为0，不需要增加栈大小
         if (offset <= 0) {
             return;
         }
         
-        // 只有在value不为null时才添加到栈映射
         if (value != null) {
             this.stack.put(value, stackSize);
         }

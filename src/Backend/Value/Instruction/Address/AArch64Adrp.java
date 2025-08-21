@@ -7,19 +7,14 @@ import Backend.Value.Operand.Symbol.AArch64Label;
 import java.util.ArrayList;
 
 public class AArch64Adrp extends AArch64Instruction {
-    private final AArch64Label label;
-
     public AArch64Adrp(AArch64Reg destReg, AArch64Label label) {
         super(destReg, new ArrayList<>());
-        this.label = label;
-    }
-
-    public AArch64Label getLabel() {
-        return label;
+        this.operands.add(label);
+        // ADRP指令始终使用64位寄存器
     }
 
     @Override
     public String toString() {
-        return "adrp\t" + getDefReg() + ", " + label.getLabelName();
+        return "adrp\t" + getDefReg() + ", " + getOperands().get(0);
     }
 }

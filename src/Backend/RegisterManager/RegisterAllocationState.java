@@ -14,7 +14,7 @@ import java.util.*;
  */
 public class RegisterAllocationState {
     
-    private static final int INTEGER_REGISTER_COUNT = 8;   // 整型寄存器数量 (x8-x15)
+    private static final int INTEGER_REGISTER_COUNT = 10;  // 整型寄存器数量 (x8-x28, 排除x8)
     private static final int FLOATING_REGISTER_COUNT = 24; // 浮点寄存器数量 (v8-v31)
     
     private final AArch64Function function;

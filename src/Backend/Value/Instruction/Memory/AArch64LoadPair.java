@@ -15,6 +15,7 @@ public class AArch64LoadPair extends AArch64Instruction {
         super(defReg1, new ArrayList<>(Arrays.asList(baseReg, offset, defReg2)));
         this.isPreIndex = false;
         this.isPostIndex = false;
+        // 内存操作始终使用64位地址寄存器，不需要设置32位模式
     }
     
     public AArch64LoadPair(AArch64Reg baseReg, AArch64Imm offset, AArch64Reg defReg1, AArch64Reg defReg2, 
@@ -22,10 +23,12 @@ public class AArch64LoadPair extends AArch64Instruction {
         super(defReg1, new ArrayList<>(Arrays.asList(baseReg, offset, defReg2)));
         this.isPreIndex = isPreIndex;
         this.isPostIndex = isPostIndex;
+        // 内存操作始终使用64位地址寄存器，不需要设置32位模式
     }
 
     @Override
     public String toString() {
+        // 内存操作始终使用64位寄存器格式
         String reg1 = getDefReg().toString();
         String reg2 = getOperands().get(2).toString();
         

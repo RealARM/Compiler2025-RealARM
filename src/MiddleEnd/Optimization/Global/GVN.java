@@ -168,6 +168,19 @@ public class GVN implements Optimizer.ModuleOptimizer {
             
             return compareType.toString() + "_" + predicate.toString() + "_" + left + "_" + right;
         }
+        else if (inst instanceof CallInstruction call) {
+            Function callee = call.getCallee();
+            if (callee.getName().contains("_memoizable")) {
+                StringBuilder hash = new StringBuilder();
+                hash.append("call_").append(callee.getName());
+                
+                for (Value arg : call.getArguments()) {
+                    hash.append("_").append(arg.toString());
+                }
+                
+                return hash.toString();
+            }
+        }
         
         return null;
     }
@@ -192,7 +205,16 @@ public class GVN implements Optimizer.ModuleOptimizer {
         }
         
         if (inst.getOpcodeName().equals("call")) {
-            return true;
+            // 检查是否为纯函数调用
+            CallInstruction callInst = (CallInstruction) inst;
+            Function callee = callInst.getCallee();
+            
+            // 如果函数名包含 "_memoizable"，说明它被标记为纯函数
+            if (callee.getName().contains("_memoizable")) {
+                return false; // 纯函数调用没有副作用
+            }
+            
+            return true; // 其他函数调用有副作用
         }
         
         return false;
@@ -212,6 +234,7 @@ public class GVN implements Optimizer.ModuleOptimizer {
         }
         
         return inst instanceof BinaryInstruction || 
-               inst instanceof CompareInstruction;
+               inst instanceof CompareInstruction ||
+               inst instanceof CallInstruction;
     }
 } 
